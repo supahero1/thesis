@@ -495,12 +495,15 @@ window_get_vulkan_extensions(
 }
 
 
-window_proc_addr_fn
+void*
 window_get_vulkan_proc_addr_fn(
 	void
 	)
 {
-	return SDL_Vulkan_GetVkGetInstanceProcAddr();
+	void* ptr = SDL_Vulkan_GetVkGetInstanceProcAddr();
+	hard_assert_not_null(ptr, window_sdl_log_error());
+
+	return ptr;
 }
 
 

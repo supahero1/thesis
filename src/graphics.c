@@ -16,8 +16,8 @@
 
 #include <thesis/debug.h>
 #include <thesis/threads.h>
-#include <thesis/alloc_ext.h>
 #include <thesis/graphics.h>
+#include <thesis/alloc_ext.h>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
@@ -121,26 +121,31 @@ struct graphics
 	XrSystemId xr_system;
 	XrSession xr_session;
 
-	struct VolkDeviceTable table;
+	PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 
-	VkDebugUtilsMessengerEXT messenger;
+#ifndef NDEBUG
+	VkDebugUtilsMessengerEXT vk_messenger;
+#endif
 
-	VkInstance instance;
-	VkSurfaceKHR surface;
-	VkSurfaceCapabilitiesKHR surface_capabilities;
+	VkInstance vk_instance;
 
-	uint32_t queue_id;
-	VkSampleCountFlagBits samples;
-	VkPhysicalDeviceLimits device_limits;
+	VkSurfaceKHR vk_surface;
+	VkSurfaceCapabilitiesKHR vk_surface_capabilities;
 
-	VkPhysicalDevice physical_device;
-	VkDevice device;
-	VkQueue queue;
-	VkPhysicalDeviceMemoryProperties memory_properties;
+	uint32_t vk_queue_id;
+	VkSampleCountFlagBits vk_samples;
+	VkPhysicalDeviceLimits vk_device_limits;
 
-	VkCommandPool command_pool;
-	VkCommandBuffer command_buffer;
-	VkFence fence;
+	VkPhysicalDevice vk_physical_device;
+	VkDevice vk_device;
+	VkQueue vk_queue;
+	VkPhysicalDeviceMemoryProperties vk_memory_properties;
+
+	struct VolkDeviceTable vk_table;
+
+	VkCommandPool vk_command_pool;
+	VkCommandBuffer vk_command_buffer;
+	VkFence vk_fence;
 
 	VkExtent2D extent;
 	uint32_t min_image_count;
@@ -206,6 +211,7 @@ private const char* graphics_xr_instance_extensions[] =
 #ifndef NDEBUG
 	XR_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #endif
+	XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
 };
 
 private const char* graphics_xr_instance_layers[] =
@@ -277,6 +283,22 @@ graphics_xr_get_func(
 }
 
 
+private void*
+graphics_vk_get_func(
+	graphics_t graphics,
+	const char* name
+	)
+{
+	assert_not_null(graphics);
+	assert_not_null(name);
+
+	void* func = graphics->vkGetInstanceProcAddr(graphics->vk_instance, name);
+	assert_not_null(func);
+
+	return func;
+}
+
+
 private const char**
 graphics_xr_get_instance_extensions(
 	graphics_t graphics,
@@ -304,6 +326,19 @@ graphics_xr_get_instance_extensions(
 	xr_result = xrEnumerateInstanceExtensionProperties(NULL,
 		xr_instance_properties_count, &xr_instance_properties_count, xr_instance_properties);
 	assert_eq(xr_result, XR_SUCCESS);
+
+	puts("XR extensions:");
+
+	for(
+		xr_instance_property = xr_instance_properties;
+		xr_instance_property < xr_instance_property_end;
+		xr_instance_property++
+		)
+	{
+		printf("- %s\n", xr_instance_property->extensionName);
+	}
+
+	puts("");
 
 	const char* const* graphics_xr_instance_extension = graphics_xr_instance_extensions;
 	const char* const* graphics_xr_instance_extension_end =
@@ -361,6 +396,19 @@ graphics_xr_get_instance_layers(
 	xr_result = xrEnumerateApiLayerProperties(
 		xr_instance_layers_count, &xr_instance_layers_count, xr_instance_layers_properties);
 	assert_eq(xr_result, XR_SUCCESS);
+
+	puts("XR layers:");
+
+	for(
+		xr_instance_layer_property = xr_instance_layers_properties;
+		xr_instance_layer_property < xr_instance_layer_property_end;
+		xr_instance_layer_property++
+		)
+	{
+		printf("- %s\n", xr_instance_layer_property->layerName);
+	}
+
+	puts("");
 
 	const char* const* graphics_xr_instance_layer = graphics_xr_instance_layers;
 	const char* const* graphics_xr_instance_layer_end =
@@ -521,14 +569,306 @@ graphics_free_xr_instance(
 }
 
 
+private const char**
+graphics_vk_get_instance_extensions(
+	graphics_t graphics,
+	const char** extension
+	)
+{
+	assert_not_null(graphics);
+	assert_not_null(extension);
+
+	uint32_t vk_instance_properties_count = 0;
+	VkResult vk_result = vkEnumerateInstanceExtensionProperties(
+		NULL, &vk_instance_properties_count, NULL);
+	assert_eq(vk_result, VK_SUCCESS);
+
+	VkExtensionProperties vk_instance_properties[vk_instance_properties_count];
+
+	VkExtensionProperties* vk_instance_property = vk_instance_properties;
+	VkExtensionProperties* vk_instance_property_end =
+		vk_instance_property + vk_instance_properties_count;
+
+	while(vk_instance_property < vk_instance_property_end)
+	{
+		*(vk_instance_property++) = (VkExtensionProperties){0};
+	}
+
+	vk_result = vkEnumerateInstanceExtensionProperties(
+		NULL, &vk_instance_properties_count, vk_instance_properties);
+	assert_eq(vk_result, VK_SUCCESS);
+
+	puts("VK extensions:");
+
+	for(
+		vk_instance_property = vk_instance_properties;
+		vk_instance_property < vk_instance_property_end;
+		vk_instance_property++
+		)
+	{
+		printf("- %s\n", vk_instance_property->extensionName);
+	}
+
+	puts("");
+
+	const char* const* graphics_vk_instance_extension =
+		graphics_vk_instance_extensions;
+	const char* const* graphics_vk_instance_extension_end =
+		graphics_vk_instance_extension + MACRO_ARRAY_LEN(graphics_vk_instance_extensions);
+
+	while(graphics_vk_instance_extension < graphics_vk_instance_extension_end)
+	{
+		bool found = false;
+		const char* extension_name = *(graphics_vk_instance_extension++);
+
+		vk_instance_property = vk_instance_properties;
+		while(vk_instance_property < vk_instance_property_end)
+		{
+			if(strcmp(extension_name, vk_instance_property->extensionName) == 0)
+			{
+				found = true;
+				break;
+			}
+
+			vk_instance_property++;
+		}
+
+		assert_true(found, fprintf(stderr, "VK extension %s not found\n", extension_name));
+		*(extension++) = extension_name;
+	}
+
+	uint32_t sdl_instance_extension_count = 0;
+	const char* const* sdl_instance_extensions =
+		window_get_vulkan_extensions(&sdl_instance_extension_count);
+	assert_ptr(sdl_instance_extensions, sdl_instance_extension_count);
+
+	const char* const* sdl_instance_extension = sdl_instance_extensions;
+	const char* const* sdl_instance_extension_end =
+		sdl_instance_extension + sdl_instance_extension_count;
+
+	while(sdl_instance_extension < sdl_instance_extension_end)
+	{
+		bool found = false;
+		const char* extension_name = *(sdl_instance_extension++);
+
+		vk_instance_property = vk_instance_properties;
+		while(vk_instance_property < vk_instance_property_end)
+		{
+			if(strcmp(extension_name, vk_instance_property->extensionName) == 0)
+			{
+				found = true;
+				break;
+			}
+
+			vk_instance_property++;
+		}
+
+		assert_true(found, fprintf(stderr, "SDL VK extension %s not found\n", extension_name));
+		*(extension++) = extension_name;
+	}
+
+	return extension;
+}
+
+
+private const char**
+graphics_vk_get_instance_layers(
+	graphics_t graphics,
+	const char** layer
+	)
+{
+	assert_not_null(graphics);
+	assert_not_null(layer);
+
+	uint32_t vk_instance_layers_count = 0;
+	VkResult vk_result = vkEnumerateInstanceLayerProperties(
+		&vk_instance_layers_count, NULL);
+	assert_eq(vk_result, VK_SUCCESS);
+
+	VkLayerProperties vk_instance_layers_properties[vk_instance_layers_count];
+
+	VkLayerProperties* vk_instance_layer_property = vk_instance_layers_properties;
+	VkLayerProperties* vk_instance_layer_property_end =
+		vk_instance_layer_property + vk_instance_layers_count;
+
+	while(vk_instance_layer_property < vk_instance_layer_property_end)
+	{
+		*(vk_instance_layer_property++) = (VkLayerProperties){0};
+	}
+
+	vk_result = vkEnumerateInstanceLayerProperties(
+		&vk_instance_layers_count, vk_instance_layers_properties);
+	assert_eq(vk_result, VK_SUCCESS);
+
+	puts("VK layers:");
+
+	for(
+		vk_instance_layer_property = vk_instance_layers_properties;
+		vk_instance_layer_property < vk_instance_layer_property_end;
+		vk_instance_layer_property++
+		)
+	{
+		printf("- %s\n", vk_instance_layer_property->layerName);
+	}
+
+	puts("");
+
+	const char* const* graphics_vk_instance_layer =
+		graphics_vk_instance_layers;
+	const char* const* graphics_vk_instance_layer_end =
+		graphics_vk_instance_layer + MACRO_ARRAY_LEN(graphics_vk_instance_layers);
+
+	while(graphics_vk_instance_layer < graphics_vk_instance_layer_end)
+	{
+		bool found = false;
+		const char* layer_name = *(graphics_vk_instance_layer++);
+
+		vk_instance_layer_property = vk_instance_layers_properties;
+		while(vk_instance_layer_property < vk_instance_layer_property_end)
+		{
+			if(strcmp(layer_name, vk_instance_layer_property->layerName) == 0)
+			{
+				found = true;
+				break;
+			}
+
+			vk_instance_layer_property++;
+		}
+
+		assert_true(found, fprintf(stderr, "VK layer %s not found\n", layer_name));
+		*(layer++) = layer_name;
+	}
+
+	return layer;
+}
+
+
 private void
-graphics_init_xr(
+graphics_init_vk_instance(
 	graphics_t graphics
 	)
 {
 	assert_not_null(graphics);
 
+	graphics->vkGetInstanceProcAddr = window_get_vulkan_proc_addr_fn();
+	assert_not_null(graphics->vkGetInstanceProcAddr);
+
+	volkInitializeCustom(graphics->vkGetInstanceProcAddr);
+
+	const char* vk_instance_extensions[64];
+	const char** vk_instance_extension =
+		graphics_vk_get_instance_extensions(graphics, vk_instance_extensions);
+	assert_lt(vk_instance_extension,
+		vk_instance_extensions + MACRO_ARRAY_LEN(vk_instance_extensions));
+
+	const char* vk_instance_layers[64];
+	const char** vk_instance_layer =
+		graphics_vk_get_instance_layers(graphics, vk_instance_layers);
+	assert_lt(vk_instance_layer,
+		vk_instance_layers + MACRO_ARRAY_LEN(vk_instance_layers));
+
+	VkApplicationInfo vk_application_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+		.pNext = NULL,
+		.pApplicationName = "Thesis",
+		.apiVersion = VK_API_VERSION_1_0
+	};
+
+	VkInstanceCreateInfo vk_instance_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pApplicationInfo = &vk_application_info,
+		.enabledLayerCount = vk_instance_layer - vk_instance_layers,
+		.ppEnabledLayerNames = vk_instance_layers,
+		.enabledExtensionCount = vk_instance_extension - vk_instance_extensions,
+		.ppEnabledExtensionNames = vk_instance_extensions
+	};
+
+#ifndef NDEBUG
+	VkDebugUtilsMessengerCreateInfoEXT vk_debug_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+		.pNext = NULL,
+		.messageSeverity =
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+		.messageType =
+			VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+		.pfnUserCallback = graphics_vk_debug_callback,
+		.pUserData = NULL
+	};
+
+	vk_instance_info.pNext = &vk_debug_info;
+#endif
+
+	XrVulkanInstanceCreateInfoKHR xr_vk_instance_info =
+	{
+		.type = XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR,
+		.next = NULL,
+		.systemId = graphics->xr_system,
+		.createFlags = 0,
+		.pfnGetInstanceProcAddr = vkGetInstanceProcAddr,
+		.vulkanCreateInfo = &vk_instance_info,
+		.vulkanAllocator = NULL
+	};
+
+	PFN_xrCreateVulkanInstanceKHR xrCreateVulkanInstanceKHR =
+		graphics_xr_get_func(graphics, "xrCreateVulkanInstanceKHR");
+
+	VkResult vk_result;
+	XrResult xr_result = xrCreateVulkanInstanceKHR(
+		graphics->xr_instance, &xr_vk_instance_info, &graphics->vk_instance, &vk_result);
+	assert_eq(xr_result, XR_SUCCESS);
+	assert_eq(vk_result, VK_SUCCESS);
+
+#ifndef NDEBUG
+	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT =
+		graphics_vk_get_func(graphics, "vkCreateDebugUtilsMessengerEXT");
+
+	vk_result = vkCreateDebugUtilsMessengerEXT(
+		graphics->vk_instance, &vk_debug_info, NULL, &graphics->vk_messenger);
+	assert_eq(vk_result, VK_SUCCESS);
+#endif
+
+	volkLoadInstanceOnly(graphics->vk_instance);
+}
+
+
+private void
+graphics_free_vk_instance(
+	graphics_t graphics
+	)
+{
+	assert_not_null(graphics);
+
+#ifndef NDEBUG
+	/* Volk loaded the function already */
+	vkDestroyDebugUtilsMessengerEXT(graphics->vk_instance, graphics->vk_messenger, NULL);
+#endif
+
+	vkDestroyInstance(graphics->vk_instance, NULL);
+
+	volkFinalize();
+}
+
+
+private void
+graphics_init_xr(
+	graphics_t graphics,
+	window_init_event_data_t* event_data
+	)
+{
+	assert_not_null(graphics);
+
 	graphics_init_xr_instance(graphics);
+	graphics_init_vk_instance(graphics);
 }
 
 
@@ -539,6 +879,7 @@ graphics_free_xr(
 {
 	assert_not_null(graphics);
 
+	graphics_free_vk_instance(graphics);
 	graphics_free_xr_instance(graphics);
 }
 
@@ -572,6 +913,13 @@ graphics_init(
 	graphics->window = window;
 	window_event_table_t* table = window_get_event_table(window);
 
+	event_listener_data_t init_data =
+	{
+		.fn = (event_fn_t) graphics_init_xr,
+		.data = graphics
+	};
+	event_target_once(&table->init_target, init_data);
+
 	event_listener_data_t free_data =
 	{
 		.fn = (event_fn_t) graphics_free,
@@ -580,8 +928,6 @@ graphics_init(
 	(void) event_target_once(&table->free_target, free_data);
 
 	event_target_init(&graphics->event_table.draw_target);
-
-	graphics_init_xr(graphics);
 
 	return graphics;
 }

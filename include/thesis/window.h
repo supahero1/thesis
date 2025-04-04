@@ -498,7 +498,7 @@ typedef void
 	);
 
 
-extern window_proc_addr_fn
+extern void*
 window_get_vulkan_proc_addr_fn(
 	void
 	);
