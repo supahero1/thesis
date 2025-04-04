@@ -21,9 +21,16 @@
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
-#include <thesis/volk.h>
+#include <volk.h>
+
+#define XR_USE_PLATFORM_WAYLAND
+#define XR_USE_GRAPHICS_API_VULKAN
+#include <openxr/openxr_platform.h>
 
 #define VULKAN_MAX_IMAGES 8
+
+#include <stdio.h>
+#include <string.h>
 
 
 typedef struct graphics_frame
@@ -106,7 +113,13 @@ struct graphics
 
 	graphics_event_table_t event_table;
 
-	uint32_t frame_number;
+#ifndef NDEBUG
+	XrDebugUtilsMessengerEXT xr_messenger;
+#endif
+
+	XrInstance xr_instance;
+	XrSystemId xr_system;
+	XrSession xr_session;
 
 	struct VolkDeviceTable table;
 
@@ -177,6 +190,7 @@ struct graphics
 	uint32_t draw_data_size;
 
 	thread_t thread;
+	uint32_t frame_number;
 	_Atomic uint8_t should_run;
 
 	sync_mtx_t resize_mtx;
@@ -187,13 +201,346 @@ struct graphics
 };
 
 
-private const graphics_vertex_input_t graphics_vertex_input[] =
+private const char* graphics_xr_instance_extensions[] =
 {
-	{ {{ -0.5f, -0.5f }}, {{ 0.0f, 0.0f }} },
-	{ {{  0.5f, -0.5f }}, {{ 1.0f, 0.0f }} },
-	{ {{ -0.5f,  0.5f }}, {{ 0.0f, 1.0f }} },
-	{ {{  0.5f,  0.5f }}, {{ 1.0f, 1.0f }} },
+#ifndef NDEBUG
+	XR_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#endif
 };
+
+private const char* graphics_xr_instance_layers[] =
+{
+#ifndef NDEBUG
+	"XR_APILAYER_LUNARG_core_validation",
+#endif
+};
+
+private const char* graphics_vk_instance_extensions[] =
+{
+#ifndef NDEBUG
+	VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#endif
+};
+
+private const char* graphics_vk_instance_layers[] =
+{
+#ifndef NDEBUG
+	"VK_LAYER_KHRONOS_validation"
+#endif
+};
+
+
+#ifndef NDEBUG
+
+private XRAPI_ATTR XrBool32 XRAPI_CALL
+graphics_xr_debug_callback(
+	XrDebugUtilsMessageSeverityFlagsEXT severity,
+	XrDebugUtilsMessageTypeFlagsEXT type,
+	const XrDebugUtilsMessengerCallbackDataEXT* data,
+	void* user_data
+	)
+{
+	fputs(data->message, stderr);
+	return XR_FALSE;
+}
+
+private VKAPI_ATTR VkBool32 VKAPI_CALL
+graphics_vk_debug_callback(
+	VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+	VkDebugUtilsMessageTypeFlagsEXT type,
+	const VkDebugUtilsMessengerCallbackDataEXT* data,
+	void* user_data
+	)
+{
+	fputs(data->pMessage, stderr);
+	return VK_FALSE;
+}
+
+#endif
+
+
+private void*
+graphics_xr_get_func(
+	graphics_t graphics,
+	const char* name
+	)
+{
+	assert_not_null(graphics);
+	assert_not_null(name);
+
+	PFN_xrVoidFunction func;
+	XrResult xr_result = xrGetInstanceProcAddr(graphics->xr_instance, name, &func);
+	assert_eq(xr_result, XR_SUCCESS);
+	assert_not_null(func);
+
+	return func;
+}
+
+
+private const char**
+graphics_xr_get_instance_extensions(
+	graphics_t graphics,
+	const char** extension
+	)
+{
+	assert_not_null(graphics);
+	assert_not_null(extension);
+
+	uint32_t xr_instance_properties_count = 0;
+	XrResult xr_result = xrEnumerateInstanceExtensionProperties(
+		NULL, 0, &xr_instance_properties_count, NULL);
+
+	XrExtensionProperties xr_instance_properties[xr_instance_properties_count];
+
+	XrExtensionProperties* xr_instance_property = xr_instance_properties;
+	XrExtensionProperties* xr_instance_property_end =
+		xr_instance_property + xr_instance_properties_count;
+
+	while(xr_instance_property < xr_instance_property_end)
+	{
+		*(xr_instance_property++) = (XrExtensionProperties){XR_TYPE_EXTENSION_PROPERTIES};
+	}
+
+	xr_result = xrEnumerateInstanceExtensionProperties(NULL,
+		xr_instance_properties_count, &xr_instance_properties_count, xr_instance_properties);
+	assert_eq(xr_result, XR_SUCCESS);
+
+	const char* const* graphics_xr_instance_extension = graphics_xr_instance_extensions;
+	const char* const* graphics_xr_instance_extension_end =
+		graphics_xr_instance_extension + MACRO_ARRAY_LEN(graphics_xr_instance_extensions);
+
+	while(graphics_xr_instance_extension < graphics_xr_instance_extension_end)
+	{
+		bool found = false;
+		const char* extension_name = *(graphics_xr_instance_extension++);
+
+		xr_instance_property = xr_instance_properties;
+		while(xr_instance_property < xr_instance_property_end)
+		{
+			if(strcmp(extension_name, xr_instance_property->extensionName) == 0)
+			{
+				found = true;
+				break;
+			}
+
+			xr_instance_property++;
+		}
+
+		assert_true(found, fprintf(stderr, "XR extension %s not found\n", extension_name));
+		*(extension++) = extension_name;
+	}
+
+	return extension;
+}
+
+
+private const char**
+graphics_xr_get_instance_layers(
+	graphics_t graphics,
+	const char** layer
+	)
+{
+	assert_not_null(graphics);
+	assert_not_null(layer);
+
+	uint32_t xr_instance_layers_count = 0;
+	XrResult xr_result = xrEnumerateApiLayerProperties(0, &xr_instance_layers_count, NULL);
+	assert_eq(xr_result, XR_SUCCESS);
+
+	XrApiLayerProperties xr_instance_layers_properties[xr_instance_layers_count];
+
+	XrApiLayerProperties* xr_instance_layer_property = xr_instance_layers_properties;
+	XrApiLayerProperties* xr_instance_layer_property_end =
+		xr_instance_layer_property + xr_instance_layers_count;
+
+	while(xr_instance_layer_property < xr_instance_layer_property_end)
+	{
+		*(xr_instance_layer_property++) = (XrApiLayerProperties){XR_TYPE_API_LAYER_PROPERTIES};
+	}
+
+	xr_result = xrEnumerateApiLayerProperties(
+		xr_instance_layers_count, &xr_instance_layers_count, xr_instance_layers_properties);
+	assert_eq(xr_result, XR_SUCCESS);
+
+	const char* const* graphics_xr_instance_layer = graphics_xr_instance_layers;
+	const char* const* graphics_xr_instance_layer_end =
+		graphics_xr_instance_layer + MACRO_ARRAY_LEN(graphics_xr_instance_layers);
+
+	while(graphics_xr_instance_layer < graphics_xr_instance_layer_end)
+	{
+		bool found = false;
+		const char* layer_name = *(graphics_xr_instance_layer++);
+
+		xr_instance_layer_property = xr_instance_layers_properties;
+		while(xr_instance_layer_property < xr_instance_layer_property_end)
+		{
+			if(strcmp(layer_name, xr_instance_layer_property->layerName) == 0)
+			{
+				found = true;
+				break;
+			}
+
+			xr_instance_layer_property++;
+		}
+
+		assert_true(found, fprintf(stderr, "XR layer %s not found\n", layer_name));
+		*(layer++) = layer_name;
+	}
+
+	return layer;
+}
+
+
+private void
+graphics_init_xr_instance(
+	graphics_t graphics
+	)
+{
+	assert_not_null(graphics);
+
+	const char* xr_instance_extensions[64];
+	const char** xr_instance_extension =
+		graphics_xr_get_instance_extensions(graphics, xr_instance_extensions);
+	assert_lt(xr_instance_extension,
+		xr_instance_extensions + MACRO_ARRAY_LEN(xr_instance_extensions));
+
+	const char* xr_instance_layers[64];
+	const char** xr_instance_layer =
+		graphics_xr_get_instance_layers(graphics, xr_instance_layers);
+	assert_lt(xr_instance_layer,
+		xr_instance_layers + MACRO_ARRAY_LEN(xr_instance_layers));
+
+	XrInstanceCreateInfo xr_instance_info =
+	{
+		.type = XR_TYPE_INSTANCE_CREATE_INFO,
+		.next = NULL,
+		.createFlags = 0,
+		.applicationInfo =
+		{
+			.apiVersion = XR_CURRENT_API_VERSION
+		},
+		.enabledExtensionCount = xr_instance_extension - xr_instance_extensions,
+		.enabledExtensionNames = xr_instance_extensions,
+		.enabledApiLayerCount = xr_instance_layer - xr_instance_layers,
+		.enabledApiLayerNames = xr_instance_layers,
+	};
+
+	strcpy(xr_instance_info.applicationInfo.applicationName, "Thesis");
+
+#ifndef NDEBUG
+	XrDebugUtilsMessengerCreateInfoEXT xr_debug_info =
+	{
+		.type = XR_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+		.next = NULL,
+		.messageSeverities =
+			XR_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+			XR_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+			XR_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+			XR_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+		.messageTypes =
+			XR_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+			XR_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+			XR_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT |
+			XR_DEBUG_UTILS_MESSAGE_TYPE_CONFORMANCE_BIT_EXT,
+		.userCallback = graphics_xr_debug_callback,
+		.userData = NULL
+	};
+
+	xr_instance_info.next = &xr_debug_info;
+#endif
+
+	XrResult xr_result = xrCreateInstance(&xr_instance_info, &graphics->xr_instance);
+	assert_eq(xr_result, XR_SUCCESS);
+
+#ifndef NDEBUG
+	PFN_xrCreateDebugUtilsMessengerEXT xrCreateDebugUtilsMessengerEXT =
+		graphics_xr_get_func(graphics, "xrCreateDebugUtilsMessengerEXT");
+
+	xr_result = xrCreateDebugUtilsMessengerEXT(
+		graphics->xr_instance, &xr_debug_info, &graphics->xr_messenger);
+	assert_eq(xr_result, XR_SUCCESS);
+#endif
+
+	XrInstanceProperties xr_instance_properties = {XR_TYPE_INSTANCE_PROPERTIES};
+	xr_result = xrGetInstanceProperties(graphics->xr_instance, &xr_instance_properties);
+	assert_eq(xr_result, XR_SUCCESS);
+
+	printf("XR instance: %s\n", xr_instance_properties.runtimeName);
+	printf("XR runtime version: %u.%u.%u\n",
+		XR_VERSION_MAJOR(xr_instance_properties.runtimeVersion),
+		XR_VERSION_MINOR(xr_instance_properties.runtimeVersion),
+		XR_VERSION_PATCH(xr_instance_properties.runtimeVersion));
+
+	XrSystemGetInfo xr_system_info =
+	{
+		.type = XR_TYPE_SYSTEM_GET_INFO,
+		.next = NULL,
+		.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY
+	};
+	xr_result = xrGetSystem(graphics->xr_instance, &xr_system_info, &graphics->xr_system);
+	assert_eq(xr_result, XR_SUCCESS);
+
+	XrSystemProperties xr_system_properties = {XR_TYPE_SYSTEM_PROPERTIES};
+	xr_result = xrGetSystemProperties(graphics->xr_instance,
+		graphics->xr_system, &xr_system_properties);
+	assert_eq(xr_result, XR_SUCCESS);
+
+	printf("XR system: %s\n", xr_system_properties.systemName);
+	printf("XR system vendor: %u\n", xr_system_properties.vendorId);
+	printf(
+		"XR system properties:\n"
+		"\tmaxSwapchainImageHeight: %u\n"
+		"\tmaxSwapchainImageWidth: %u\n"
+		"\tmaxLayerCount: %u\n"
+		"\torientationTracking: %d\n"
+		"\tpositionTracking: %d\n",
+		xr_system_properties.graphicsProperties.maxSwapchainImageHeight,
+		xr_system_properties.graphicsProperties.maxSwapchainImageWidth,
+		xr_system_properties.graphicsProperties.maxLayerCount,
+		xr_system_properties.trackingProperties.orientationTracking,
+		xr_system_properties.trackingProperties.positionTracking
+		);
+}
+
+
+private void
+graphics_free_xr_instance(
+	graphics_t graphics
+	)
+{
+	assert_not_null(graphics);
+
+#ifndef NDEBUG
+	PFN_xrDestroyDebugUtilsMessengerEXT xrDestroyDebugUtilsMessengerEXT =
+		graphics_xr_get_func(graphics, "xrDestroyDebugUtilsMessengerEXT");
+
+	xrDestroyDebugUtilsMessengerEXT(graphics->xr_messenger);
+#endif
+
+	xrDestroyInstance(graphics->xr_instance);
+}
+
+
+private void
+graphics_init_xr(
+	graphics_t graphics
+	)
+{
+	assert_not_null(graphics);
+
+	graphics_init_xr_instance(graphics);
+}
+
+
+private void
+graphics_free_xr(
+	graphics_t graphics
+	)
+{
+	assert_not_null(graphics);
+
+	graphics_free_xr_instance(graphics);
+}
 
 
 private void
@@ -203,6 +550,8 @@ graphics_free(
 	)
 {
 	assert_not_null(graphics);
+
+	graphics_free_xr(graphics);
 
 	event_target_free(&graphics->event_table.draw_target);
 
@@ -232,29 +581,9 @@ graphics_init(
 
 	event_target_init(&graphics->event_table.draw_target);
 
+	graphics_init_xr(graphics);
+
 	return graphics;
 }
 
 
-static void
-graphics_resize_draw_data(
-	graphics_t graphics,
-	uint32_t count
-	)
-{
-	uint32_t new_used = graphics->draw_data_used;
-
-	if((new_used < (graphics->draw_data_size >> 2)) || (new_used > graphics->draw_data_size))
-	{
-		uint32_t new_size = (new_used << 1) | 1;
-
-		graphics->draw_data_buffer = alloc_remalloc(
-			graphics->draw_data_buffer,
-			sizeof(*graphics->draw_data_buffer) * graphics->draw_data_size,
-			sizeof(*graphics->draw_data_buffer) * new_size
-			);
-		assert_not_null(graphics->draw_data_buffer);
-
-		graphics->draw_data_size = new_size;
-	}
-}

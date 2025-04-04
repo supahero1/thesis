@@ -65,24 +65,4 @@ app: shaders
 
 	$(CP) bin/app thesis/
 
-ifeq ($(OS),Windows_NT)
-	if [[ ! -f thesis/SDL3.dll ]]; then \
-		$(CP) "C:\\msys64\\mingw64\\bin\\SDL3.dll" thesis/; \
-	fi
-	if [[ ! -f thesis/libwinpthread-1.dll ]]; then \
-		$(CP) "C:\\msys64\\mingw64\\bin\\libwinpthread-1.dll" thesis/; \
-	fi
-else
-	if [[ ! -f thesis/libvulkan.so.1 ]]; then \
-		$(CP) \
-			$$(ls -1 /usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.* | sort -V | tail -n 1) \
-			thesis/libvulkan.so.1; \
-	fi
-	if ! ls thesis/libSDL3.so.* 1>/dev/null 2>&1; then \
-		$(CP) \
-			$$(ls -1 /usr/local/lib/libSDL3.so.* | sort -V | tail -n 1) \
-			thesis/; \
-	fi
-endif
-
 	cd thesis; $(VALGRIND_CALL) ./app

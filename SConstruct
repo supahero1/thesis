@@ -15,7 +15,6 @@
 #  limitations under the License.
 
 import os
-import subprocess
 
 
 
@@ -25,7 +24,7 @@ flags = Split("-std=gnu23 -Wall -Iinclude/ -D_GNU_SOURCE")
 
 release = int(ARGUMENTS["RELEASE"] if "RELEASE" in ARGUMENTS else os.environ.get("RELEASE", "0"))
 if release <= 0:
-	flags.extend(Split("-O0 -g3 -D_FORTIFY_SOURCE=3"))
+	flags.extend(Split("-O0 -g3"))
 	if os.name != "nt":
 		env.Append(LINKFLAGS=Split("-rdynamic"))
 else:
@@ -36,7 +35,7 @@ else:
 
 env.Append(CPPFLAGS=flags)
 
-libs = Split("m SDL3")
+libs = Split("m SDL3 openxr_loader")
 if os.name == "nt":
 	libs.extend(Split("vulkan-1 ws2_32"))
 else:
