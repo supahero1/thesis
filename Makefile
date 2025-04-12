@@ -65,4 +65,13 @@ app: shaders
 
 	$(CP) bin/app thesis/
 
-	cd thesis; $(VALGRIND_CALL) ./app
+	kill -0 "$$(cat /run/user/1000/monado.pid)" 2>/dev/null; \
+	if [[ "$$?" -eq 0 ]]; then \
+		$(CP) /etc/openxr/1/monado_runtime.json ~/.config/openxr/1/active_runtime.json; \
+		echo "monado" > /tmp/thesis_runtime; \
+	else \
+		$(CP) /etc/openxr/1/wivrn_runtime.json ~/.config/openxr/1/active_runtime.json; \
+		echo "wivrn" > /tmp/thesis_runtime; \
+	fi
+
+	cd thesis; $(VALGRIND_CALL) ./app --runtime $$(cat /tmp/thesis_runtime)

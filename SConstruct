@@ -18,7 +18,7 @@ import os
 
 
 
-env = Environment(tools = ["mingw"] if os.name == "nt" else ["default"])
+env = Environment(tools = ["mingw"] if os.name == "nt" else ["default"], ENV=os.environ)
 
 flags = Split("-std=gnu23 -Wall -Iinclude/ -D_GNU_SOURCE")
 

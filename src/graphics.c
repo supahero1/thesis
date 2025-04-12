@@ -215,6 +215,7 @@ private const char* graphics_xr_instance_extensions[] =
 #endif
 	XR_KHR_VULKAN_ENABLE_EXTENSION_NAME,
 	XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
+	XR_EXT_HAND_TRACKING_EXTENSION_NAME,
 };
 
 private const char* graphics_xr_instance_layers[] =
@@ -565,10 +566,23 @@ graphics_init_xr_instance(
 	xr_result = xrGetSystem(graphics->xr_instance, &xr_system_info, &graphics->xr_system);
 	assert_eq(xr_result, XR_SUCCESS);
 
-	XrSystemProperties xr_system_properties = {XR_TYPE_SYSTEM_PROPERTIES};
+	XrSystemHandTrackingPropertiesEXT xr_hand_tracking_properties =
+	{
+		.type = XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT,
+		.next = NULL,
+		.supportsHandTracking = false
+	};
+
+	XrSystemProperties xr_system_properties = {
+		.type = XR_TYPE_SYSTEM_PROPERTIES,
+		.next = &xr_hand_tracking_properties
+	};
+
 	xr_result = xrGetSystemProperties(graphics->xr_instance,
 		graphics->xr_system, &xr_system_properties);
 	assert_eq(xr_result, XR_SUCCESS);
+
+	assert_true(xr_hand_tracking_properties.supportsHandTracking);
 
 	printf("XR system: %s\n", xr_system_properties.systemName);
 	printf("XR system vendor: %u\n", xr_system_properties.vendorId);

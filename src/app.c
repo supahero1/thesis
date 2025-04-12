@@ -16,7 +16,9 @@
 
 #include <thesis/app.h>
 #include <thesis/file.h>
+#include <thesis/hash.h>
 #include <thesis/debug.h>
+#include <thesis/options.h>
 #include <thesis/graphics.h>
 #include <thesis/alloc_ext.h>
 
@@ -120,6 +122,8 @@ app_init(
 	int status = chdir(dir);
 	hard_assert_eq(status, 0);
 
+	global_options = options_init(argc, (void*) argv);
+
 	app->manager = window_manager_init();
 	app->window = window_init();
 	window_manager_add(app->manager, app->window);
@@ -170,6 +174,9 @@ app_free(
 	assert_not_null(app);
 
 	window_manager_free(app->manager);
+
+	options_free(global_options);
+	global_options = NULL;
 
 	alloc_free(app, sizeof(*app));
 }
