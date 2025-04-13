@@ -168,6 +168,8 @@ hash_table_free(
 
 	alloc_free(table->buckets, sizeof(*table->buckets) * table->bucket_count);
 	alloc_free(table->entries, sizeof(*table->entries) * table->entries_size);
+
+	alloc_free(table, sizeof(*table));
 }
 
 

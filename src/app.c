@@ -14,15 +14,16 @@
  *  limitations under the License.
  */
 
+#include <thesis/vk.h>
 #include <thesis/app.h>
 #include <thesis/file.h>
-#include <thesis/hash.h>
 #include <thesis/debug.h>
 #include <thesis/options.h>
-#include <thesis/graphics.h>
 #include <thesis/alloc_ext.h>
+#include <thesis/simulation.h>
 
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <libgen.h>
 #include <limits.h>
@@ -31,75 +32,19 @@
 
 struct app
 {
+	/*
 	window_event_table_t* window_event_table;
 	event_listener_t* window_close_once_listener;
 	event_listener_t* window_key_down_listener;
 
-	window_manager_t manager;
+	window_manager_t window_manager;
 	window_t window;
-	graphics_t graphics;
+	*/
+
+	simulation_t simulation;
+
+	vk_t vk;
 };
-
-
-private void
-app_window_close_once_fn(
-	app_t app,
-	window_close_event_data_t* event_data
-	)
-{
-	app->window_close_once_listener = NULL;
-	window_close(event_data->window);
-}
-
-
-private void
-app_window_free_once_fn(
-	app_t app,
-	window_free_event_data_t* event_data
-	)
-{
-	window_event_table_t* table = app->window_event_table;
-
-	event_target_del(&table->key_down_target, app->window_key_down_listener);
-
-	if(app->window_close_once_listener)
-	{
-		event_target_del_once(&table->close_target, app->window_close_once_listener);
-	}
-}
-
-
-private void
-app_window_init_once_fn(
-	app_t app,
-	window_init_event_data_t* event_data
-	)
-{
-	window_toggle_fullscreen(app->window);
-}
-
-
-private void
-app_window_key_down_fn(
-	app_t app,
-	window_key_down_event_data_t* event_data
-	)
-{
-	if(
-		(
-			(event_data->mods & WINDOW_MOD_CTRL_BIT) &&
-			(
-				event_data->key == WINDOW_KEY_W ||
-				event_data->key == WINDOW_KEY_R
-				)
-			) ||
-		event_data->key == WINDOW_KEY_ESCAPE ||
-		event_data->key == WINDOW_KEY_F11
-		)
-	{
-		window_close(app->window);
-	}
-}
 
 
 app_t
@@ -122,45 +67,16 @@ app_init(
 	int status = chdir(dir);
 	hard_assert_eq(status, 0);
 
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGINT);
+	pthread_sigmask(SIG_BLOCK, &set, NULL);
+
 	global_options = options_init(argc, (void*) argv);
 
-	app->manager = window_manager_init();
-	app->window = window_init();
-	window_manager_add(app->manager, app->window);
-	window_show(app->window);
+	app->simulation = simulation_init();
 
-	app->window_event_table = window_get_event_table(app->window);
-	window_event_table_t* table = app->window_event_table;
-
-	event_listener_data_t close_once_data =
-	{
-		.fn = (event_fn_t) app_window_close_once_fn,
-		.data = app
-	};
-	app->window_close_once_listener = event_target_once(&table->close_target, close_once_data);
-
-	event_listener_data_t free_once_data =
-	{
-		.fn = (event_fn_t) app_window_free_once_fn,
-		.data = app
-	};
-	event_target_once(&table->free_target, free_once_data);
-
-	event_listener_data_t init_once_data =
-	{
-		.fn = (event_fn_t) app_window_init_once_fn,
-		.data = app
-	};
-	event_target_once(&table->init_target, init_once_data);
-
-	event_listener_data_t key_down_data =
-	{
-		.fn = (event_fn_t) app_window_key_down_fn,
-		.data = app
-	};
-	app->window_key_down_listener = event_target_add(&table->key_down_target, key_down_data);
-
-	app->graphics = graphics_init(app->window);
+	app->vk = vk_init(app->simulation);
 
 	return app;
 }
@@ -173,7 +89,7 @@ app_free(
 {
 	assert_not_null(app);
 
-	window_manager_free(app->manager);
+	simulation_free(app->simulation);
 
 	options_free(global_options);
 	global_options = NULL;
@@ -189,5 +105,6 @@ app_run(
 {
 	assert_not_null(app);
 
-	window_manager_run(app->manager);
+	simulation_event_table_t* table = simulation_get_event_table(app->simulation);
+	event_target_wait(&table->stop_target);
 }

@@ -1,5 +1,5 @@
 /*
- *   Copyright 2025 Franciszek Balcerak
+ *   Copyright 2024-2025 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
  */
 
 #include <thesis/debug.h>
-#include <thesis/window.h>
 #include <thesis/alloc_ext.h>
+#include <thesis/window.h>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -211,7 +211,7 @@ window_init(
 
 	event_listener_data_t free_data =
 	{
-		.fn = (event_fn_t) window_free_once_fn,
+		.fn = (void*) window_free_once_fn,
 		.data = window
 	};
 	(void) event_target_once(&window->event_table.free_target, free_data);
@@ -795,11 +795,14 @@ window_manager_free(
 void
 window_manager_add(
 	window_manager_t manager,
-	window_t window
+	window_t window,
+	const char* title,
+	const window_history_t* history
 	)
 {
 	assert_not_null(manager);
 	assert_not_null(window);
+	assert_not_null(title);
 
 	window->manager = manager;
 
@@ -816,11 +819,35 @@ window_manager_add(
 	window_user_event_window_init_data_t* data = alloc_malloc(sizeof(*data));
 	assert_ptr(data, sizeof(*data));
 
+	str_t title_str = str_init_copy_cstr(title);
+
+	window_history_t* history_copy = alloc_malloc(sizeof(*history_copy));
+	assert_not_null(history_copy);
+
+	if(history)
+	{
+		*history_copy = *history;
+	}
+	else
+	{
+		*history_copy =
+		(window_history_t)
+		{
+			.extent =
+			{
+				.w = 1280,
+				.h = 720
+			},
+			.fullscreen = false
+		};
+	}
+
 	*data =
 	(window_user_event_window_init_data_t)
 	{
+		.title = title_str,
+		.history = history_copy
 	};
-
 	window_push_event(window, WINDOW_USER_EVENT_WINDOW_INIT, data);
 }
 
@@ -912,15 +939,23 @@ window_manager_process_user_event(
 		hard_assert_true(status, window_sdl_log_error());
 
 		status = SDL_SetNumberProperty(sdl_props,
-			SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 1280);
+			SDL_PROP_WINDOW_CREATE_X_NUMBER, data->history->extent.x);
 		hard_assert_true(status, window_sdl_log_error());
 
 		status = SDL_SetNumberProperty(sdl_props,
-			SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 720);
+			SDL_PROP_WINDOW_CREATE_Y_NUMBER, data->history->extent.y);
+		hard_assert_true(status, window_sdl_log_error());
+
+		status = SDL_SetNumberProperty(sdl_props,
+			SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, data->history->extent.w);
+		hard_assert_true(status, window_sdl_log_error());
+
+		status = SDL_SetNumberProperty(sdl_props,
+			SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, data->history->extent.h);
 		hard_assert_true(status, window_sdl_log_error());
 
 		status = SDL_SetStringProperty(sdl_props,
-			SDL_PROP_WINDOW_CREATE_TITLE_STRING, "Thesis");
+			SDL_PROP_WINDOW_CREATE_TITLE_STRING, data->title->str);
 		hard_assert_true(status, window_sdl_log_error());
 
 		status = SDL_SetBooleanProperty(sdl_props,
@@ -963,14 +998,16 @@ window_manager_process_user_event(
 		};
 		event_target_fire(&window->event_table.init_target, &event_data);
 
+		alloc_free(data->history, sizeof(*data->history));
+		str_free(data->title);
 		alloc_free(data, sizeof(*data));
 
 		break;
 	}
 
-	case WINDOW_USER_EVENT_WINDOW_CLOSE:
+	case WINDOW_USER_EVENT_WINDOW_FREE:
 	{
-		window_user_event_window_close_data_t* data = event_data;
+		window_user_event_window_free_data_t* data = event_data;
 
 		if(window->prev)
 		{
@@ -986,12 +1023,30 @@ window_manager_process_user_event(
 			window->next->prev = window->prev;
 		}
 
-		window_free(window);
-
 		if(--manager->window_count == 0)
 		{
 			window_manager_stop_running(manager);
 		}
+
+		alloc_free(data, sizeof(*data));
+
+		break;
+	}
+
+	case WINDOW_USER_EVENT_WINDOW_CLOSE:
+	{
+		window_user_event_window_close_data_t* data = event_data;
+
+		window_free(window);
+
+		window_user_event_window_free_data_t* free_data = alloc_malloc(sizeof(*free_data));
+		assert_ptr(free_data, sizeof(*free_data));
+
+		*free_data =
+		(window_user_event_window_free_data_t)
+		{
+		};
+		window_push_event(window, WINDOW_USER_EVENT_WINDOW_FREE, free_data);
 
 		alloc_free(data, sizeof(*data));
 

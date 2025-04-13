@@ -1,5 +1,5 @@
 /*
- *   Copyright 2025 Franciszek Balcerak
+ *   Copyright 2024-2025 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -100,10 +100,13 @@ window_mod_t;
 
 typedef struct window* window_t;
 
+typedef struct window_history window_history_t;
+
 
 typedef enum window_user_event : uint32_t
 {
 	WINDOW_USER_EVENT_WINDOW_INIT,
+	WINDOW_USER_EVENT_WINDOW_FREE,
 	WINDOW_USER_EVENT_WINDOW_CLOSE,
 	WINDOW_USER_EVENT_WINDOW_FULLSCREEN,
 	WINDOW_USER_EVENT_SET_CURSOR,
@@ -119,6 +122,8 @@ window_user_event_t;
 
 typedef struct window_user_event_window_init_data
 {
+	str_t title;
+	const window_history_t* history;
 }
 window_user_event_window_init_data_t;
 
@@ -193,7 +198,9 @@ window_manager_free(
 extern void
 window_manager_add(
 	window_manager_t manager,
-	window_t window
+	window_t window,
+	const char* title,
+	const window_history_t* history
 	);
 
 
@@ -489,12 +496,6 @@ window_get_event_table(
 extern const char* const*
 window_get_vulkan_extensions(
 	uint32_t* count
-	);
-
-
-typedef void
-(*window_proc_addr_fn)(
-	void
 	);
 
 
