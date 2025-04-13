@@ -16,4 +16,12 @@
 
 #pragma once
 
+#define MAX_EXTENSIONS 64
+#define VK_MAX_IMAGES 8
 
+
+extern void
+shared_free_str_array(
+	const char** start,
+	const char** end
+	);

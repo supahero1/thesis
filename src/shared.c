@@ -14,9 +14,23 @@
  *  limitations under the License.
  */
 
+#include <thesis/str.h>
+#include <thesis/debug.h>
 #include <thesis/shared.h>
 
 
+void
+shared_free_str_array(
+	const char** start,
+	const char** end
+	)
+{
+	assert_not_null(start);
+	assert_not_null(end);
 
-
+	while(start < end)
+	{
+		cstr_free((void*) *(start++));
+	}
+}
 

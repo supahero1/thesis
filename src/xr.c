@@ -1,3 +1,4 @@
+/* skip */
 /*
  *   Copyright 2025 Franciszek Balcerak
  *
@@ -14,9 +15,9 @@
  *  limitations under the License.
  */
 
+#include <thesis/xr.h>
 #include <thesis/debug.h>
 #include <thesis/threads.h>
-#include <thesis/graphics.h>
 #include <thesis/alloc_ext.h>
 
 #define VK_NO_PROTOTYPES

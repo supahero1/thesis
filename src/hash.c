@@ -330,6 +330,9 @@ hash_table_add(
 
 		if(str_case_cmp(search_key, entry_key))
 		{
+			table->key_free_fn(search_key);
+			table->value_free_fn(value);
+
 			return false;
 		}
 
