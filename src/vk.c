@@ -26,9 +26,40 @@
 #include <vulkan/vulkan.h>
 #include <volk.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb/stb_image.h>
+
 #include <signal.h>
 #include <string.h>
 
+
+typedef enum vk_image_type
+{
+	VK_IMAGE_TYPE_DEPTH_STENCIL,
+	VK_IMAGE_TYPE_MULTISAMPLED,
+	VK_IMAGE_TYPE_TEXTURE
+}
+vk_image_type_t;
+
+typedef struct vk_image
+{
+	const char* path;
+
+	uint32_t width;
+	uint32_t height;
+
+	VkFormat format;
+	vk_image_type_t type;
+
+	VkImage image;
+	VkImageView view;
+	VkDeviceMemory memory;
+
+	VkImageAspectFlags aspect;
+	VkImageUsageFlags usage;
+	VkSampleCountFlagBits samples;
+}
+vk_image_t;
 
 struct vk
 {
@@ -79,6 +110,9 @@ struct vk
 	VkCommandPool vk_command_pool;
 	VkCommandBuffer vk_command_buffer;
 	VkFence vk_fence;
+
+	vk_image_t vk_depth_image;
+	vk_image_t vk_multisampled_image;
 };
 
 
@@ -1068,6 +1102,573 @@ vk_free_device(
 }
 
 
+private uint32_t
+vk_get_memory(
+	vk_t vk,
+	uint32_t bits,
+	VkMemoryPropertyFlags flags
+	)
+{
+	for(uint32_t i = 0; i < vk->vk_memory_properties.memoryTypeCount; ++i)
+	{
+		if(
+			(bits & (1 << i)) &&
+			(vk->vk_memory_properties.memoryTypes[i].propertyFlags & flags) == flags
+			)
+		{
+			return i;
+		}
+	}
+
+	hard_assert_unreachable();
+}
+
+
+private void
+vk_begin_command_buffer(
+	vk_t vk
+	)
+{
+	VkResult vk_result = vk->vk_table.vkWaitForFences(
+		vk->vk_device, 1, &vk->vk_fence, VK_TRUE, UINT64_MAX);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_result = vk->vk_table.vkResetFences(vk->vk_device, 1, &vk->vk_fence);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_result = vk->vk_table.vkResetCommandBuffer(vk->vk_command_buffer, 0);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkCommandBufferBeginInfo vk_command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		.pInheritanceInfo = NULL
+	};
+
+	vk_result = vk->vk_table.vkBeginCommandBuffer(
+		vk->vk_command_buffer, &vk_command_buffer_info);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+}
+
+
+private void
+vk_end_command_buffer(
+	vk_t vk
+	)
+{
+	VkResult vk_result = vk->vk_table.vkEndCommandBuffer(vk->vk_command_buffer);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkSubmitInfo vk_submit_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = NULL,
+		.waitSemaphoreCount = 0,
+		.pWaitSemaphores = NULL,
+		.pWaitDstStageMask = NULL,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &vk->vk_command_buffer,
+		.signalSemaphoreCount = 0,
+		.pSignalSemaphores = NULL
+	};
+
+	vk_result = vk->vk_table.vkQueueSubmit(
+		vk->vk_queue, 1, &vk_submit_info, vk->vk_fence);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+}
+
+
+private void
+vk_init_buffer(
+	vk_t vk,
+	VkDeviceSize size,
+	VkBufferUsageFlags usage,
+	VkMemoryPropertyFlags flags,
+	VkBuffer* buffer,
+	VkDeviceMemory* buffer_memory
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(buffer);
+	assert_not_null(buffer_memory);
+
+	VkBufferCreateInfo vk_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.size = size,
+		.usage = usage,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL
+	};
+
+	VkResult vk_result = vk->vk_table.vkCreateBuffer(
+		vk->vk_device, &vk_buffer_info, NULL, buffer);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkMemoryRequirements vk_memory_requirements;
+	vk->vk_table.vkGetBufferMemoryRequirements(
+		vk->vk_device, *buffer, &vk_memory_requirements);
+
+	uint32_t memory_type_index = vk_get_memory(
+		vk, vk_memory_requirements.memoryTypeBits, flags);
+
+	VkMemoryAllocateInfo vk_memory_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = NULL,
+		.allocationSize = vk_memory_requirements.size,
+		.memoryTypeIndex = memory_type_index
+	};
+
+	vk_result = vk->vk_table.vkAllocateMemory(
+		vk->vk_device, &vk_memory_info, NULL, buffer_memory);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_result = vk->vk_table.vkBindBufferMemory(
+		vk->vk_device, *buffer, *buffer_memory, 0);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+}
+
+
+private void
+vk_init_staging_buffer(
+	vk_t vk,
+	VkDeviceSize size,
+	VkBuffer* buffer,
+	VkDeviceMemory* buffer_memory
+	)
+{
+	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		buffer, buffer_memory);
+}
+
+
+private void
+vk_init_vertex_buffer(
+	vk_t vk,
+	VkDeviceSize size,
+	VkBuffer* buffer,
+	VkDeviceMemory* buffer_memory
+	)
+{
+	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		buffer, buffer_memory);
+}
+
+
+private void
+vk_init_index_buffer(
+	vk_t vk,
+	VkDeviceSize size,
+	VkBuffer* buffer,
+	VkDeviceMemory* buffer_memory
+	)
+{
+	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		buffer, buffer_memory);
+}
+
+
+private void
+vk_free_buffer(
+	vk_t vk,
+	VkBuffer buffer,
+	VkDeviceMemory buffer_memory
+	)
+{
+	assert_not_null(vk);
+
+	vk->vk_table.vkFreeMemory(vk->vk_device, buffer_memory, NULL);
+	vk->vk_table.vkDestroyBuffer(vk->vk_device, buffer, NULL);
+}
+
+
+private void
+vk_copy_to_buffer(
+	vk_t vk,
+	VkBuffer dst_buffer,
+	const void* data,
+	VkDeviceSize size
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(dst_buffer);
+	assert_ptr(data, size);
+
+	if(!size)
+	{
+		return;
+	}
+
+	vk_begin_command_buffer(vk);
+
+	VkBuffer staging_buffer;
+	VkDeviceMemory staging_buffer_memory;
+	vk_init_staging_buffer(vk, size, &staging_buffer, &staging_buffer_memory);
+
+	void* mapped_data;
+	VkResult vk_result = vk->vk_table.vkMapMemory(
+		vk->vk_device, staging_buffer_memory, 0, size, 0, &mapped_data);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	memcpy(mapped_data, data, size);
+
+	vk->vk_table.vkUnmapMemory(vk->vk_device, staging_buffer_memory);
+
+	VkBufferCopy vk_buffer_copy =
+	{
+		.srcOffset = 0,
+		.dstOffset = 0,
+		.size = size
+	};
+
+	vk->vk_table.vkCmdCopyBuffer(vk->vk_command_buffer,
+		staging_buffer, dst_buffer, 1, &vk_buffer_copy);
+
+	vk_free_buffer(vk, staging_buffer, staging_buffer_memory);
+
+	vk_end_command_buffer(vk);
+}
+
+
+private void
+vk_copy_texture_to_image(
+	vk_t vk,
+	vk_image_t* image,
+	const void* data,
+	uint32_t size
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(image);
+	assert_ptr(data, size);
+
+	vk_begin_command_buffer(vk);
+
+	VkBuffer staging_buffer;
+	VkDeviceMemory staging_buffer_memory;
+	vk_init_staging_buffer(vk, size, &staging_buffer, &staging_buffer_memory);
+
+	void* mapped_data;
+	VkResult vk_result = vk->vk_table.vkMapMemory(
+		vk->vk_device, staging_buffer_memory, 0, size, 0, &mapped_data);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	memcpy(mapped_data, data, size);
+
+	vk->vk_table.vkUnmapMemory(vk->vk_device, staging_buffer_memory);
+
+	VkBufferImageCopy vk_buffer_image_copy =
+	{
+		.bufferOffset = 0,
+		.bufferRowLength = 0,
+		.bufferImageHeight = 0,
+		.imageSubresource =
+		{
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.mipLevel = 0,
+			.baseArrayLayer = 0,
+			.layerCount = 1
+		},
+		.imageOffset =
+		{
+			.x = 0,
+			.y = 0,
+			.z = 0
+		},
+		.imageExtent =
+		{
+			image->width,
+			image->height,
+			1
+		}
+	};
+
+	vk->vk_table.vkCmdCopyBufferToImage(vk->vk_command_buffer, staging_buffer,
+		image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &vk_buffer_image_copy);
+
+	vk_free_buffer(vk, staging_buffer, staging_buffer_memory);
+
+	vk_end_command_buffer(vk);
+}
+
+
+private void
+vk_transition_image_layout(
+	vk_t vk,
+	vk_image_t* image,
+	VkImageLayout from,
+	VkImageLayout to
+	)
+{
+	vk_begin_command_buffer(vk);
+
+	VkPipelineStageFlags src_stage;
+	VkPipelineStageFlags dst_stage;
+
+	VkImageMemoryBarrier vk_barrier =
+	{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.pNext = NULL,
+		.srcAccessMask = 0,
+		.dstAccessMask = 0
+	};
+
+	if(from == VK_IMAGE_LAYOUT_UNDEFINED && to == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+	{
+		vk_barrier.srcAccessMask = 0;
+		vk_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+		src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	}
+	else if(from == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+		to == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	{
+		vk_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		vk_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+		src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+	else
+	{
+		hard_assert_unreachable();
+	}
+
+	vk_barrier.oldLayout = from;
+	vk_barrier.newLayout = to;
+	vk_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	vk_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	vk_barrier.image = image->image;
+	vk_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	vk_barrier.subresourceRange.baseMipLevel = 0;
+	vk_barrier.subresourceRange.levelCount = 1;
+	vk_barrier.subresourceRange.baseArrayLayer = 0;
+	vk_barrier.subresourceRange.layerCount = 1;
+
+	vkCmdPipelineBarrier(vk->vk_command_buffer,
+		src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &vk_barrier);
+
+	vk_end_command_buffer(vk);
+}
+
+
+private void
+vk_init_image(
+	vk_t vk,
+	vk_image_t* image
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(image);
+
+	void* data;
+	uint32_t size;
+
+
+	switch(image->type)
+	{
+
+	case VK_IMAGE_TYPE_DEPTH_STENCIL:
+	{
+		image->format = VK_FORMAT_D32_SFLOAT;
+
+		image->aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		image->usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+		image->samples = vk->vk_samples;
+
+		image->width = vk->vk_extent.width;
+		image->height = vk->vk_extent.height;
+
+		break;
+	}
+
+	case VK_IMAGE_TYPE_MULTISAMPLED:
+	{
+		image->format = VK_FORMAT_B8G8R8A8_SRGB;
+
+		image->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		image->usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
+			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+		image->samples = vk->vk_samples;
+
+		image->width = vk->vk_extent.width;
+		image->height = vk->vk_extent.height;
+
+		break;
+	}
+
+	case VK_IMAGE_TYPE_TEXTURE:
+	{
+		int width;
+		int height;
+		data = stbi_load(image->path, &width, &height, NULL, 4);
+		hard_assert_not_null(data);
+
+		size = width * height * 4;
+
+		image->format = VK_FORMAT_B8G8R8A8_SRGB;
+
+		image->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		image->usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		image->samples = VK_SAMPLE_COUNT_1_BIT;
+
+		image->width = width;
+		image->height = height;
+
+		break;
+	}
+
+	}
+
+
+	VkImageCreateInfo vk_image_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = image->format,
+		.extent =
+		{
+			image->width,
+			image->height,
+			1
+		},
+		.mipLevels = 1,
+		.arrayLayers = 1,
+		.samples = image->samples,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = image->usage,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL,
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+	};
+
+	VkResult vk_result = vk->vk_table.vkCreateImage(
+		vk->vk_device, &vk_image_info, NULL, &image->image);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkMemoryRequirements vk_memory_requirements;
+	vk->vk_table.vkGetImageMemoryRequirements(
+		vk->vk_device, image->image, &vk_memory_requirements);
+
+	uint32_t memory_type_index = vk_get_memory(vk,
+		vk_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	VkMemoryAllocateInfo vk_memory_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = NULL,
+		.allocationSize = vk_memory_requirements.size,
+		.memoryTypeIndex = memory_type_index
+	};
+
+	vk_result = vk->vk_table.vkAllocateMemory(
+		vk->vk_device, &vk_memory_info, NULL, &image->memory);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_result = vk->vk_table.vkBindImageMemory(
+		vk->vk_device, image->image, image->memory, 0);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkImageViewCreateInfo vk_image_view_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.image = image->image,
+		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.format = image->format,
+		.components =
+		{
+			VK_COMPONENT_SWIZZLE_IDENTITY,
+			VK_COMPONENT_SWIZZLE_IDENTITY,
+			VK_COMPONENT_SWIZZLE_IDENTITY,
+			VK_COMPONENT_SWIZZLE_IDENTITY
+		},
+		.subresourceRange =
+		{
+			.aspectMask = image->aspect,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1
+		}
+	};
+
+	vk_result = vk->vk_table.vkCreateImageView(
+		vk->vk_device, &vk_image_view_info, NULL, &image->view);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	if(image->type == VK_IMAGE_TYPE_TEXTURE)
+	{
+		vk_transition_image_layout(vk, image,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+		vk_copy_texture_to_image(vk, image, data, size);
+
+		stbi_image_free(data);
+
+		vk_transition_image_layout(vk, image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	}
+}
+
+
+private void
+vk_free_image(
+	vk_t vk,
+	vk_image_t* image
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(image);
+
+	vk->vk_table.vkDestroyImageView(vk->vk_device, image->view, NULL);
+	vk->vk_table.vkDestroyImage(vk->vk_device, image->image, NULL);
+	vk->vk_table.vkFreeMemory(vk->vk_device, image->memory, NULL);
+}
+
+
+private void
+vk_init_images(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk->vk_depth_image.type = VK_IMAGE_TYPE_DEPTH_STENCIL;
+	vk_init_image(vk, &vk->vk_depth_image);
+
+	vk->vk_multisampled_image.type = VK_IMAGE_TYPE_MULTISAMPLED;
+	vk_init_image(vk, &vk->vk_multisampled_image);
+}
+
+
+private void
+vk_free_images(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk_free_image(vk, &vk->vk_multisampled_image);
+	vk_free_image(vk, &vk->vk_depth_image);
+}
+
+
 private VkShaderModule
 vk_create_shader(
 	vk_t vk,
@@ -1112,6 +1713,27 @@ vk_destroy_shader(
 
 
 private void
+vk_init_pipeline(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+
+}
+
+
+private void
+vk_free_pipeline(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+}
+
+
+private void
 vk_init_vk(
 	vk_t vk
 	)
@@ -1121,6 +1743,8 @@ vk_init_vk(
 	vk_init_instance(vk);
 	vk_init_surface(vk);
 	vk_init_device(vk);
+	vk_init_images(vk);
+	vk_init_pipeline(vk);
 }
 
 
@@ -1131,6 +1755,8 @@ vk_free_vk(
 {
 	assert_not_null(vk);
 
+	vk_free_pipeline(vk);
+	vk_free_images(vk);
 	vk_free_device(vk);
 	vk_free_surface(vk);
 	vk_free_instance(vk);
