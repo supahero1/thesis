@@ -17,12 +17,7 @@
 #pragma once
 
 #include <thesis/event.h>
-
-#define CGLM_FORCE_RADIANS
-#define CGLM_FORCE_LEFT_HANDED
-#define CGLM_FORCE_DEPTH_ZERO_TO_ONE
-#define CGLM_FORCE_DEFAULT_ALIGNED_GENTYPES
-#include <cglm/cglm.h>
+#include <thesis/model.h>
 
 
 typedef struct simulation* simulation_t;
@@ -46,10 +41,36 @@ typedef struct simulation_event_table
 }
 simulation_event_table_t;
 
+typedef struct simulation_camera
+{
+	vec3 pos;
+	vec3 angle;
+	float fov;
+	float near;
+	float far;
+}
+simulation_camera_t;
+
+typedef struct simulation_entity_init
+{
+	const char* model_path;
+	vec3 translation;
+	vec3 rotation;
+	bool dynamic;
+}
+simulation_entity_init_t;
+
+typedef struct simulation_entity_data
+{
+	mat4 transform;
+	uint32_t model_index;
+}
+simulation_entity_data_t;
+
 
 extern simulation_t
 simulation_init(
-	void
+	simulation_camera_t camera
 	);
 
 
@@ -62,6 +83,27 @@ simulation_free(
 extern simulation_event_table_t*
 simulation_get_event_table(
 	simulation_t simulation
+	);
+
+
+extern void
+simulation_add_entity(
+	simulation_t simulation,
+	simulation_entity_init_t entity_init
+	);
+
+
+extern simulation_entity_data_t*
+simulation_get_entity_data(
+	simulation_t simulation,
+	uint32_t* data_count
+	);
+
+
+extern model_t**
+simulation_get_models(
+	simulation_t simulation,
+	uint32_t* model_count
 	);
 
 

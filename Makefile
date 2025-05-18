@@ -59,6 +59,10 @@ shaders: bin/shaders/vert.spv bin/shaders/frag.spv
 app: shaders
 	scons app -j $(shell nproc)
 
+	if [[ ! -d thesis/assets/ ]]; then \
+		$(CP) -r assets/ thesis/; \
+	fi
+
 	if [[ ! -d thesis/shaders/ ]]; then \
 		$(CP) -r bin/shaders/ thesis/; \
 	fi

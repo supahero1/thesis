@@ -32,17 +32,7 @@
 
 struct app
 {
-	/*
-	window_event_table_t* window_event_table;
-	event_listener_t* window_close_once_listener;
-	event_listener_t* window_key_down_listener;
-
-	window_manager_t window_manager;
-	window_t window;
-	*/
-
 	simulation_t simulation;
-
 	vk_t vk;
 };
 
@@ -74,7 +64,27 @@ app_init(
 
 	global_options = options_init(argc, (void*) argv);
 
-	app->simulation = simulation_init();
+	app->simulation = simulation_init(
+		(simulation_camera_t)
+		{
+			.pos = { 0.0f, 0.0f, 0.0f },
+			.angle = { 0.0f, 0.0f, 0.0f },
+			.fov = 90.0f,
+			.near = 1.0f,
+			.far = 10000.0f
+		}
+		);
+
+	simulation_add_entity(
+		app->simulation,
+		(simulation_entity_init_t)
+		{
+			.model_path = "assets/ccity-building-set-1/maya2sketchfab.fbx",
+			.translation = { 0.0f, 0.0f, 0.0f },
+			.rotation = { 0.0f, 0.0f, 0.0f },
+			.dynamic = false
+		}
+		);
 
 	app->vk = vk_init(app->simulation);
 

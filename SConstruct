@@ -17,7 +17,6 @@
 import os
 
 
-
 env = Environment(tools = ["mingw"] if os.name == "nt" else ["default"], ENV=os.environ)
 
 flags = Split("-std=gnu23 -Wall -Iinclude/ -D_GNU_SOURCE")
@@ -35,7 +34,7 @@ else:
 
 env.Append(CPPFLAGS=flags)
 
-libs = Split("m SDL3 openxr_loader")
+libs = Split("m SDL3 assimp openxr_loader")
 if os.name == "nt":
 	libs.extend(Split("vulkan-1 ws2_32"))
 else:
