@@ -24,7 +24,7 @@
 
 typedef struct simulation_entity
 {
-	uint32_t model_index;
+	uint32_t model_idx;
 	vec3 translation;
 	vec3 rotation;
 	bool dynamic;
@@ -158,7 +158,7 @@ simulation_add_entity(
 		model = simulation->model_count;
 	}
 
-	entity->model_index = --model;
+	entity->model_idx = --model;
 
 	glm_vec3_copy(entity_init.translation, entity->translation);
 	glm_vec3_copy(entity_init.rotation, entity->rotation);
@@ -189,7 +189,7 @@ simulation_get_entity_data(
 		simulation_entity_data_t* cur_data = &data[i];
 		simulation_entity_t* entity = &simulation->entities[i];
 
-		cur_data->model_index = entity->model_index;
+		cur_data->model_idx = entity->model_idx;
 
 		glm_mat4_identity(cur_data->transform);
 		glm_translate(cur_data->transform, entity->translation);

@@ -28,8 +28,9 @@ const_basename(
 	const char *path
 	)
 {
-	const char* slash = strrchr(path, '/');
-	return slash ? slash + 1 : path;
+	const char* rslash = strrchr(path, '/');
+	const char* lslash = strrchr(path, '\\');
+	return rslash ? rslash + 1 : lslash ? lslash + 1 : path;
 }
 
 
@@ -91,11 +92,28 @@ model_init(
 
 		material->texture = str_init();
 
-		struct aiString path;
+		struct aiString texture_path;
 		if(AI_SUCCESS == aiGetMaterialTexture(sceneMaterial,
-			aiTextureType_DIFFUSE, 0, &path, NULL, NULL, NULL, NULL, NULL, NULL))
+			aiTextureType_DIFFUSE, 0, &texture_path, NULL, NULL, NULL, NULL, NULL, NULL))
 		{
-			str_set_copy_cstr(material->texture, const_basename(path.data));
+			const char* path_dir_end = const_basename(path) - 1;
+			size_t path_len = path_dir_end - path;
+
+			const char* tex_path = const_basename(texture_path.data);
+			size_t tex_len = texture_path.length - (tex_path - texture_path.data);
+
+			char* combined_path = alloc_malloc(path_len + tex_len + 2);
+			assert_not_null(combined_path);
+
+			char* ptr = combined_path;
+			memcpy(ptr, path, path_len);
+			ptr += path_len;
+			*(ptr++) = '/';
+			memcpy(ptr, tex_path, tex_len);
+			ptr += tex_len;
+			*(ptr++) = 0;
+
+			str_set_move_len(material->texture, combined_path, ptr - combined_path);
 		}
 	}
 

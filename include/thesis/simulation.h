@@ -63,7 +63,7 @@ simulation_entity_init_t;
 typedef struct simulation_entity_data
 {
 	mat4 transform;
-	uint32_t model_index;
+	uint32_t model_idx;
 }
 simulation_entity_data_t;
 

@@ -224,14 +224,14 @@ thread_sleep(
 	time.tv_sec = ns / 1000000000;
 	time.tv_nsec = ns % 1000000000;
 
-	struct timespec Rem;
+	struct timespec rem;
 
 	int status;
-	while((status = nanosleep(&time, &Rem)))
+	while((status = nanosleep(&time, &rem)))
 	{
 		if(errno == EINTR)
 		{
-			time = Rem;
+			time = rem;
 			continue;
 		}
 

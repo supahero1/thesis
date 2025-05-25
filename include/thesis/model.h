@@ -39,12 +39,12 @@ typedef struct mesh
 {
 	uint32_t material_idx;
 	uint32_t vertex_count;
+	uint32_t index_count;
+
 	vec3* vertices;
 	vec3* normals;
 	vec2* coords;
-
 	uint32_t* indexes;
-	uint32_t index_count;
 }
 mesh_t;
 
