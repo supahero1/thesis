@@ -67,7 +67,7 @@ app: shaders
 		$(CP) -r bin/shaders/ thesis/; \
 	fi
 
-	$(CP) bin/app thesis/
+	$(CP) bin/thesis_app thesis/
 
 	kill -0 "$$(cat /run/user/1000/monado.pid)" 2>/dev/null; \
 	runtime=; \
@@ -78,4 +78,4 @@ app: shaders
 		$(CP) /etc/openxr/1/wivrn_runtime.json ~/.config/openxr/1/active_runtime.json; \
 		runtime=wivrn; \
 	fi; \
-	cd thesis; $(VALGRIND_CALL) ./app --runtime=$$runtime
+	cd thesis; $(VALGRIND_CALL) ./thesis_app --runtime=$$runtime

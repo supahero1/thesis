@@ -116,6 +116,6 @@ def add_objects(files):
 
 app_objects = add_objects(app_files)
 
-app = env.Program("bin/app", app_objects)
+app = env.Program("bin/thesis_app", app_objects)
 
 env.Alias("app", app)

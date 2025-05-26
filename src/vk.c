@@ -132,7 +132,6 @@ typedef struct vk_frame
 	VkFramebuffer framebuffer;
 	VkImageView image_view;
 	VkImage image;
-	VkCommandBuffer command_buffer;
 }
 vk_frame_t;
 
@@ -155,6 +154,7 @@ typedef struct vk_barrier
 {
 	VkSemaphore semaphores[VK_BARRIER_SEMAPHORE__COUNT];
 	VkFence fences[VK_BARRIER_FENCE__COUNT];
+	VkCommandBuffer command_buffer;
 }
 vk_barrier_t;
 
@@ -170,12 +170,11 @@ struct vk
 	window_t window;
 	thread_t window_thread;
 
-	bool window_resize_bool;
+	_Atomic bool window_resize_bool;
 	sync_mtx_t window_resize_mtx;
 	sync_cond_t window_resize_cond;
 
 	thread_t vk_thread;
-	bool vk_first_frame;
 	_Atomic bool vk_running;
 
 	PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
@@ -293,7 +292,7 @@ vk_debug_callback(
 #endif
 
 
-private void*
+private void* assert_used
 vk_load_func(
 	vk_t vk,
 	const char* name
@@ -1016,6 +1015,29 @@ vk_get_device_score(
 }
 
 
+private bool
+vk_load_bool(
+	_Atomic bool* value
+	)
+{
+	assert_not_null(value);
+
+	return atomic_load_explicit(value, memory_order_acquire);
+}
+
+
+private void
+vk_store_bool(
+	_Atomic bool* value,
+	bool new_value
+	)
+{
+	assert_not_null(value);
+
+	atomic_store_explicit(value, new_value, memory_order_release);
+}
+
+
 private void
 vk_get_extent(
 	vk_t vk
@@ -1041,25 +1063,34 @@ vk_get_extent(
 		}
 
 		sync_mtx_lock(&vk->window_resize_mtx);
-			while(!vk->window_resize_bool)
+			while(!vk_load_bool(&vk->window_resize_bool))
 			{
 				sync_cond_wait(&vk->window_resize_cond, &vk->window_resize_mtx);
 			}
 
-			vk->window_resize_bool = false;
+			vk_store_bool(&vk->window_resize_bool, false);
 		sync_mtx_unlock(&vk->window_resize_mtx);
+	}
+
+	if(width == UINT32_MAX || height == UINT32_MAX)
+	{
+		window_info_t window_info;
+		window_get_info(vk->window, &window_info);
+
+		width = window_info.extent.w;
+		height = window_info.extent.h;
 	}
 
 	width = MACRO_CLAMP(
 		width,
-		vk->vk_surface_capabilities.maxImageExtent.width,
-		vk->vk_surface_capabilities.minImageExtent.width
+		vk->vk_surface_capabilities.minImageExtent.width,
+		vk->vk_surface_capabilities.maxImageExtent.width
 		);
 
 	height = MACRO_CLAMP(
 		height,
-		vk->vk_surface_capabilities.maxImageExtent.height,
-		vk->vk_surface_capabilities.minImageExtent.height
+		vk->vk_surface_capabilities.minImageExtent.height,
+		vk->vk_surface_capabilities.maxImageExtent.height
 		);
 
 	vk->vk_extent =
@@ -2804,8 +2835,8 @@ vk_init_frames(
 {
 	assert_not_null(vk);
 
-	printf("vk_init_frames image_count %u\n", vk->vk_image_count);
 	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
+	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
 
 	VkCommandBufferAllocateInfo vk_command_buffer_info =
 	{
@@ -2820,18 +2851,6 @@ vk_init_frames(
 		vk->vk_device, &vk_command_buffer_info, vk_command_buffers);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
-	vk_frame_t* vk_frame = vk->vk_frames;
-	vk_frame_t* vk_frame_end = vk_frame + vk->vk_image_count;
-
-	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
-
-	while(vk_frame < vk_frame_end)
-	{
-		vk_frame->command_buffer =*vk_command_buffer;
-
-		++vk_frame;
-		++vk_command_buffer;
-	}
 
 	VkSemaphoreCreateInfo vk_semaphore_info =
 	{
@@ -2872,7 +2891,10 @@ vk_init_frames(
 			hard_assert_eq(vk_result, VK_SUCCESS);
 		}
 
+		vk_barrier->command_buffer = *vk_command_buffer;
+
 		++vk_barrier;
+		++vk_command_buffer;
 	}
 
 	vk->vk_barrier = vk->vk_barriers;
@@ -2886,11 +2908,16 @@ vk_free_frames(
 {
 	assert_not_null(vk);
 
+	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
+	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
+
 	vk_barrier_t* vk_barrier = vk->vk_barriers;
 	vk_barrier_t* vk_barrier_end = vk_barrier + vk->vk_image_count;
 
 	while(vk_barrier < vk_barrier_end)
 	{
+		*vk_command_buffer = vk_barrier->command_buffer;
+
 		VkFence* vk_fence = vk_barrier->fences;
 		VkFence* vk_fence_end = vk_fence + MACRO_ARRAY_LEN(vk_barrier->fences);
 
@@ -2910,19 +2937,6 @@ vk_free_frames(
 		}
 
 		++vk_barrier;
-	}
-
-	vk_frame_t* vk_frame = vk->vk_frames;
-	vk_frame_t* vk_frame_end = vk_frame + vk->vk_image_count;
-
-	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
-	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
-
-	while(vk_frame < vk_frame_end)
-	{
-		*vk_command_buffer = vk_frame->command_buffer;
-
-		++vk_frame;
 		++vk_command_buffer;
 	}
 
@@ -2945,14 +2959,14 @@ vk_init_framebuffers(
 
 	assert_lt(image_count, VK_MAX_FRAMES);
 	assert_ge(image_count, vk->vk_image_count);
-	printf("old image_count %u, new image_count %u\n", vk->vk_image_count, image_count);
-	if(vk->vk_image_count != image_count)
+
+	bool vk_reinit_frames = vk->vk_image_count != image_count;
+	vk->vk_image_count = image_count;
+	if(vk_reinit_frames)
 	{
 		vk_free_frames(vk);
 		vk_init_frames(vk);
 	}
-
-	vk->vk_image_count = image_count;
 
 	VkImage vk_images[image_count];
 	vk_result = vk->vk_table.vkGetSwapchainImagesKHR(
@@ -3131,13 +3145,25 @@ vk_free_prelude_command_buffer(
 
 
 private void
+vk_device_wait_idle(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkResult vk_result = vk->vk_table.vkDeviceWaitIdle(vk->vk_device);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+}
+
+
+private void
 vk_recreate_swapchain(
 	vk_t vk
 	)
 {
 	assert_not_null(vk);
 
-	vk->vk_table.vkDeviceWaitIdle(vk->vk_device);
+	vk_device_wait_idle(vk);
 
 	vk_free_images(vk);
 	vk_get_extent(vk);
@@ -3148,6 +3174,8 @@ vk_recreate_swapchain(
 	vk_free_framebuffers(vk);
 	vk_init_swapchain(vk);
 	vk_init_framebuffers(vk);
+
+	vk_store_bool(&vk->window_resize_bool, false);
 }
 
 
@@ -3158,13 +3186,9 @@ vk_draw(
 {
 	assert_not_null(vk);
 
-	puts("waiting for fences");
-
 	VkResult vk_result = vk->vk_table.vkWaitForFences(vk->vk_device, 1,
 		vk->vk_barrier->fences + VK_BARRIER_FENCE_IN_FLIGHT, VK_TRUE, UINT64_MAX);
 	hard_assert_eq(vk_result, VK_SUCCESS);
-
-	puts("acquiring next image");
 
 	uint32_t image_idx;
 	vk_result = vk->vk_table.vkAcquireNextImageKHR(vk->vk_device, vk->vk_swapchain, UINT64_MAX,
@@ -3175,28 +3199,24 @@ vk_draw(
 		return;
 	}
 
-	printf("acquired image %u\n", image_idx);
-
 	vk_result = vk->vk_table.vkResetFences(vk->vk_device, 1,
 		vk->vk_barrier->fences + VK_BARRIER_FENCE_IN_FLIGHT);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	vk_frame_t* vk_frame = vk->vk_frames + image_idx;
 
-	printf("recording commands, barrier %lu\n", vk->vk_barrier - vk->vk_barriers);
-
 
 	VkClearValue vk_clear_values[] =
 	{
 		{
-			.color = {{0.0f, 0.0f, 0.0f, 1.0f}}
+			.color = {{0.2f, 0.1f, 0.5f, 1.0f}}
 		},
 		{
 			.depthStencil = { 1.0f, 0 }
 		}
 	};
 
-	vk_result = vk->vk_table.vkResetCommandBuffer(vk_frame->command_buffer, 0);
+	vk_result = vk->vk_table.vkResetCommandBuffer(vk->vk_barrier->command_buffer, 0);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	VkCommandBufferBeginInfo vk_command_buffer_info =
@@ -3208,7 +3228,7 @@ vk_draw(
 	};
 
 	vk_result = vk->vk_table.vkBeginCommandBuffer(
-		vk_frame->command_buffer, &vk_command_buffer_info);
+		vk->vk_barrier->command_buffer, &vk_command_buffer_info);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	VkRenderPassBeginInfo vk_render_pass_begin_info =
@@ -3226,10 +3246,10 @@ vk_draw(
 		.pClearValues = vk_clear_values
 	};
 
-	vk->vk_table.vkCmdBeginRenderPass(vk_frame->command_buffer,
+	vk->vk_table.vkCmdBeginRenderPass(vk->vk_barrier->command_buffer,
 		&vk_render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE_AND_SECONDARY_COMMAND_BUFFERS_KHR);
 
-	vk->vk_table.vkCmdExecuteCommands(vk_frame->command_buffer,
+	vk->vk_table.vkCmdExecuteCommands(vk->vk_barrier->command_buffer,
 		1, &vk->vk_prelude_command_buffer);
 
 
@@ -3240,7 +3260,7 @@ vk_draw(
 	glm_mat4_copy(transform.view, vk_constant_data.view);
 
 	vk->vk_table.vkCmdPushConstants(
-		vk_frame->command_buffer, vk->vk_pipeline_layout,
+		vk->vk_barrier->command_buffer, vk->vk_pipeline_layout,
 		VK_SHADER_STAGE_VERTEX_BIT, 0,
 		sizeof(vk_constant_data_t), &vk_constant_data);
 
@@ -3293,9 +3313,9 @@ vk_draw(
 	simulation_free_entity_data(entity_data, entity_count);
 
 
-	vk->vk_table.vkCmdEndRenderPass(vk_frame->command_buffer);
+	vk->vk_table.vkCmdEndRenderPass(vk->vk_barrier->command_buffer);
 
-	vk_result = vk->vk_table.vkEndCommandBuffer(vk_frame->command_buffer);
+	vk_result = vk->vk_table.vkEndCommandBuffer(vk->vk_barrier->command_buffer);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
@@ -3312,7 +3332,7 @@ vk_draw(
 		.pWaitSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_IMAGE_AVAILABLE,
 		.pWaitDstStageMask = vk_wait_stages,
 		.commandBufferCount = 1,
-		.pCommandBuffers = &vk_frame->command_buffer,
+		.pCommandBuffers = &vk->vk_barrier->command_buffer,
 		.signalSemaphoreCount = 1,
 		.pSignalSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_RENDER_FINISHED
 	};
@@ -3333,16 +3353,19 @@ vk_draw(
 		.pResults = NULL
 	};
 
-	puts("presenting");
-
 	vk_result = vk->vk_table.vkQueuePresentKHR(vk->vk_queue, &vk_present_info);
-	if(vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR)
+	if(
+		vk_result == VK_ERROR_OUT_OF_DATE_KHR ||
+		vk_result == VK_SUBOPTIMAL_KHR ||
+		vk_load_bool(&vk->window_resize_bool)
+		)
 	{
 		vk_recreate_swapchain(vk);
-		return;
 	}
-
-	puts("done presenting");
+	else
+	{
+		hard_assert_eq(vk_result, VK_SUCCESS);
+	}
 
 	if(++vk->vk_barrier >= vk->vk_barriers + vk->vk_image_count)
 	{
@@ -3358,17 +3381,9 @@ vk_thread_fn(
 {
 	assert_not_null(vk);
 
-	while(atomic_load_explicit(&vk->vk_running, memory_order_acquire))
+	while(vk_load_bool(&vk->vk_running))
 	{
 		vk_draw(vk);
-
-		if(vk->vk_first_frame)
-		{
-			puts("first frame, showing window");
-			vk->vk_first_frame = false;
-			window_show(vk->window);
-			// window_toggle_fullscreen(vk->window);
-		}
 	}
 }
 
@@ -3381,7 +3396,6 @@ vk_init_thread(
 	assert_not_null(vk);
 
 	atomic_init(&vk->vk_running, true);
-	vk->vk_first_frame = true;
 
 	thread_data_t vk_thread_data =
 	{
@@ -3399,7 +3413,7 @@ vk_free_thread(
 {
 	assert_not_null(vk);
 
-	atomic_store_explicit(&vk->vk_running, false, memory_order_release);
+	vk_store_bool(&vk->vk_running, false);
 	thread_join(vk->vk_thread);
 
 	thread_free(&vk->vk_thread);
@@ -3437,7 +3451,7 @@ vk_free_vk(
 
 	vk_free_thread(vk);
 
-	vk->vk_table.vkDeviceWaitIdle(vk->vk_device);
+	vk_device_wait_idle(vk);
 
 	vk_free_staging_buffer(vk);
 
@@ -3495,6 +3509,8 @@ vk_window_init_once_fn(
 {
 	assert_not_null(vk);
 
+	window_show(vk->window);
+
 	vk_init_vk(vk);
 }
 
@@ -3507,9 +3523,9 @@ vk_window_resize_fn(
 {
 	assert_not_null(vk);
 
-	if(!vk->window_resize_bool)
+	if(!vk_load_bool(&vk->window_resize_bool))
 	{
-		vk->window_resize_bool = true;
+		vk_store_bool(&vk->window_resize_bool, true);
 		sync_cond_wake(&vk->window_resize_cond);
 	}
 }
@@ -3531,11 +3547,14 @@ vk_window_key_down_fn(
 				event_data->key == WINDOW_KEY_R
 				)
 			) ||
-		event_data->key == WINDOW_KEY_ESCAPE ||
-		event_data->key == WINDOW_KEY_F11
+		event_data->key == WINDOW_KEY_ESCAPE
 		)
 	{
 		window_close(vk->window);
+	}
+	else if(event_data->key == WINDOW_KEY_F11)
+	{
+		window_toggle_fullscreen(vk->window);
 	}
 }
 
@@ -3567,7 +3586,7 @@ vk_init_window(
 	vk->window = window_init();
 	window_manager_add(vk->window_manager, vk->window, "Thesis", NULL);
 
-	vk->window_resize_bool = false;
+	atomic_init(&vk->window_resize_bool, false);
 	sync_mtx_init(&vk->window_resize_mtx);
 	sync_cond_init(&vk->window_resize_cond);
 

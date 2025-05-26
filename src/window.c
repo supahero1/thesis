@@ -835,6 +835,8 @@ window_manager_add(
 		{
 			.extent =
 			{
+				.x = SDL_WINDOWPOS_CENTERED,
+				.y = SDL_WINDOWPOS_CENTERED,
 				.w = 1280,
 				.h = 720
 			},
@@ -1099,9 +1101,10 @@ window_manager_process_user_event(
 				window->info.old_extent.size.w, window->info.old_extent.size.h);
 			hard_assert_true(status, window_sdl_log_error());
 
-			status = SDL_SetWindowPosition(window->sdl_window,
+			/* Some protocols, like Wayland, don't allow positioning windows */
+			/*status = */SDL_SetWindowPosition(window->sdl_window,
 				window->info.old_extent.pos.x, window->info.old_extent.pos.y);
-			hard_assert_true(status, window_sdl_log_error());
+			/* hard_assert_true(status, window_sdl_log_error()); */
 		}
 
 		window_fullscreen_event_data_t event_data =
