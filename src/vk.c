@@ -32,6 +32,8 @@
 #include <signal.h>
 #include <string.h>
 
+#define VK_MAX_FRAMES 8
+
 
 typedef enum vk_image_type
 {
@@ -207,8 +209,10 @@ struct vk
 	uint32_t vk_material_count;
 	uint32_t vk_model_count;
 
-	vk_frame_t* vk_frames;
-	vk_barrier_t* vk_barriers;
+	vk_frame_t vk_frames[VK_MAX_FRAMES];
+	vk_barrier_t vk_barriers[VK_MAX_FRAMES];
+
+	VkSwapchainKHR vk_swapchain;
 };
 
 
@@ -2368,6 +2372,8 @@ vk_free_models(
 		}
 
 		alloc_free(vk_model->meshes, sizeof(*vk_model->meshes) * vk_model->mesh_count);
+
+		++vk_model;
 	}
 
 	alloc_free(vk->vk_models, sizeof(*vk->vk_models) * vk->vk_model_count);
@@ -2378,6 +2384,7 @@ vk_free_models(
 	while(vk_material < vk_material_end)
 	{
 		vk_free_image(vk, &vk_material->texture);
+		++vk_material;
 	}
 
 	alloc_free(vk->vk_materials, sizeof(*vk->vk_materials) * vk->vk_material_count);
@@ -2391,11 +2398,75 @@ vk_init_frames(
 {
 	assert_not_null(vk);
 
-	vk->vk_frames = alloc_malloc(sizeof(*vk->vk_frames) * vk->vk_image_count);
-	assert_not_null(vk->vk_frames);
+	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
 
-	vk->vk_barriers = alloc_malloc(sizeof(*vk->vk_barriers) * vk->vk_image_count);
-	assert_not_null(vk->vk_barriers);
+	VkCommandBufferAllocateInfo vk_command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vk->vk_command_pool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = vk->vk_image_count
+	};
+
+	VkResult vk_result = vk->vk_table.vkAllocateCommandBuffers(
+		vk->vk_device, &vk_command_buffer_info, vk_command_buffers);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_frame_t* vk_frame = vk->vk_frames;
+	vk_frame_t* vk_frame_end = vk_frame + vk->vk_image_count;
+
+	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
+
+	while(vk_frame < vk_frame_end)
+	{
+		vk_frame->command_buffer =*vk_command_buffer;
+
+		++vk_frame;
+		++vk_command_buffer;
+	}
+
+	VkSemaphoreCreateInfo vk_semaphore_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0
+	};
+
+	VkFenceCreateInfo vk_fence_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = VK_FENCE_CREATE_SIGNALED_BIT
+	};
+
+	vk_barrier_t* vk_barrier = vk->vk_barriers;
+	vk_barrier_t* vk_barrier_end = vk_barrier + vk->vk_image_count;
+
+	while(vk_barrier < vk_barrier_end)
+	{
+		VkSemaphore* vk_semaphore = vk_barrier->semaphores;
+		VkSemaphore* vk_semaphore_end = vk_semaphore + MACRO_ARRAY_LEN(vk_barrier->semaphores);
+
+		while(vk_semaphore < vk_semaphore_end)
+		{
+			vk_result = vk->vk_table.vkCreateSemaphore(
+				vk->vk_device, &vk_semaphore_info, NULL, vk_semaphore++);
+			hard_assert_eq(vk_result, VK_SUCCESS);
+		}
+
+		VkFence* vk_fence = vk_barrier->fences;
+		VkFence* vk_fence_end = vk_fence + MACRO_ARRAY_LEN(vk_barrier->fences);
+
+		while(vk_fence < vk_fence_end)
+		{
+			vk_result = vk->vk_table.vkCreateFence(
+				vk->vk_device, &vk_fence_info, NULL, vk_fence++);
+			hard_assert_eq(vk_result, VK_SUCCESS);
+		}
+
+		++vk_barrier;
+	}
 }
 
 
@@ -2406,8 +2477,208 @@ vk_free_frames(
 {
 	assert_not_null(vk);
 
-	alloc_free(vk->vk_barriers, sizeof(*vk->vk_barriers) * vk->vk_image_count);
-	alloc_free(vk->vk_frames, sizeof(*vk->vk_frames) * vk->vk_image_count);
+	vk_barrier_t* vk_barrier = vk->vk_barriers;
+	vk_barrier_t* vk_barrier_end = vk_barrier + vk->vk_image_count;
+
+	while(vk_barrier < vk_barrier_end)
+	{
+		VkFence* vk_fence = vk_barrier->fences;
+		VkFence* vk_fence_end = vk_fence + MACRO_ARRAY_LEN(vk_barrier->fences);
+
+		while(vk_fence < vk_fence_end)
+		{
+			vk->vk_table.vkDestroyFence(vk->vk_device, *vk_fence, NULL);
+			++vk_fence;
+		}
+
+		VkSemaphore* vk_semaphore = vk_barrier->semaphores;
+		VkSemaphore* vk_semaphore_end = vk_semaphore + MACRO_ARRAY_LEN(vk_barrier->semaphores);
+
+		while(vk_semaphore < vk_semaphore_end)
+		{
+			vk->vk_table.vkDestroySemaphore(vk->vk_device, *vk_semaphore, NULL);
+			++vk_semaphore;
+		}
+
+		++vk_barrier;
+	}
+
+	vk_frame_t* vk_frame = vk->vk_frames;
+	vk_frame_t* vk_frame_end = vk_frame + vk->vk_image_count;
+
+	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
+	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
+
+	while(vk_frame < vk_frame_end)
+	{
+		*vk_command_buffer = vk_frame->command_buffer;
+
+		++vk_frame;
+		++vk_command_buffer;
+	}
+
+	vk->vk_table.vkFreeCommandBuffers(vk->vk_device,
+		vk->vk_command_pool, vk->vk_image_count, vk_command_buffers);
+}
+
+
+private void
+vk_free_swapchain(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk->vk_table.vkDestroySwapchainKHR(vk->vk_device, vk->vk_swapchain, NULL);
+}
+
+
+private void
+vk_init_swapchain(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkSwapchainCreateInfoKHR vk_swapchain_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+		.pNext = NULL,
+		.flags = 0,
+		.surface = vk->vk_surface,
+		.minImageCount = vk->vk_image_count,
+		.imageFormat = VK_FORMAT_B8G8R8A8_SRGB,
+		.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+		.imageExtent = vk->vk_extent,
+		.imageArrayLayers = 1,
+		.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL,
+		.preTransform = vk->vk_transform,
+		.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+		.presentMode = vk->vk_present_mode,
+		.clipped = VK_TRUE,
+		.oldSwapchain = vk->vk_swapchain
+	};
+
+	VkSwapchainKHR vk_swapchain;
+	VkResult vk_result = vk->vk_table.vkCreateSwapchainKHR(
+		vk->vk_device, &vk_swapchain_info, NULL, &vk_swapchain);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_free_swapchain(vk);
+	vk->vk_swapchain = vk_swapchain;
+}
+
+
+private void
+vk_init_framebuffers(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	uint32_t image_count;
+	VkResult vk_result = vk->vk_table.vkGetSwapchainImagesKHR(
+		vk->vk_device, vk->vk_swapchain, &image_count, NULL);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	assert_lt(image_count, VK_MAX_FRAMES);
+	assert_ge(image_count, vk->vk_image_count);
+	vk->vk_image_count = image_count;
+
+	VkImage vk_images[image_count];
+	vk_result = vk->vk_table.vkGetSwapchainImagesKHR(
+		vk->vk_device, vk->vk_swapchain, &image_count, vk_images);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
+	vk_frame_t* vk_frame = vk->vk_frames;
+	vk_frame_t* vk_frame_end = vk_frame + vk->vk_image_count;
+
+	VkImage* vk_image = vk_images;
+
+	while(vk_frame < vk_frame_end)
+	{
+		vk_frame->image = *vk_image;
+
+		VkImageViewCreateInfo vk_image_view_info =
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.image = vk_frame->image,
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = VK_FORMAT_B8G8R8A8_SRGB,
+			.components =
+			{
+				.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.a = VK_COMPONENT_SWIZZLE_IDENTITY
+			},
+			.subresourceRange =
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			}
+		};
+
+		vk_result = vk->vk_table.vkCreateImageView(
+			vk->vk_device, &vk_image_view_info, NULL, &vk_frame->image_view);
+		hard_assert_eq(vk_result, VK_SUCCESS);
+
+		VkImageView vk_attachments[] =
+		{
+			vk->vk_multisampled_image.view,
+			vk->vk_depth_image.view,
+			vk_frame->image_view
+		};
+
+		VkFramebufferCreateInfo vk_framebuffer_info =
+		{
+			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.renderPass = vk->vk_render_pass,
+			.attachmentCount = MACRO_ARRAY_LEN(vk_attachments),
+			.pAttachments = vk_attachments,
+			.width = vk->vk_extent.width,
+			.height = vk->vk_extent.height,
+			.layers = 1
+		};
+
+		vk_result = vk->vk_table.vkCreateFramebuffer(
+			vk->vk_device, &vk_framebuffer_info, NULL, &vk_frame->framebuffer);
+		hard_assert_eq(vk_result, VK_SUCCESS);
+
+		++vk_frame;
+		++vk_image;
+	}
+}
+
+
+private void
+vk_free_framebuffers(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk_frame_t* vk_frame = vk->vk_frames;
+	vk_frame_t* vk_frame_end = vk_frame + vk->vk_image_count;
+
+	while(vk_frame < vk_frame_end)
+	{
+		vk->vk_table.vkDestroyFramebuffer(vk->vk_device, vk_frame->framebuffer, NULL);
+		vk->vk_table.vkDestroyImageView(vk->vk_device, vk_frame->image_view, NULL);
+
+		++vk_frame;
+	}
 }
 
 
@@ -2425,6 +2696,8 @@ vk_init_vk(
 	vk_init_pipeline(vk);
 	vk_init_models(vk);
 	vk_init_frames(vk);
+	vk_init_swapchain(vk);
+	vk_init_framebuffers(vk);
 }
 
 
@@ -2435,6 +2708,12 @@ vk_free_vk(
 {
 	assert_not_null(vk);
 
+	vk->vk_table.vkDeviceWaitIdle(vk->vk_device);
+
+	vk_free_staging_buffer(vk);
+
+	vk_free_framebuffers(vk);
+	vk_free_swapchain(vk);
 	vk_free_frames(vk);
 	vk_free_models(vk);
 	vk_free_pipeline(vk);
