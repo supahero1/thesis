@@ -182,7 +182,7 @@ simulation_get_entity_data(
 	simulation_entity_data_t* data = alloc_malloc(
 		sizeof(*data) * simulation->entity_count
 		);
-	assert_not_null(data);
+	assert_ptr(data, sizeof(*data) * simulation->entity_count);
 
 	for(uint32_t i = 0; i < simulation->entity_count; ++i)
 	{
@@ -199,6 +199,40 @@ simulation_get_entity_data(
 	}
 
 	return data;
+}
+
+
+void
+simulation_free_entity_data(
+	simulation_entity_data_t* data,
+	uint32_t data_count
+	)
+{
+	alloc_free(data, sizeof(*data) * data_count);
+}
+
+
+simulation_transform_t
+simulation_get_transform(
+	simulation_t simulation,
+	float width,
+	float height
+	)
+{
+	assert_not_null(simulation);
+
+	simulation_transform_t transform;
+
+	glm_mat4_identity(transform.projection);
+	glm_perspective(simulation->camera.fov, width / height,
+		simulation->camera.near, simulation->camera.far, transform.projection);
+
+	glm_mat4_identity(transform.view);
+	glm_euler_xyz(simulation->camera.angle, transform.view);
+	glm_translate(transform.view, (vec3){ -simulation->camera.pos[0],
+		-simulation->camera.pos[1], -simulation->camera.pos[2] });
+
+	return transform;
 }
 
 

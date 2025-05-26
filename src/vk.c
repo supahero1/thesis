@@ -84,6 +84,8 @@ vk_vertex_data_t;
 typedef struct vk_instance_data
 {
 	mat4 transform;
+	vec4 diffuse;
+	vec4 ambient;
 }
 vk_instance_data_t;
 
@@ -93,7 +95,7 @@ typedef struct vk_material
 	vec4 diffuse;
 	vec4 ambient;
 
-	VkDescriptorSet vk_descriptor_set;
+	VkDescriptorSet descriptor_set;
 }
 vk_material_t;
 
@@ -119,6 +121,9 @@ typedef struct vk_model
 {
 	vk_mesh_t* meshes;
 	uint32_t mesh_count;
+
+	VkCommandBuffer command_buffer;
+	bool recorded;
 }
 vk_model_t;
 
@@ -197,6 +202,8 @@ struct vk
 	VkPhysicalDeviceMemoryProperties vk_memory_properties;
 
 	VkExtent2D vk_extent;
+	VkViewport vk_viewport;
+	VkRect2D vk_scissor;
 	uint32_t vk_image_count;
 	VkSurfaceTransformFlagBitsKHR vk_transform;
 	VkPresentModeKHR vk_present_mode;
@@ -223,6 +230,9 @@ struct vk
 	VkBuffer vk_instance_buffer;
 	VkDeviceMemory vk_instance_memory;
 
+	VkBuffer vk_indirect_buffer;
+	VkDeviceMemory vk_indirect_memory;
+
 	vk_material_t* vk_materials;
 	vk_model_t* vk_models;
 	uint32_t vk_material_count;
@@ -233,6 +243,8 @@ struct vk
 	vk_barrier_t* vk_barrier;
 
 	VkSwapchainKHR vk_swapchain;
+
+	VkCommandBuffer vk_prelude_command_buffer;
 };
 
 
@@ -253,6 +265,7 @@ private const char* vk_instance_layers[] =
 private const char* vk_device_extensions[] =
 {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+	VK_KHR_MAINTENANCE_7_EXTENSION_NAME,
 };
 
 private const char* vk_device_layers[] =
@@ -504,7 +517,7 @@ vk_init_instance(
 		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		.pNext = NULL,
 		.pApplicationName = "Thesis",
-		.apiVersion = VK_API_VERSION_1_0
+		.apiVersion = VK_API_VERSION_1_1
 	};
 
 	VkInstanceCreateInfo vk_instance_info =
@@ -617,10 +630,29 @@ vk_get_device_features(
 	vk_device_score* device_score
 	)
 {
-	VkPhysicalDeviceFeatures features;
-	vkGetPhysicalDeviceFeatures(device, &features);
+	VkPhysicalDeviceMaintenance7FeaturesKHR vk_device_maintenance_7_features =
+	{
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR,
+		.pNext = NULL,
+		.maintenance7 = VK_FALSE
+	};
 
-	if(!features.samplerAnisotropy)
+	VkPhysicalDeviceFeatures2 vk_device_features_2 =
+	{
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+		.pNext = &vk_device_maintenance_7_features,
+		.features = {0}
+	};
+
+	vkGetPhysicalDeviceFeatures2(device, &vk_device_features_2);
+
+	if(!vk_device_features_2.features.samplerAnisotropy)
+	{
+		hard_assert_log();
+		return false;
+	}
+
+	if(!vk_device_maintenance_7_features.maintenance7)
 	{
 		hard_assert_log();
 		return false;
@@ -1036,6 +1068,24 @@ vk_get_extent(
 		.width = width,
 		.height = height
 	};
+
+	vk->vk_viewport =
+	(VkViewport)
+	{
+		.x = 0.0f,
+		.y = 0.0f,
+		.width = vk->vk_extent.width,
+		.height = vk->vk_extent.height,
+		.minDepth = 0.0f,
+		.maxDepth = 1.0f
+	};
+
+	vk->vk_scissor =
+	(VkRect2D)
+	{
+		.offset = {0, 0},
+		.extent = vk->vk_extent
+	};
 }
 
 
@@ -1102,10 +1152,17 @@ vk_init_device(
 		.samplerAnisotropy = VK_TRUE
 	};
 
+	VkPhysicalDeviceMaintenance7FeaturesKHR vk_device_maintenance_7_features =
+	{
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR,
+		.pNext = NULL,
+		.maintenance7 = VK_TRUE
+	};
+
 	VkDeviceCreateInfo vk_device_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-		.pNext = NULL,
+		.pNext = &vk_device_maintenance_7_features,
 		.flags = 0,
 		.queueCreateInfoCount = 1,
 		.pQueueCreateInfos = &vk_device_queue_info,
@@ -1430,6 +1487,23 @@ vk_init_index_buffer(
 
 	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 		VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		buffer, buffer_memory);
+}
+
+
+private void
+vk_init_indirect_buffer(
+	vk_t vk,
+	VkBuffer* buffer,
+	VkDeviceMemory* buffer_memory
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(buffer);
+	assert_not_null(buffer_memory);
+
+	vk_init_buffer(vk, sizeof(VkDrawIndirectCommand), VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 		buffer, buffer_memory);
 }
 
@@ -2056,6 +2130,18 @@ vk_init_pipeline(
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
 			.offset = offsetof(vk_instance_data_t, transform) + sizeof(vec4) * 3
+		},
+		{
+			.location = 7,
+			.binding = 1,
+			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+			.offset = offsetof(vk_instance_data_t, diffuse)
+		},
+		{
+			.location = 8,
+			.binding = 1,
+			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+			.offset = offsetof(vk_instance_data_t, ambient)
 		}
 	};
 
@@ -2333,6 +2419,9 @@ vk_init_models(
 		VK_MAX_INSTANCES, &vk->vk_instance_buffer, &vk->vk_instance_memory);
 
 
+	vk_init_indirect_buffer(vk, &vk->vk_indirect_buffer, &vk->vk_indirect_memory);
+
+
 	VkDescriptorSet vk_descriptor_sets[vk->vk_material_count];
 
 	VkDescriptorSetLayout* vk_descriptor_set_layouts = alloc_malloc(
@@ -2365,6 +2454,22 @@ vk_init_models(
 	alloc_free(vk_descriptor_set_layouts, sizeof(*vk_descriptor_set_layouts) * vk->vk_material_count);
 
 
+	VkCommandBuffer vk_command_buffers[vk->vk_model_count];
+
+	VkCommandBufferAllocateInfo vk_command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vk->vk_command_pool,
+		.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+		.commandBufferCount = vk->vk_model_count
+	};
+
+	vk_result = vk->vk_table.vkAllocateCommandBuffers(
+		vk->vk_device, &vk_command_buffer_info, vk_command_buffers);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
 	vk->vk_materials = alloc_malloc(sizeof(*vk->vk_materials) * vk->vk_material_count);
 	assert_ptr(vk->vk_materials, sizeof(*vk->vk_materials) * vk->vk_material_count);
 
@@ -2373,10 +2478,12 @@ vk_init_models(
 
 	vk_material_t* vk_material = vk->vk_materials;
 	vk_model_t* vk_model = vk->vk_models;
+	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
 
 	for(uint32_t i = 0; i < vk->vk_model_count; ++i)
 	{
 		model_t* model = models[i];
+
 
 		vk_model->meshes = alloc_malloc(sizeof(*vk_model->meshes) * model->mesh_count);
 		assert_ptr(vk_model->meshes, sizeof(*vk_model->meshes) * model->mesh_count);
@@ -2434,6 +2541,7 @@ vk_init_models(
 			++mesh;
 		}
 
+
 		material_t* material = model->materials;
 		material_t* material_end = material + model->material_count;
 
@@ -2486,6 +2594,8 @@ vk_init_models(
 				.pTexelBufferView = NULL
 			};
 
+			vk_material->descriptor_set = *vk_descriptor_set;
+
 			++vk_material;
 			++material;
 			++vk_descriptor_image;
@@ -2495,6 +2605,14 @@ vk_init_models(
 
 		vk->vk_table.vkUpdateDescriptorSets(vk->vk_device,
 			vk->vk_material_count, vk_descriptor_writes, 0, NULL);
+
+
+		vk_model->command_buffer = *vk_command_buffer;
+		vk_model->recorded = false;
+
+
+		++vk_model;
+		++vk_command_buffer;
 	}
 }
 
@@ -2505,6 +2623,9 @@ vk_free_models(
 	)
 {
 	assert_not_null(vk);
+
+	VkCommandBuffer vk_command_buffers[vk->vk_model_count];
+	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
 
 	vk_model_t* vk_model = vk->vk_models;
 	vk_model_t* vk_model_end = vk_model + vk->vk_model_count;
@@ -2527,8 +2648,14 @@ vk_free_models(
 
 		alloc_free(vk_model->meshes, sizeof(*vk_model->meshes) * vk_model->mesh_count);
 
+		*vk_command_buffer = vk_model->command_buffer;
+
 		++vk_model;
+		++vk_command_buffer;
 	}
+
+	vk->vk_table.vkFreeCommandBuffers(vk->vk_device,
+		vk->vk_command_pool, vk->vk_model_count, vk_command_buffers);
 
 	alloc_free(vk->vk_models, sizeof(*vk->vk_models) * vk->vk_model_count);
 
@@ -2543,11 +2670,130 @@ vk_free_models(
 
 	alloc_free(vk->vk_materials, sizeof(*vk->vk_materials) * vk->vk_material_count);
 
+	vk_free_buffer(vk, vk->vk_indirect_buffer, vk->vk_indirect_memory);
+
 	vk_free_buffer(vk, vk->vk_instance_buffer, vk->vk_instance_memory);
 	alloc_free(vk->vk_instance_data, sizeof(*vk->vk_instance_data) * VK_MAX_INSTANCES);
 
 	vk->vk_table.vkDestroyDescriptorPool(vk->vk_device, vk->vk_descriptor_pool, NULL);
 	vk->vk_table.vkDestroySampler(vk->vk_device, vk->vk_sampler, NULL);
+}
+
+
+private void
+vk_model_render_commands(
+	vk_t vk,
+	vk_model_t* vk_model
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(vk_model);
+
+	if(vk_model->recorded)
+	{
+		return;
+	}
+
+	vk_model->recorded = true;
+
+	VkCommandBufferInheritanceInfo vk_command_buffer_inheritance_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+		.pNext = NULL,
+		.renderPass = vk->vk_render_pass,
+		.subpass = 0,
+		.framebuffer = VK_NULL_HANDLE,
+		.occlusionQueryEnable = VK_FALSE,
+		.queryFlags = 0,
+		.pipelineStatistics = 0
+	};
+
+	VkCommandBufferBeginInfo vk_command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT |
+			VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT,
+		.pInheritanceInfo = &vk_command_buffer_inheritance_info
+	};
+
+	VkResult vk_result = vk->vk_table.vkBeginCommandBuffer(
+		vk_model->command_buffer, &vk_command_buffer_info);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_mesh_t* vk_mesh = vk_model->meshes;
+	vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
+
+	while(vk_mesh < vk_mesh_end)
+	{
+		vk->vk_table.vkCmdBindVertexBuffers(vk_model->command_buffer,
+			0, 1, &vk_mesh->vertex_buffer, (VkDeviceSize[]){0});
+
+		vk->vk_table.vkCmdBindIndexBuffer(vk_model->command_buffer,
+			vk_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+		vk->vk_table.vkCmdBindDescriptorSets(vk_model->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_pipeline_layout, 0, 1,
+			&vk->vk_materials[vk_mesh->material_idx].descriptor_set, 0, NULL);
+
+		vk->vk_table.vkCmdDrawIndirect(vk_model->command_buffer,
+			vk->vk_indirect_buffer, 0, 1, 0);
+
+		++vk_mesh;
+	}
+
+	vk_result = vk->vk_table.vkEndCommandBuffer(vk_model->command_buffer);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+}
+
+
+private void
+vk_free_swapchain(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk->vk_table.vkDestroySwapchainKHR(vk->vk_device, vk->vk_swapchain, NULL);
+}
+
+
+private void
+vk_init_swapchain(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkSwapchainCreateInfoKHR vk_swapchain_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+		.pNext = NULL,
+		.flags = 0,
+		.surface = vk->vk_surface,
+		.minImageCount = vk->vk_image_count,
+		.imageFormat = VK_FORMAT_B8G8R8A8_SRGB,
+		.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+		.imageExtent = vk->vk_extent,
+		.imageArrayLayers = 1,
+		.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL,
+		.preTransform = vk->vk_transform,
+		.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+		.presentMode = vk->vk_present_mode,
+		.clipped = VK_TRUE,
+		.oldSwapchain = vk->vk_swapchain
+	};
+
+	VkSwapchainKHR vk_swapchain;
+	VkResult vk_result = vk->vk_table.vkCreateSwapchainKHR(
+		vk->vk_device, &vk_swapchain_info, NULL, &vk_swapchain);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_free_swapchain(vk);
+	vk->vk_swapchain = vk_swapchain;
 }
 
 
@@ -2558,6 +2804,7 @@ vk_init_frames(
 {
 	assert_not_null(vk);
 
+	printf("vk_init_frames image_count %u\n", vk->vk_image_count);
 	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
 
 	VkCommandBufferAllocateInfo vk_command_buffer_info =
@@ -2685,56 +2932,6 @@ vk_free_frames(
 
 
 private void
-vk_free_swapchain(
-	vk_t vk
-	)
-{
-	assert_not_null(vk);
-
-	vk->vk_table.vkDestroySwapchainKHR(vk->vk_device, vk->vk_swapchain, NULL);
-}
-
-
-private void
-vk_init_swapchain(
-	vk_t vk
-	)
-{
-	assert_not_null(vk);
-
-	VkSwapchainCreateInfoKHR vk_swapchain_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-		.pNext = NULL,
-		.flags = 0,
-		.surface = vk->vk_surface,
-		.minImageCount = vk->vk_image_count,
-		.imageFormat = VK_FORMAT_B8G8R8A8_SRGB,
-		.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-		.imageExtent = vk->vk_extent,
-		.imageArrayLayers = 1,
-		.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-		.queueFamilyIndexCount = 0,
-		.pQueueFamilyIndices = NULL,
-		.preTransform = vk->vk_transform,
-		.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-		.presentMode = vk->vk_present_mode,
-		.clipped = VK_TRUE,
-		.oldSwapchain = vk->vk_swapchain
-	};
-
-	VkSwapchainKHR vk_swapchain;
-	VkResult vk_result = vk->vk_table.vkCreateSwapchainKHR(
-		vk->vk_device, &vk_swapchain_info, NULL, &vk_swapchain);
-	hard_assert_eq(vk_result, VK_SUCCESS);
-
-	vk_free_swapchain(vk);
-	vk->vk_swapchain = vk_swapchain;
-}
-
-
-private void
 vk_init_framebuffers(
 	vk_t vk
 	)
@@ -2748,6 +2945,13 @@ vk_init_framebuffers(
 
 	assert_lt(image_count, VK_MAX_FRAMES);
 	assert_ge(image_count, vk->vk_image_count);
+	printf("old image_count %u, new image_count %u\n", vk->vk_image_count, image_count);
+	if(vk->vk_image_count != image_count)
+	{
+		vk_free_frames(vk);
+		vk_init_frames(vk);
+	}
+
 	vk->vk_image_count = image_count;
 
 	VkImage vk_images[image_count];
@@ -2845,6 +3049,88 @@ vk_free_framebuffers(
 
 
 private void
+vk_record_prelude_command_buffer(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkResult vk_result = vk->vk_table.vkResetCommandBuffer(vk->vk_prelude_command_buffer, 0);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkCommandBufferInheritanceInfo vk_command_buffer_inheritance_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+		.pNext = NULL,
+		.renderPass = vk->vk_render_pass,
+		.subpass = 0,
+		.framebuffer = VK_NULL_HANDLE,
+		.occlusionQueryEnable = VK_FALSE,
+		.queryFlags = 0,
+		.pipelineStatistics = 0
+	};
+
+	VkCommandBufferBeginInfo vk_command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT |
+			VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT,
+		.pInheritanceInfo = &vk_command_buffer_inheritance_info
+	};
+
+	vk_result = vk->vk_table.vkBeginCommandBuffer(
+		vk->vk_prelude_command_buffer, &vk_command_buffer_info);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk->vk_table.vkCmdBindPipeline(vk->vk_prelude_command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_pipeline);
+
+	vk->vk_table.vkCmdSetViewport(vk->vk_prelude_command_buffer, 0, 1, &vk->vk_viewport);
+	vk->vk_table.vkCmdSetScissor(vk->vk_prelude_command_buffer, 0, 1, &vk->vk_scissor);
+
+	vk_result = vk->vk_table.vkEndCommandBuffer(vk->vk_prelude_command_buffer);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+}
+
+
+private void
+vk_init_prelude_command_buffer(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkCommandBufferAllocateInfo vk_command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vk->vk_command_pool,
+		.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+		.commandBufferCount = 1
+	};
+
+	VkResult vk_result = vk->vk_table.vkAllocateCommandBuffers(
+		vk->vk_device, &vk_command_buffer_info, &vk->vk_prelude_command_buffer);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_record_prelude_command_buffer(vk);
+}
+
+
+private void
+vk_free_prelude_command_buffer(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk->vk_table.vkFreeCommandBuffers(vk->vk_device,
+		vk->vk_command_pool, 1, &vk->vk_prelude_command_buffer);
+}
+
+
+private void
 vk_recreate_swapchain(
 	vk_t vk
 	)
@@ -2857,20 +3143,11 @@ vk_recreate_swapchain(
 	vk_get_extent(vk);
 	vk_init_images(vk);
 
+	vk_record_prelude_command_buffer(vk);
+
 	vk_free_framebuffers(vk);
 	vk_init_swapchain(vk);
 	vk_init_framebuffers(vk);
-}
-
-
-private void
-vk_record_commands(
-	vk_t vk
-	)
-{
-	assert_not_null(vk);
-
-
 }
 
 
@@ -2881,7 +3158,196 @@ vk_draw(
 {
 	assert_not_null(vk);
 
+	puts("waiting for fences");
 
+	VkResult vk_result = vk->vk_table.vkWaitForFences(vk->vk_device, 1,
+		vk->vk_barrier->fences + VK_BARRIER_FENCE_IN_FLIGHT, VK_TRUE, UINT64_MAX);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	puts("acquiring next image");
+
+	uint32_t image_idx;
+	vk_result = vk->vk_table.vkAcquireNextImageKHR(vk->vk_device, vk->vk_swapchain, UINT64_MAX,
+		vk->vk_barrier->semaphores[VK_BARRIER_SEMAPHORE_IMAGE_AVAILABLE], VK_NULL_HANDLE, &image_idx);
+	if(vk_result == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		vk_recreate_swapchain(vk);
+		return;
+	}
+
+	printf("acquired image %u\n", image_idx);
+
+	vk_result = vk->vk_table.vkResetFences(vk->vk_device, 1,
+		vk->vk_barrier->fences + VK_BARRIER_FENCE_IN_FLIGHT);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_frame_t* vk_frame = vk->vk_frames + image_idx;
+
+	printf("recording commands, barrier %lu\n", vk->vk_barrier - vk->vk_barriers);
+
+
+	VkClearValue vk_clear_values[] =
+	{
+		{
+			.color = {{0.0f, 0.0f, 0.0f, 1.0f}}
+		},
+		{
+			.depthStencil = { 1.0f, 0 }
+		}
+	};
+
+	vk_result = vk->vk_table.vkResetCommandBuffer(vk_frame->command_buffer, 0);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkCommandBufferBeginInfo vk_command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pInheritanceInfo = NULL
+	};
+
+	vk_result = vk->vk_table.vkBeginCommandBuffer(
+		vk_frame->command_buffer, &vk_command_buffer_info);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkRenderPassBeginInfo vk_render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = vk->vk_render_pass,
+		.framebuffer = vk_frame->framebuffer,
+		.renderArea =
+		{
+			.offset = {0, 0},
+			.extent = vk->vk_extent
+		},
+		.clearValueCount = MACRO_ARRAY_LEN(vk_clear_values),
+		.pClearValues = vk_clear_values
+	};
+
+	vk->vk_table.vkCmdBeginRenderPass(vk_frame->command_buffer,
+		&vk_render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE_AND_SECONDARY_COMMAND_BUFFERS_KHR);
+
+	vk->vk_table.vkCmdExecuteCommands(vk_frame->command_buffer,
+		1, &vk->vk_prelude_command_buffer);
+
+
+	simulation_transform_t transform = simulation_get_transform(
+		vk->simulation, vk->vk_extent.width, vk->vk_extent.height);
+	vk_constant_data_t vk_constant_data;
+	glm_mat4_copy(transform.projection, vk_constant_data.projection);
+	glm_mat4_copy(transform.view, vk_constant_data.view);
+
+	vk->vk_table.vkCmdPushConstants(
+		vk_frame->command_buffer, vk->vk_pipeline_layout,
+		VK_SHADER_STAGE_VERTEX_BIT, 0,
+		sizeof(vk_constant_data_t), &vk_constant_data);
+
+
+	uint32_t entity_count;
+	simulation_entity_data_t* entity_data =
+		simulation_get_entity_data(vk->simulation, &entity_count);
+
+	// simulation_entity_data_t* entity = entity_data;
+	// simulation_entity_data_t* entity_end = entity + entity_count;
+
+	// uint32_t* vk_model_counts = alloc_calloc(sizeof(*vk_model_counts) * vk->vk_model_count);
+	// assert_ptr(vk_model_counts, sizeof(*vk_model_counts) * vk->vk_model_count);
+
+	// while(entity < entity_end)
+	// {
+	// 	++vk_model_counts[entity->model_idx];
+	// 	++entity;
+	// }
+
+	// uint32_t* vk_model_count = vk_model_counts;
+	// uint32_t* vk_model_count_end = vk_model_counts + vk->vk_model_count;
+
+	// vk_model_t* vk_model = vk->vk_models;
+
+	// while(vk_model_count < vk_model_count_end)
+	// {
+	// 	vk_instance_data_t* vk_instance = vk->vk_instance_data;
+
+	// 	entity = entity_data;
+
+	// 	while(entity < entity_end)
+	// 	{
+	// 		if(entity->model_idx == (vk_model_count - vk_model_counts))
+	// 		{
+
+
+	// 			glm_mat4_copy(entity->transform, vk_instance->transform);
+
+	// 			++vk_instance;
+	// 		}
+
+	// 		++entity;
+	// 	}
+
+	// 	++vk_model_count;
+	// 	++vk_model;
+	// }
+
+	simulation_free_entity_data(entity_data, entity_count);
+
+
+	vk->vk_table.vkCmdEndRenderPass(vk_frame->command_buffer);
+
+	vk_result = vk->vk_table.vkEndCommandBuffer(vk_frame->command_buffer);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
+	VkPipelineStageFlags vk_wait_stages[] =
+	{
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+	};
+
+	VkSubmitInfo vk_submit_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = NULL,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_IMAGE_AVAILABLE,
+		.pWaitDstStageMask = vk_wait_stages,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &vk_frame->command_buffer,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_RENDER_FINISHED
+	};
+
+	vk_result = vk->vk_table.vkQueueSubmit(vk->vk_queue, 1,
+		&vk_submit_info, vk->vk_barrier->fences[VK_BARRIER_FENCE_IN_FLIGHT]);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkPresentInfoKHR vk_present_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+		.pNext = NULL,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_RENDER_FINISHED,
+		.swapchainCount = 1,
+		.pSwapchains = &vk->vk_swapchain,
+		.pImageIndices = &image_idx,
+		.pResults = NULL
+	};
+
+	puts("presenting");
+
+	vk_result = vk->vk_table.vkQueuePresentKHR(vk->vk_queue, &vk_present_info);
+	if(vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR)
+	{
+		vk_recreate_swapchain(vk);
+		return;
+	}
+
+	puts("done presenting");
+
+	if(++vk->vk_barrier >= vk->vk_barriers + vk->vk_image_count)
+	{
+		vk->vk_barrier = vk->vk_barriers;
+	}
 }
 
 
@@ -2898,8 +3364,10 @@ vk_thread_fn(
 
 		if(vk->vk_first_frame)
 		{
+			puts("first frame, showing window");
 			vk->vk_first_frame = false;
 			window_show(vk->window);
+			// window_toggle_fullscreen(vk->window);
 		}
 	}
 }
@@ -2951,9 +3419,10 @@ vk_init_vk(
 	vk_init_images(vk);
 	vk_init_pipeline(vk);
 	vk_init_models(vk);
-	vk_init_frames(vk);
 	vk_init_swapchain(vk);
+	vk_init_frames(vk);
 	vk_init_framebuffers(vk);
+	vk_init_prelude_command_buffer(vk);
 
 	vk_init_thread(vk);
 }
@@ -2972,9 +3441,10 @@ vk_free_vk(
 
 	vk_free_staging_buffer(vk);
 
+	vk_free_prelude_command_buffer(vk);
 	vk_free_framebuffers(vk);
-	vk_free_swapchain(vk);
 	vk_free_frames(vk);
+	vk_free_swapchain(vk);
 	vk_free_models(vk);
 	vk_free_pipeline(vk);
 	vk_free_images(vk);

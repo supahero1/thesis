@@ -67,6 +67,13 @@ typedef struct simulation_entity_data
 }
 simulation_entity_data_t;
 
+typedef struct simulation_transform
+{
+	mat4 projection;
+	mat4 view;
+}
+simulation_transform_t;
+
 
 extern simulation_t
 simulation_init(
@@ -97,6 +104,21 @@ extern simulation_entity_data_t*
 simulation_get_entity_data(
 	simulation_t simulation,
 	uint32_t* data_count
+	);
+
+
+extern void
+simulation_free_entity_data(
+	simulation_entity_data_t* data,
+	uint32_t data_count
+	);
+
+
+extern simulation_transform_t
+simulation_get_transform(
+	simulation_t simulation,
+	float width,
+	float height
 	);
 
 
