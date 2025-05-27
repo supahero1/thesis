@@ -20,6 +20,8 @@ layout(push_constant) uniform Constants
 {
 	mat4 projection;
 	mat4 view;
+	vec4 ambient;
+	vec4 diffuse;
 }
 consts;
 
@@ -28,14 +30,10 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inCoords;
 
 layout(location = 3) in mat4 inTransform;
-layout(location = 7) in vec4 inAmbient;
-layout(location = 8) in vec4 inDiffuse;
 
 layout(location = 0) out vec3 outPosition;
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec2 outCoords;
-layout(location = 3) out vec4 outAmbient;
-layout(location = 4) out vec4 outDiffuse;
 
 void
 main()
@@ -46,6 +44,4 @@ main()
     outPosition = worldPos.xyz;
     outNormal = mat3(inTransform) * inNormal;
     outCoords = inCoords;
-	outAmbient = inAmbient;
-	outDiffuse = inDiffuse;
 }

@@ -70,6 +70,8 @@ typedef struct vk_constant_data
 {
 	mat4 projection;
 	mat4 view;
+	vec4 diffuse;
+	vec4 ambient;
 }
 vk_constant_data_t;
 
@@ -84,8 +86,6 @@ vk_vertex_data_t;
 typedef struct vk_instance_data
 {
 	mat4 transform;
-	vec4 diffuse;
-	vec4 ambient;
 }
 vk_instance_data_t;
 
@@ -102,6 +102,8 @@ vk_material_t;
 typedef struct vk_mesh
 {
 	uint32_t material_idx;
+	uint32_t vertex_count;
+	uint32_t index_count;
 
 	VkBuffer vertex_buffer;
 	VkDeviceMemory vertex_memory;
@@ -115,6 +117,9 @@ typedef struct vk_model
 {
 	vk_mesh_t* meshes;
 	uint32_t mesh_count;
+
+	VkBuffer instance_buffer;
+	VkDeviceMemory instance_memory;
 }
 vk_model_t;
 
@@ -215,10 +220,6 @@ struct vk
 
 	VkSampler vk_sampler;
 	VkDescriptorPool vk_descriptor_pool;
-
-	vk_instance_data_t* vk_instance_data;
-	VkBuffer vk_instance_buffer;
-	VkDeviceMemory vk_instance_memory;
 
 	vk_material_t* vk_materials;
 	vk_model_t* vk_models;
@@ -2118,18 +2119,6 @@ vk_init_pipeline(
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
 			.offset = offsetof(vk_instance_data_t, transform) + sizeof(vec4) * 3
-		},
-		{
-			.location = 7,
-			.binding = 1,
-			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_instance_data_t, diffuse)
-		},
-		{
-			.location = 8,
-			.binding = 1,
-			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_instance_data_t, ambient)
 		}
 	};
 
@@ -2262,7 +2251,7 @@ vk_init_pipeline(
 	VkPushConstantRange vk_push_constants[] =
 	{
 		{
-			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 			.offset = 0,
 			.size = sizeof(vk_constant_data_t)
 		}
@@ -2400,13 +2389,6 @@ vk_init_models(
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
-	vk->vk_instance_data = alloc_malloc(sizeof(*vk->vk_instance_data) * VK_MAX_INSTANCES);
-	assert_not_null(vk->vk_instance_data);
-
-	vk_init_vertex_buffer(vk, sizeof(*vk->vk_instance_data) *
-		VK_MAX_INSTANCES, &vk->vk_instance_buffer, &vk->vk_instance_memory);
-
-
 	VkDescriptorSet vk_descriptor_sets[vk->vk_material_count];
 
 	VkDescriptorSetLayout* vk_descriptor_set_layouts = alloc_malloc(
@@ -2452,7 +2434,6 @@ vk_init_models(
 	{
 		model_t* model = models[i];
 
-
 		vk_model->meshes = alloc_malloc(sizeof(*vk_model->meshes) * model->mesh_count);
 		assert_ptr(vk_model->meshes, sizeof(*vk_model->meshes) * model->mesh_count);
 		vk_model->mesh_count = model->mesh_count;
@@ -2465,6 +2446,8 @@ vk_init_models(
 		while(mesh < mesh_end)
 		{
 			vk_mesh->material_idx = vk_material - vk->vk_materials + mesh->material_idx;
+			vk_mesh->vertex_count = mesh->vertex_count;
+			vk_mesh->index_count = mesh->index_count;
 
 			vk_vertex_data_t* vk_vertex_data = alloc_malloc(sizeof(*vk_vertex_data) * mesh->vertex_count);
 			assert_ptr(vk_vertex_data, sizeof(*vk_vertex_data) * mesh->vertex_count);
@@ -2569,6 +2552,11 @@ vk_init_models(
 		vk->vk_table.vkUpdateDescriptorSets(vk->vk_device,
 			vk->vk_material_count, vk_descriptor_writes, 0, NULL);
 
+
+		vk_init_vertex_buffer(vk, sizeof(vk_instance_data_t) *
+			VK_MAX_INSTANCES, &vk_model->instance_buffer, &vk_model->instance_memory);
+
+
 		++vk_model;
 	}
 }
@@ -2586,6 +2574,8 @@ vk_free_models(
 
 	while(vk_model < vk_model_end)
 	{
+		vk_free_buffer(vk, vk_model->instance_buffer, vk_model->instance_memory);
+
 		vk_mesh_t* vk_mesh = vk_model->meshes;
 		vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
 
@@ -2614,9 +2604,6 @@ vk_free_models(
 	}
 
 	alloc_free(vk->vk_materials, sizeof(*vk->vk_materials) * vk->vk_material_count);
-
-	vk_free_buffer(vk, vk->vk_instance_buffer, vk->vk_instance_memory);
-	alloc_free(vk->vk_instance_data, sizeof(*vk->vk_instance_data) * VK_MAX_INSTANCES);
 
 	vk->vk_table.vkDestroyDescriptorPool(vk->vk_device, vk->vk_descriptor_pool, NULL);
 	vk->vk_table.vkDestroySampler(vk->vk_device, vk->vk_sampler, NULL);
@@ -2970,7 +2957,7 @@ vk_draw(
 	VkClearValue vk_clear_values[] =
 	{
 		{
-			.color = {{0.2f, 0.1f, 0.5f, 1.0f}}
+			.color = {{0.1f, 0.05f, 0.4f, 1.0f}}
 		},
 		{
 			.depthStencil = { 1.0f, 0 }
@@ -3023,66 +3010,121 @@ vk_draw(
 	glm_mat4_copy(transform.projection, vk_constant_data.projection);
 	glm_mat4_copy(transform.view, vk_constant_data.view);
 
-	vk->vk_table.vkCmdPushConstants(
-		vk->vk_barrier->command_buffer, vk->vk_pipeline_layout,
-		VK_SHADER_STAGE_VERTEX_BIT, 0,
-		sizeof(vk_constant_data_t), &vk_constant_data);
-
 
 	uint32_t entity_count;
 	simulation_entity_data_t* entity_data =
 		simulation_get_entity_data(vk->simulation, &entity_count);
 
-	// simulation_entity_data_t* entity = entity_data;
-	// simulation_entity_data_t* entity_end = entity + entity_count;
+	simulation_entity_data_t* entity = entity_data;
+	simulation_entity_data_t* entity_end = entity + entity_count;
 
-	// uint32_t* vk_model_counts = alloc_calloc(sizeof(*vk_model_counts) * vk->vk_model_count);
-	// assert_ptr(vk_model_counts, sizeof(*vk_model_counts) * vk->vk_model_count);
+	typedef struct vk_entities_per_model
+	{
+		simulation_entity_data_t** entities;
+		uint32_t entities_used;
+		uint32_t entities_size;
+	}
+	vk_entities_per_model_t;
 
-	// while(entity < entity_end)
-	// {
-	// 	++vk_model_counts[entity->model_idx];
-	// 	++entity;
-	// }
+	vk_entities_per_model_t* vk_entity_data = alloc_calloc(sizeof(*vk_entity_data) * vk->vk_model_count);
+	assert_ptr(vk_entity_data, sizeof(*vk_entity_data) * vk->vk_model_count);
 
-	// uint32_t* vk_model_count = vk_model_counts;
-	// uint32_t* vk_model_count_end = vk_model_counts + vk->vk_model_count;
+	while(entity < entity_end)
+	{
+		vk_entities_per_model_t* vk_entities = vk_entity_data + entity->model_idx;
 
-	// vk_model_t* vk_model = vk->vk_models;
+		if(vk_entities->entities_used >= vk_entities->entities_size)
+		{
+			uint32_t new_size = (vk_entities->entities_size << 1) | 1;
 
-	// while(vk_model_count < vk_model_count_end)
-	// {
-	// 	vk_instance_data_t* vk_instance = vk->vk_instance_data;
+			vk_entities->entities = alloc_recalloc(vk_entities->entities,
+				sizeof(*vk_entities->entities) * vk_entities->entities_size,
+				sizeof(*vk_entities->entities) * new_size);
+			assert_ptr(vk_entities->entities, sizeof(*vk_entities->entities) * new_size);
 
-	// 	entity = entity_data;
+			vk_entities->entities_size = new_size;
+		}
 
-	// 	while(entity < entity_end)
-	// 	{
-	// 		if(entity->model_idx == (vk_model_count - vk_model_counts))
-	// 		{
+		vk_entities->entities[vk_entities->entities_used++] = entity;
 
+		++entity;
+	}
 
-	// 			glm_mat4_copy(entity->transform, vk_instance->transform);
+	vk_entities_per_model_t* vk_entities_per_model = vk_entity_data;
+	vk_entities_per_model_t* vk_entities_per_model_end =
+		vk_entities_per_model + vk->vk_model_count;
 
-	// 			++vk_instance;
-	// 		}
+	vk_model_t* vk_model = vk->vk_models;
 
-	// 		++entity;
-	// 	}
+	while(vk_entities_per_model < vk_entities_per_model_end)
+	{
+		if(vk_entities_per_model->entities_used != 0)
+		{
+			hard_assert_le(vk_entities_per_model->entities_used, VK_MAX_INSTANCES);
 
-	// 	++vk_model_count;
-	// 	++vk_model;
-	// }
+			simulation_entity_data_t** vk_entity = vk_entities_per_model->entities;
+			simulation_entity_data_t** vk_entity_end =
+				vk_entity + vk_entities_per_model->entities_used;
 
-		// vk->vk_table.vkCmdBindVertexBuffers(vk_model->command_buffer,
-		// 	0, 1, &vk_mesh->vertex_buffer, (VkDeviceSize[]){0});
+			uint64_t vk_instance_data_size =
+				sizeof(vk_instance_data_t) * vk_entities_per_model->entities_used;
+			vk_instance_data_t* vk_instance_data = alloc_malloc(vk_instance_data_size);
+			assert_ptr(vk_instance_data, vk_instance_data_size);
 
-		// vk->vk_table.vkCmdBindIndexBuffer(vk_model->command_buffer,
-		// 	vk_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+			vk_instance_data_t* vk_instance = vk_instance_data;
 
-		// vk->vk_table.vkCmdBindDescriptorSets(vk_model->command_buffer,
-		// 	VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_pipeline_layout, 0, 1,
-		// 	&vk->vk_materials[vk_mesh->material_idx].descriptor_set, 0, NULL);
+			while(vk_entity < vk_entity_end)
+			{
+				glm_mat4_copy((*vk_entity)->transform, vk_instance->transform);
+
+				++vk_entity;
+				++vk_instance;
+			}
+
+			vk_copy_to_buffer(vk, vk_model->instance_buffer, vk_instance_data, vk_instance_data_size);
+			alloc_free(vk_instance_data, vk_instance_data_size);
+
+			vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
+				1, 1, &vk_model->instance_buffer, (VkDeviceSize[]){0});
+
+			vk_mesh_t* vk_mesh = vk_model->meshes;
+			vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
+
+			while(vk_mesh < vk_mesh_end)
+			{
+				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].ambient, vk_constant_data.ambient);
+				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].diffuse, vk_constant_data.diffuse);
+
+				vk->vk_table.vkCmdPushConstants(
+					vk->vk_barrier->command_buffer, vk->vk_pipeline_layout,
+					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+					0, sizeof(vk_constant_data_t), &vk_constant_data);
+
+				vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
+					0, 1, &vk_mesh->vertex_buffer, (VkDeviceSize[]){0});
+
+				vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
+					vk_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+				vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+					VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_pipeline_layout, 0, 1,
+					&vk->vk_materials[vk_mesh->material_idx].descriptor_set, 0, NULL);
+
+				vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,
+					vk_mesh->index_count, vk_entities_per_model->entities_used, 0, 0, 0);
+
+				++vk_mesh;
+			}
+		}
+
+		alloc_free(vk_entities_per_model->entities,
+			sizeof(*vk_entities_per_model->entities) * vk_entities_per_model->entities_size);
+
+		++vk_entities_per_model;
+		++vk_model;
+	}
+
+	alloc_free(vk_entity_data, sizeof(*vk_entity_data) * vk->vk_model_count);
 
 	simulation_free_entity_data(entity_data, entity_count);
 
