@@ -247,6 +247,7 @@ typedef struct window_move_event_data
 	window_t window;
 	pair_t old_pos;
 	pair_t new_pos;
+	pair_t rel_pos;
 }
 window_move_event_data_t;
 
@@ -255,6 +256,7 @@ typedef struct window_resize_event_data
 	window_t window;
 	pair_t old_size;
 	pair_t new_size;
+	pair_t rel_size;
 }
 window_resize_event_data_t;
 
@@ -344,6 +346,7 @@ typedef struct window_mouse_move_event_data
 	window_t window;
 	pair_t old_pos;
 	pair_t new_pos;
+	pair_t rel_pos;
 }
 window_mouse_move_event_data_t;
 
@@ -357,11 +360,11 @@ window_mouse_scroll_event_data_t;
 
 typedef struct window_info
 {
-	half_extent_t old_extent;
 	half_extent_t extent;
 	pair_t mouse;
 
 	bool fullscreen;
+	bool rel_mouse_in_fullscreen;
 }
 window_info_t;
 
@@ -391,6 +394,7 @@ struct window_history
 {
 	half_extent_t extent;
 	bool fullscreen;
+	bool rel_mouse_in_fullscreen;
 };
 
 

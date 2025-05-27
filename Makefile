@@ -44,15 +44,22 @@ bin/shaders/ thesis/shaders/:
 
 .PHONY: clean
 clean:
-	$(RM) -r bin/
+	$(RM) -r bin/ thesis/
 
 
-bin/shaders/%.spv: shaders/%.glsl | bin/shaders/ thesis/shaders/
-	glslc -O -fshader-stage=$* $< -o $@
+SHADERS=$(wildcard shaders/*)
+BIN_SHADERS=$(SHADERS:shaders/%=bin/shaders/%.spv)
+
+bin/shaders/%.vert.spv: shaders/%.vert | bin/shaders/ thesis/shaders/
+	glslc -O -fshader-stage=vert $< -o $@
+	$(CP) $@ thesis/shaders/
+
+bin/shaders/%.frag.spv: shaders/%.frag | bin/shaders/ thesis/shaders/
+	glslc -O -fshader-stage=frag $< -o $@
 	$(CP) $@ thesis/shaders/
 
 .PHONY: shaders
-shaders: bin/shaders/vert.spv bin/shaders/frag.spv
+shaders: $(BIN_SHADERS)
 
 
 .PHONY: app
@@ -78,4 +85,5 @@ app: shaders
 		$(CP) /etc/openxr/1/wivrn_runtime.json ~/.config/openxr/1/active_runtime.json; \
 		runtime=wivrn; \
 	fi; \
-	cd thesis; $(VALGRIND_CALL) ./thesis_app --runtime=$$runtime
+	cd thesis; $(VALGRIND_CALL) ./thesis_app --runtime=$$runtime \
+		--vk_sample_shading=$(VK_SAMPLE_SHADING)

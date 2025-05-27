@@ -130,6 +130,20 @@ simulation_get_models(
 
 
 extern void
+simulation_modify_position(
+	simulation_t simulation,
+	vec3 pos
+	);
+
+
+extern void
+simulation_modify_angle(
+	simulation_t simulation,
+	vec3 angle
+	);
+
+
+extern void
 simulation_stop(
 	simulation_t simulation
 	);

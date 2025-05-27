@@ -57,6 +57,10 @@ simulation_init(
 	simulation_t simulation = alloc_malloc(sizeof(*simulation));
 	assert_not_null(simulation);
 
+	camera.fov = glm_rad(camera.fov);
+	camera.angle[0] = glm_rad(camera.angle[0]);
+	camera.angle[1] = glm_rad(camera.angle[1]);
+	camera.angle[2] = glm_rad(camera.angle[2]);
 	simulation->camera = camera;
 
 	simulation->models = NULL;
@@ -250,6 +254,39 @@ simulation_get_models(
 	}
 
 	return simulation->models;
+}
+
+
+void
+simulation_modify_position(
+	simulation_t simulation,
+	vec3 pos
+	)
+{
+	assert_not_null(simulation);
+
+	mat4 rotation;
+	glm_mat4_identity(rotation);
+
+	glm_rotate(rotation, simulation->camera.angle[1], (vec3){0.0f, 1.0f, 0.0f});
+	glm_rotate(rotation, simulation->camera.angle[0], (vec3){1.0f, 0.0f, 0.0f});
+
+	vec3 rotated_pos;
+	glm_mat4_mulv3(rotation, pos, 1.0f, rotated_pos);
+
+	glm_vec3_add(simulation->camera.pos, rotated_pos, simulation->camera.pos);
+}
+
+
+void
+simulation_modify_angle(
+	simulation_t simulation,
+	vec3 angle
+	)
+{
+	assert_not_null(simulation);
+
+	glm_vec3_add(simulation->camera.angle, angle, simulation->camera.angle);
 }
 
 

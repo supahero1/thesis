@@ -67,11 +67,11 @@ app_init(
 	app->simulation = simulation_init(
 		(simulation_camera_t)
 		{
-			.pos = { 0.0f, 0.0f, 0.0f },
-			.angle = { 0.0f, 0.0f, 0.0f },
-			.fov = 90.0f,
-			.near = 1.0f,
-			.far = 10000.0f
+			.pos = { -10000.0f, 4000.0f, -10000.0f },
+			.angle = { 0.0f, 180.0f, 180.0f },
+			.fov = 60.0f,
+			.near = 10.0f,
+			.far = 50000.0f
 		}
 		);
 

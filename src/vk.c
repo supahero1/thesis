@@ -19,6 +19,7 @@
 #include <thesis/debug.h>
 #include <thesis/shared.h>
 #include <thesis/window.h>
+#include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
 
@@ -30,11 +31,15 @@
 #include <stb/stb_image.h>
 
 #include <signal.h>
-#include <string.h>
 #include <stdatomic.h>
 
 #define VK_MAX_FRAMES 8
 #define VK_MAX_INSTANCES 128
+
+#define VK_WINDOW_WIDTH 1280
+#define VK_WINDOW_HEIGHT 720
+#define VK_WINDOW_SENSITIVITY 0.005f
+#define VK_WINDOW_SPEED 200.0f
 
 
 typedef enum vk_image_type
@@ -42,6 +47,7 @@ typedef enum vk_image_type
 	VK_IMAGE_TYPE_DEPTH_STENCIL,
 	VK_IMAGE_TYPE_MULTISAMPLED,
 	VK_IMAGE_TYPE_TEXTURE,
+	VK_IMAGE_TYPE_CUBE,
 	MACRO_ENUM_BITS(VK_IMAGE_TYPE)
 }
 vk_image_type_t;
@@ -160,7 +166,14 @@ struct vk
 
 	event_listener_t* window_close_once_listener;
 	event_listener_t* window_resize_listener;
+	event_listener_t* window_mouse_down_listener;
+	event_listener_t* window_mouse_up_listener;
+	event_listener_t* window_mouse_move_listener;
 	event_listener_t* window_key_down_listener;
+	event_listener_t* window_key_up_listener;
+
+	float window_default_width;
+	float window_default_height;
 
 	window_manager_t window_manager;
 	window_t window;
@@ -169,6 +182,10 @@ struct vk
 	_Atomic bool window_resize_bool;
 	sync_mtx_t window_resize_mtx;
 	sync_cond_t window_resize_cond;
+
+	bool window_mouse_holding;
+
+	bool vk_sample_shading;
 
 	thread_t vk_thread;
 	_Atomic bool vk_running;
@@ -186,6 +203,7 @@ struct vk
 
 	uint32_t vk_queue_id;
 	VkSampleCountFlagBits vk_samples;
+	float vk_anisotropy;
 	VkPhysicalDeviceLimits vk_limits;
 
 	VkPhysicalDevice vk_physical_device;
@@ -259,6 +277,36 @@ private const char* vk_device_layers[] =
 	"VK_LAYER_KHRONOS_validation"
 #endif
 };
+
+
+private void
+vk_init_options(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	options_set_default(global_options, "window_width", str_init_copy_cstr(MACRO_STR(VK_WINDOW_WIDTH)));
+	str_t window_width = options_get(global_options, "window_width");
+	float window_width_value = strtof(window_width->str, NULL);
+	if(window_width_value <= 0.0f)
+	{
+		window_width_value = VK_WINDOW_WIDTH;
+	}
+	vk->window_default_width = window_width_value;
+
+	options_set_default(global_options, "window_height", str_init_copy_cstr(MACRO_STR(VK_WINDOW_HEIGHT)));
+	str_t window_height = options_get(global_options, "window_height");
+	float window_height_value = strtof(window_height->str, NULL);
+	if(window_height_value <= 0.0f)
+	{
+		window_height_value = VK_WINDOW_HEIGHT;
+	}
+	vk->window_default_height = window_height_value;
+
+	str_t sample_shading = options_get(global_options, "vk_sample_shading");
+	vk->vk_sample_shading = sample_shading && str_case_cmp_len(sample_shading, "true", 4);
+}
 
 
 #ifndef NDEBUG
@@ -603,6 +651,7 @@ typedef struct vk_device_score
 	uint32_t score;
 	uint32_t queue_id;
 	VkSampleCountFlagBits samples;
+	float anisotropy;
 	VkPhysicalDeviceLimits limits;
 }
 vk_device_score;
@@ -619,6 +668,12 @@ vk_get_device_features(
 	vkGetPhysicalDeviceFeatures(device, &vk_features);
 
 	if(!vk_features.samplerAnisotropy)
+	{
+		hard_assert_log();
+		return false;
+	}
+
+	if(vk->vk_sample_shading && !vk_features.sampleRateShading)
 	{
 		hard_assert_log();
 		return false;
@@ -859,7 +914,7 @@ vk_get_device_swapchain(
 
 	while(1)
 	{
-		if(format->format == VK_FORMAT_B8G8R8A8_SRGB &&
+		if(format->format == VK_FORMAT_R8G8B8A8_SRGB &&
 			format->colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
 		{
 			return true;
@@ -913,9 +968,18 @@ vk_get_device_properties(
 
 	device_score->score += device_score->samples * 16;
 
+	device_score->anisotropy = properties.limits.maxSamplerAnisotropy;
+	device_score->score += device_score->anisotropy * 10;
+
 	if(properties.limits.maxImageDimension2D < 1024)
 	{
 		hard_assert_log("%u\n", properties.limits.maxImageDimension2D);
+		return false;
+	}
+
+	if(properties.limits.maxPushConstantsSize < sizeof(vk_constant_data_t))
+	{
+		hard_assert_log("%u\n", properties.limits.maxPushConstantsSize);
 		return false;
 	}
 
@@ -1143,6 +1207,7 @@ vk_init_device(
 
 	vk->vk_queue_id = best_device_score.queue_id;
 	vk->vk_samples = best_device_score.samples;
+	vk->vk_anisotropy = best_device_score.anisotropy;
 	vk->vk_limits = best_device_score.limits;
 
 	vk->vk_physical_device = best_device;
@@ -1162,7 +1227,8 @@ vk_init_device(
 
 	VkPhysicalDeviceFeatures vk_device_features =
 	{
-		.samplerAnisotropy = VK_TRUE
+		.samplerAnisotropy = VK_TRUE,
+		.sampleRateShading = vk->vk_sample_shading
 	};
 
 	VkDeviceCreateInfo vk_device_info =
@@ -1697,7 +1763,7 @@ vk_init_image(
 
 	case VK_IMAGE_TYPE_MULTISAMPLED:
 	{
-		image->format = VK_FORMAT_B8G8R8A8_SRGB;
+		image->format = VK_FORMAT_R8G8B8A8_SRGB;
 
 		image->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 		image->usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
@@ -1714,12 +1780,13 @@ vk_init_image(
 	{
 		int width;
 		int height;
+		stbi_set_flip_vertically_on_load(1);
 		data = stbi_load(image->path, &width, &height, NULL, 4);
 		hard_assert_not_null(data);
 
 		size = width * height * 4;
 
-		image->format = VK_FORMAT_B8G8R8A8_SRGB;
+		image->format = VK_FORMAT_R8G8B8A8_SRGB;
 
 		image->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 		image->usage = VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -1729,6 +1796,11 @@ vk_init_image(
 		image->width = width;
 		image->height = height;
 
+		break;
+	}
+
+	case VK_IMAGE_TYPE_CUBE:
+	{
 		break;
 	}
 
@@ -1817,7 +1889,7 @@ vk_init_image(
 		vk->vk_device, &vk_image_view_info, NULL, &image->view);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
-	if(image->type == VK_IMAGE_TYPE_TEXTURE)
+	if(image->type >= VK_IMAGE_TYPE_TEXTURE)
 	{
 		vk_transition_image_layout(vk, image,
 			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -2032,7 +2104,7 @@ vk_init_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/vert.spv"),
+			.module = vk_create_shader(vk, "shaders/mesh.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -2041,7 +2113,7 @@ vk_init_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = vk_create_shader(vk, "shaders/frag.spv"),
+			.module = vk_create_shader(vk, "shaders/mesh.frag.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		}
@@ -2176,8 +2248,8 @@ vk_init_pipeline(
 		.pNext = NULL,
 		.flags = 0,
 		.rasterizationSamples = vk->vk_samples,
-		.sampleShadingEnable = VK_FALSE,
-		.minSampleShading = 1.0f,
+		.sampleShadingEnable = vk->vk_sample_shading,
+		.minSampleShading = 0.2f,
 		.pSampleMask = NULL,
 		.alphaToCoverageEnable = VK_FALSE,
 		.alphaToOneEnable = VK_FALSE
@@ -2352,7 +2424,7 @@ vk_init_models(
 		.addressModeW = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
 		.mipLodBias = 0.0f,
 		.anisotropyEnable = VK_TRUE,
-		.maxAnisotropy = 8.0f,
+		.maxAnisotropy = vk->vk_anisotropy,
 		.compareEnable = VK_FALSE,
 		.compareOp = VK_COMPARE_OP_ALWAYS,
 		.minLod = 0.0f,
@@ -2635,7 +2707,7 @@ vk_init_swapchain(
 		.flags = 0,
 		.surface = vk->vk_surface,
 		.minImageCount = vk->vk_image_count,
-		.imageFormat = VK_FORMAT_B8G8R8A8_SRGB,
+		.imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
 		.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
 		.imageExtent = vk->vk_extent,
 		.imageArrayLayers = 1,
@@ -2822,7 +2894,7 @@ vk_init_framebuffers(
 			.flags = 0,
 			.image = vk_frame->image,
 			.viewType = VK_IMAGE_VIEW_TYPE_2D,
-			.format = VK_FORMAT_B8G8R8A8_SRGB,
+			.format = VK_FORMAT_R8G8B8A8_SRGB,
 			.components =
 			{
 				.r = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -2957,7 +3029,7 @@ vk_draw(
 	VkClearValue vk_clear_values[] =
 	{
 		{
-			.color = {{0.1f, 0.05f, 0.4f, 1.0f}}
+			.color = {{0.0f, 0.0f, 0.0f, 1.0f}}
 		},
 		{
 			.depthStencil = { 1.0f, 0 }
@@ -3307,7 +3379,11 @@ vk_window_free_once_fn(
 
 	window_event_table_t* table = window_get_event_table(vk->window);
 
+	event_target_del(&table->key_up_target, vk->window_key_up_listener);
 	event_target_del(&table->key_down_target, vk->window_key_down_listener);
+	event_target_del(&table->mouse_move_target, vk->window_mouse_move_listener);
+	event_target_del(&table->mouse_up_target, vk->window_mouse_up_listener);
+	event_target_del(&table->mouse_down_target, vk->window_mouse_down_listener);
 	event_target_del(&table->resize_target, vk->window_resize_listener);
 	event_target_del_once(&table->close_target, vk->window_close_once_listener);
 
@@ -3345,6 +3421,67 @@ vk_window_resize_fn(
 
 
 private void
+vk_window_mouse_down_fn(
+	vk_t vk,
+	window_mouse_down_event_data_t* event_data
+	)
+{
+	assert_not_null(vk);
+
+	if(event_data->button == WINDOW_BUTTON_LEFT && event_data->clicks == 1)
+	{
+		vk->window_mouse_holding = true;
+	}
+}
+
+
+private void
+vk_window_mouse_up_fn(
+	vk_t vk,
+	window_mouse_up_event_data_t* event_data
+	)
+{
+	assert_not_null(vk);
+
+	if(event_data->button == WINDOW_BUTTON_LEFT)
+	{
+		vk->window_mouse_holding = false;
+	}
+}
+
+
+private void
+vk_window_mouse_move_fn(
+	vk_t vk,
+	window_mouse_move_event_data_t* event_data
+	)
+{
+	assert_not_null(vk);
+
+	bool modify_angle = vk->window_mouse_holding;
+
+	if(!modify_angle)
+	{
+		window_info_t info;
+		window_get_info(vk->window, &info);
+
+		modify_angle = info.fullscreen && info.rel_mouse_in_fullscreen;
+	}
+
+	if(modify_angle)
+	{
+		vec3 angles =
+		{
+			event_data->rel_pos.y * VK_WINDOW_SENSITIVITY,
+			-event_data->rel_pos.x * VK_WINDOW_SENSITIVITY,
+			0.0f
+		};
+		simulation_modify_angle(vk->simulation, angles);
+	}
+}
+
+
+private void
 vk_window_key_down_fn(
 	vk_t vk,
 	window_key_down_event_data_t* event_data
@@ -3373,6 +3510,53 @@ vk_window_key_down_fn(
 
 
 private void
+vk_window_key_up_fn(
+	vk_t vk,
+	window_key_up_event_data_t* event_data
+	)
+{
+	assert_not_null(vk);
+
+	vec3 pos = {0.0f, 0.0f, 0.0f};
+
+
+	switch(event_data->key)
+	{
+
+	case WINDOW_KEY_W:
+	{
+		pos[2] = VK_WINDOW_SPEED;
+		break;
+	}
+
+	case WINDOW_KEY_S:
+	{
+		pos[2] = -VK_WINDOW_SPEED;
+		break;
+	}
+
+	case WINDOW_KEY_A:
+	{
+		pos[0] = VK_WINDOW_SPEED;
+		break;
+	}
+
+	case WINDOW_KEY_D:
+	{
+		pos[0] = -VK_WINDOW_SPEED;
+		break;
+	}
+
+	default: break;
+
+	}
+
+
+	simulation_modify_position(vk->simulation, pos);
+}
+
+
+private void
 vk_window_thread_fn(
 	vk_t vk
 	)
@@ -3397,11 +3581,26 @@ vk_init_window(
 
 	vk->window_manager = window_manager_init();
 	vk->window = window_init();
-	window_manager_add(vk->window_manager, vk->window, "Thesis", NULL);
+
+	window_history_t history =
+	{
+		.extent =
+		{
+			.x = -1,
+			.y = -1,
+			.w = vk->window_default_width,
+			.h = vk->window_default_height
+		},
+		.fullscreen = true,
+		.rel_mouse_in_fullscreen = true
+	};
+	window_manager_add(vk->window_manager, vk->window, "Thesis", &history);
 
 	atomic_init(&vk->window_resize_bool, false);
 	sync_mtx_init(&vk->window_resize_mtx);
 	sync_cond_init(&vk->window_resize_cond);
+
+	vk->window_mouse_holding = false;
 
 	window_event_table_t* table = window_get_event_table(vk->window);
 
@@ -3433,12 +3632,40 @@ vk_init_window(
 	};
 	vk->window_resize_listener = event_target_add(&table->resize_target, resize_data);
 
+	event_listener_data_t mouse_down_data =
+	{
+		.fn = (void*) vk_window_mouse_down_fn,
+		.data = vk
+	};
+	vk->window_mouse_down_listener = event_target_add(&table->mouse_down_target, mouse_down_data);
+
+	event_listener_data_t mouse_up_data =
+	{
+		.fn = (void*) vk_window_mouse_up_fn,
+		.data = vk
+	};
+	vk->window_mouse_up_listener = event_target_add(&table->mouse_up_target, mouse_up_data);
+
+	event_listener_data_t mouse_move_data =
+	{
+		.fn = (void*) vk_window_mouse_move_fn,
+		.data = vk
+	};
+	vk->window_mouse_move_listener = event_target_add(&table->mouse_move_target, mouse_move_data);
+
 	event_listener_data_t key_down_data =
 	{
 		.fn = (void*) vk_window_key_down_fn,
 		.data = vk
 	};
 	vk->window_key_down_listener = event_target_add(&table->key_down_target, key_down_data);
+
+	event_listener_data_t key_up_data =
+	{
+		.fn = (void*) vk_window_key_up_fn,
+		.data = vk
+	};
+	vk->window_key_up_listener = event_target_add(&table->key_up_target, key_up_data);
 
 	thread_data_t thread_data =
 	{
@@ -3491,6 +3718,8 @@ vk_init(
 
 	vk_t vk = alloc_calloc(sizeof(*vk));
 	assert_not_null(vk);
+
+	vk_init_options(vk);
 
 	vk->simulation = simulation;
 

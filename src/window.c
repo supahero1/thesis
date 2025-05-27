@@ -554,6 +554,13 @@ window_process_event(
 			.new_pos = {{ event->window.data1, event->window.data2 }}
 		};
 
+		event_data.rel_pos =
+		(pair_t)
+		{
+			.x = event_data.new_pos.x - event_data.old_pos.x,
+			.y = event_data.new_pos.y - event_data.old_pos.y
+		};
+
 		sync_mtx_lock(&window->mtx);
 			window->info.extent.pos = event_data.new_pos;
 		sync_mtx_unlock(&window->mtx);
@@ -570,6 +577,13 @@ window_process_event(
 			.window = window,
 			.old_size = window->info.extent.size,
 			.new_size = {{ event->window.data1, event->window.data2 }}
+		};
+
+		event_data.rel_size =
+		(pair_t)
+		{
+			.x = event_data.new_size.x - event_data.old_size.x,
+			.y = event_data.new_size.y - event_data.old_size.y
 		};
 
 		sync_mtx_lock(&window->mtx);
@@ -698,7 +712,8 @@ window_process_event(
 		{
 			.window = window,
 			.old_pos = window->info.mouse,
-			.new_pos = {{ event->motion.x, event->motion.y }}
+			.new_pos = {{ event->motion.x, event->motion.y }},
+			.rel_pos = {{ event->motion.xrel, event->motion.yrel }}
 		};
 
 		sync_mtx_lock(&window->mtx);
@@ -840,8 +855,19 @@ window_manager_add(
 				.w = 1280,
 				.h = 720
 			},
-			.fullscreen = false
+			.fullscreen = false,
+			.rel_mouse_in_fullscreen = false
 		};
+	}
+
+	if(history_copy->extent.x == -1)
+	{
+		history_copy->extent.x = SDL_WINDOWPOS_CENTERED;
+	}
+
+	if(history_copy->extent.y == -1)
+	{
+		history_copy->extent.y = SDL_WINDOWPOS_CENTERED;
 	}
 
 	*data =
@@ -956,6 +982,9 @@ window_manager_process_user_event(
 			SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, data->history->extent.h);
 		hard_assert_true(status, window_sdl_log_error());
 
+		status = SDL_SetBooleanProperty(sdl_props,
+			SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, data->history->fullscreen);
+
 		status = SDL_SetStringProperty(sdl_props,
 			SDL_PROP_WINDOW_CREATE_TITLE_STRING, data->title->str);
 		hard_assert_true(status, window_sdl_log_error());
@@ -973,6 +1002,14 @@ window_manager_process_user_event(
 
 		window->props = props;
 		window_set(window, "WINDOW_PTR", window);
+
+
+		if(data->history->rel_mouse_in_fullscreen)
+		{
+			status = SDL_SetWindowRelativeMouseMode(window->sdl_window, true);
+			hard_assert_true(status, window_sdl_log_error());
+		}
+
 
 		status = SDL_SetWindowMinimumSize(window->sdl_window, 480, 270);
 		hard_assert_true(status, window_sdl_log_error());
@@ -992,7 +1029,8 @@ window_manager_process_user_event(
 
 		window->info.mouse = (pair_t){{ 0, 0 }};
 
-		window->info.fullscreen = false;
+		window->info.fullscreen = data->history->fullscreen;
+		window->info.rel_mouse_in_fullscreen = data->history->rel_mouse_in_fullscreen;
 
 		window_init_event_data_t event_data =
 		{
@@ -1045,48 +1083,29 @@ window_manager_process_user_event(
 		window->info.fullscreen = !window->info.fullscreen;
 		sync_mtx_unlock(&window->mtx);
 
+		bool status;
+
 		if(window->info.fullscreen)
 		{
-			ipair_t old_size;
-			bool status = SDL_GetWindowSize(window->sdl_window, &old_size.w, &old_size.h);
-			hard_assert_true(status, window_sdl_log_error());
-
-			window->info.old_extent.size =
-			(pair_t)
+			if(window->info.rel_mouse_in_fullscreen)
 			{
-				.w = old_size.w,
-				.h = old_size.h
-			};
-
-
-			ipair_t old_pos;
-			status = SDL_GetWindowPosition(window->sdl_window, &old_pos.x, &old_pos.y);
-			hard_assert_true(status, window_sdl_log_error());
-
-			window->info.old_extent.pos =
-			(pair_t)
-			{
-				.x = old_pos.x,
-				.y = old_pos.y
-			};
-
+				status = SDL_SetWindowRelativeMouseMode(window->sdl_window, true);
+				hard_assert_true(status, window_sdl_log_error());
+			}
 
 			status = SDL_SetWindowFullscreen(window->sdl_window, true);
 			hard_assert_true(status, window_sdl_log_error());
 		}
 		else
 		{
-			bool status = SDL_SetWindowFullscreen(window->sdl_window, false);
+			status = SDL_SetWindowFullscreen(window->sdl_window, false);
 			hard_assert_true(status, window_sdl_log_error());
 
-			status = SDL_SetWindowSize(window->sdl_window,
-				window->info.old_extent.size.w, window->info.old_extent.size.h);
-			hard_assert_true(status, window_sdl_log_error());
-
-			/* Some protocols, like Wayland, don't allow positioning windows */
-			/*status = */SDL_SetWindowPosition(window->sdl_window,
-				window->info.old_extent.pos.x, window->info.old_extent.pos.y);
-			/* hard_assert_true(status, window_sdl_log_error()); */
+			if(window->info.rel_mouse_in_fullscreen)
+			{
+				status = SDL_SetWindowRelativeMouseMode(window->sdl_window, false);
+				hard_assert_true(status, window_sdl_log_error());
+			}
 		}
 
 		window_fullscreen_event_data_t event_data =
