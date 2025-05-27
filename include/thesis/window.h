@@ -106,7 +106,6 @@ typedef struct window_history window_history_t;
 typedef enum window_user_event : uint32_t
 {
 	WINDOW_USER_EVENT_WINDOW_INIT,
-	WINDOW_USER_EVENT_WINDOW_FREE,
 	WINDOW_USER_EVENT_WINDOW_CLOSE,
 	WINDOW_USER_EVENT_WINDOW_FULLSCREEN,
 	WINDOW_USER_EVENT_SET_CURSOR,

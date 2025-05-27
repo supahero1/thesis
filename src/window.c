@@ -1007,9 +1007,9 @@ window_manager_process_user_event(
 		break;
 	}
 
-	case WINDOW_USER_EVENT_WINDOW_FREE:
+	case WINDOW_USER_EVENT_WINDOW_CLOSE:
 	{
-		window_user_event_window_free_data_t* data = event_data;
+		window_user_event_window_close_data_t* data = event_data;
 
 		if(window->prev)
 		{
@@ -1030,25 +1030,7 @@ window_manager_process_user_event(
 			window_manager_stop_running(manager);
 		}
 
-		alloc_free(data, sizeof(*data));
-
-		break;
-	}
-
-	case WINDOW_USER_EVENT_WINDOW_CLOSE:
-	{
-		window_user_event_window_close_data_t* data = event_data;
-
 		window_free(window);
-
-		window_user_event_window_free_data_t* free_data = alloc_malloc(sizeof(*free_data));
-		assert_ptr(free_data, sizeof(*free_data));
-
-		*free_data =
-		(window_user_event_window_free_data_t)
-		{
-		};
-		window_push_event(window, WINDOW_USER_EVENT_WINDOW_FREE, free_data);
 
 		alloc_free(data, sizeof(*data));
 
