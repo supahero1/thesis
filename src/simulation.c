@@ -287,6 +287,7 @@ simulation_modify_angle(
 	assert_not_null(simulation);
 
 	glm_vec3_add(simulation->camera.angle, angle, simulation->camera.angle);
+	simulation->camera.angle[0] = glm_clamp(simulation->camera.angle[0], -M_PI_2, M_PI_2);
 }
 
 
