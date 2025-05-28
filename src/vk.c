@@ -15,6 +15,7 @@
  */
 
 #include <thesis/vk.h>
+#include <thesis/stb.h>
 #include <thesis/file.h>
 #include <thesis/debug.h>
 #include <thesis/shared.h>
@@ -27,10 +28,8 @@
 #include <vulkan/vulkan.h>
 #include <volk.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
-
 #include <signal.h>
+#include <string.h>
 #include <stdatomic.h>
 
 #define VK_MAX_FRAMES 8
@@ -58,6 +57,7 @@ typedef struct vk_image
 
 	uint32_t width;
 	uint32_t height;
+	uint32_t levels;
 
 	VkFormat format;
 	vk_image_type_t type;
@@ -186,6 +186,7 @@ struct vk
 	bool window_mouse_holding;
 
 	bool vk_sample_shading;
+	uint32_t vk_mipmap_levels;
 
 	thread_t vk_thread;
 	_Atomic bool vk_running;
@@ -202,6 +203,7 @@ struct vk
 	VkSurfaceCapabilitiesKHR vk_surface_capabilities;
 
 	uint32_t vk_queue_id;
+	VkFormat vk_format;
 	VkSampleCountFlagBits vk_samples;
 	float vk_anisotropy;
 	VkPhysicalDeviceLimits vk_limits;
@@ -286,26 +288,45 @@ vk_init_options(
 {
 	assert_not_null(vk);
 
-	options_set_default(global_options, "window_width", str_init_copy_cstr(MACRO_STR(VK_WINDOW_WIDTH)));
 	str_t window_width = options_get(global_options, "window_width");
-	float window_width_value = strtof(window_width->str, NULL);
-	if(window_width_value <= 0.0f)
+	if(window_width)
 	{
-		window_width_value = VK_WINDOW_WIDTH;
-	}
-	vk->window_default_width = window_width_value;
+		float window_width_value = strtof(window_width->str, NULL);
 
-	options_set_default(global_options, "window_height", str_init_copy_cstr(MACRO_STR(VK_WINDOW_HEIGHT)));
-	str_t window_height = options_get(global_options, "window_height");
-	float window_height_value = strtof(window_height->str, NULL);
-	if(window_height_value <= 0.0f)
-	{
-		window_height_value = VK_WINDOW_HEIGHT;
+		if(window_width_value <= 0.0f)
+		{
+			window_width_value = VK_WINDOW_WIDTH;
+		}
+
+		vk->window_default_width = window_width_value;
 	}
-	vk->window_default_height = window_height_value;
+	else
+	{
+		vk->window_default_width = VK_WINDOW_WIDTH;
+	}
+
+	str_t window_height = options_get(global_options, "window_height");
+	if(window_height)
+	{
+		float window_height_value = strtof(window_height->str, NULL);
+
+		if(window_height_value <= 0.0f)
+		{
+			window_height_value = VK_WINDOW_HEIGHT;
+		}
+
+		vk->window_default_height = window_height_value;
+	}
+	else
+	{
+		vk->window_default_height = VK_WINDOW_HEIGHT;
+	}
 
 	str_t sample_shading = options_get(global_options, "vk_sample_shading");
 	vk->vk_sample_shading = sample_shading && str_case_cmp_len(sample_shading, "true", 4);
+
+	str_t mipmap_levels = options_get(global_options, "vk_mipmap_levels");
+	vk->vk_mipmap_levels = mipmap_levels ? strtoul(mipmap_levels->str, NULL, 10) : 2;
 }
 
 
@@ -650,18 +671,19 @@ typedef struct vk_device_score
 {
 	uint32_t score;
 	uint32_t queue_id;
+	VkFormat format;
 	VkSampleCountFlagBits samples;
 	float anisotropy;
 	VkPhysicalDeviceLimits limits;
 }
-vk_device_score;
+vk_device_score_t;
 
 
 private bool
 vk_get_device_features(
 	vk_t vk,
 	VkPhysicalDevice device,
-	vk_device_score* device_score
+	vk_device_score_t* device_score
 	)
 {
 	VkPhysicalDeviceFeatures vk_features;
@@ -679,6 +701,22 @@ vk_get_device_features(
 		return false;
 	}
 
+	VkFormatProperties vk_format_properties;
+	vkGetPhysicalDeviceFormatProperties(device,
+		VK_FORMAT_R8G8B8A8_SRGB, &vk_format_properties);
+
+	if(
+		vk->vk_mipmap_levels &&
+		!(
+			vk_format_properties.optimalTilingFeatures &
+				VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT
+			)
+		)
+	{
+		hard_assert_log();
+		return false;
+	}
+
 	return true;
 }
 
@@ -687,7 +725,7 @@ private bool
 vk_get_device_queues(
 	vk_t vk,
 	VkPhysicalDevice device,
-	vk_device_score* device_score
+	vk_device_score_t* device_score
 	)
 {
 	uint32_t queue_count;
@@ -729,7 +767,7 @@ private bool
 vk_get_device_extensions(
 	vk_t vk,
 	VkPhysicalDevice device,
-	vk_device_score* device_score
+	vk_device_score_t* device_score
 	)
 {
 	if(MACRO_ARRAY_LEN(vk_device_extensions) == 0)
@@ -811,7 +849,7 @@ private bool
 vk_get_device_layers(
 	vk_t vk,
 	VkPhysicalDevice device,
-	vk_device_score* device_score
+	vk_device_score_t* device_score
 	)
 {
 	if(MACRO_ARRAY_LEN(vk_device_layers) == 0)
@@ -888,7 +926,7 @@ private bool
 vk_get_device_swapchain(
 	vk_t vk,
 	VkPhysicalDevice device,
-	vk_device_score* device_score
+	vk_device_score_t* device_score
 	)
 {
 	uint32_t format_count;
@@ -914,9 +952,15 @@ vk_get_device_swapchain(
 
 	while(1)
 	{
-		if(format->format == VK_FORMAT_R8G8B8A8_SRGB &&
-			format->colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+		if(
+			(
+				format->format == VK_FORMAT_R8G8B8A8_SRGB ||
+				format->format == VK_FORMAT_B8G8R8A8_SRGB
+				) &&
+			format->colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+			)
 		{
+			device_score->format = format->format;
 			return true;
 		}
 
@@ -933,7 +977,7 @@ private bool
 vk_get_device_properties(
 	vk_t vk,
 	VkPhysicalDevice device,
-	vk_device_score* device_score
+	vk_device_score_t* device_score
 	)
 {
 	VkPhysicalDeviceProperties properties;
@@ -996,7 +1040,7 @@ vk_get_device_properties(
 }
 
 
-private vk_device_score
+private vk_device_score_t
 vk_get_device_score(
 	vk_t vk,
 	VkPhysicalDevice device
@@ -1005,7 +1049,7 @@ vk_get_device_score(
 	assert_not_null(vk);
 	assert_not_null(device);
 
-	vk_device_score device_score = {0};
+	vk_device_score_t device_score = {0};
 
 	if(!vk_get_device_extensions(vk, device, &device_score))
 	{
@@ -1189,11 +1233,11 @@ vk_init_device(
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	VkPhysicalDevice best_device = NULL;
-	vk_device_score best_device_score = {0};
+	vk_device_score_t best_device_score = {0};
 
 	do
 	{
-		vk_device_score this_device_score = vk_get_device_score(vk, *vk_physical_device);
+		vk_device_score_t this_device_score = vk_get_device_score(vk, *vk_physical_device);
 
 		if(this_device_score.score > best_device_score.score)
 		{
@@ -1206,6 +1250,7 @@ vk_init_device(
 	hard_assert_not_null(best_device);
 
 	vk->vk_queue_id = best_device_score.queue_id;
+	vk->vk_format = best_device_score.format;
 	vk->vk_samples = best_device_score.samples;
 	vk->vk_anisotropy = best_device_score.anisotropy;
 	vk->vk_limits = best_device_score.limits;
@@ -1668,6 +1713,101 @@ vk_copy_texture_to_image(
 
 
 private void
+vk_generate_texture_mipmaps(
+	vk_t vk,
+	vk_image_t* image
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(image);
+
+	vk_begin_command_buffer(vk);
+
+	VkImageMemoryBarrier vk_barrier =
+	{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.pNext = NULL,
+		.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+		.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+		.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = image->image,
+		.subresourceRange =
+		{
+			.aspectMask = image->aspect,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1
+		}
+	};
+
+	uint32_t mip_width = image->width;
+	uint32_t mip_height = image->height;
+
+	uint32_t i = 1;
+	while(1)
+	{
+		vk->vk_table.vkCmdPipelineBarrier(vk->vk_command_buffer,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			0, 0, NULL, 0, NULL, 1, &vk_barrier);
+
+		if(i == image->levels)
+		{
+			break;
+		}
+
+		++vk_barrier.subresourceRange.baseMipLevel;
+
+		uint32_t next_mip_width = MACRO_MAX(1, mip_width >> 1);
+		uint32_t next_mip_height = MACRO_MAX(1, mip_height >> 1);
+
+		VkImageBlit vk_blit =
+		{
+			.srcSubresource =
+			{
+				.aspectMask = image->aspect,
+				.mipLevel = i - 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+			.srcOffsets =
+			{
+				{0, 0, 0},
+				{mip_width, mip_height, 1}
+			},
+			.dstSubresource =
+			{
+				.aspectMask = image->aspect,
+				.mipLevel = i,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+			.dstOffsets =
+			{
+				{0, 0, 0},
+				{next_mip_width, next_mip_height, 1}
+			}
+		};
+
+		vk->vk_table.vkCmdBlitImage(vk->vk_command_buffer, image->image,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image->image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &vk_blit,
+			VK_FILTER_LINEAR);
+
+		mip_width = next_mip_width;
+		mip_height = next_mip_height;
+
+		++i;
+	}
+
+	vk_end_command_buffer(vk);
+}
+
+
+private void
 vk_transition_image_layout(
 	vk_t vk,
 	vk_image_t* image,
@@ -1687,11 +1827,28 @@ vk_transition_image_layout(
 	{
 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 		.pNext = NULL,
-		.srcAccessMask = 0,
-		.dstAccessMask = 0
+		.oldLayout = from,
+		.newLayout = to,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = image->image,
+		.subresourceRange =
+		{
+			.aspectMask = image->aspect,
+			.baseMipLevel = 0,
+			.levelCount = image->levels,
+			.baseArrayLayer = 0,
+			.layerCount = 1
+		}
 	};
 
-	if(from == VK_IMAGE_LAYOUT_UNDEFINED && to == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+	if(
+		from == VK_IMAGE_LAYOUT_UNDEFINED &&
+		(
+			to == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ||
+			to == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+			)
+		)
 	{
 		vk_barrier.srcAccessMask = 0;
 		vk_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1699,8 +1856,13 @@ vk_transition_image_layout(
 		src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 		dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 	}
-	else if(from == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
-		to == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	else if(
+		(
+			from == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ||
+			from == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+			) &&
+		to == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		)
 	{
 		vk_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 		vk_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -1712,17 +1874,6 @@ vk_transition_image_layout(
 	{
 		hard_assert_unreachable();
 	}
-
-	vk_barrier.oldLayout = from;
-	vk_barrier.newLayout = to;
-	vk_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	vk_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	vk_barrier.image = image->image;
-	vk_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	vk_barrier.subresourceRange.baseMipLevel = 0;
-	vk_barrier.subresourceRange.levelCount = 1;
-	vk_barrier.subresourceRange.baseArrayLayer = 0;
-	vk_barrier.subresourceRange.layerCount = 1;
 
 	vk->vk_table.vkCmdPipelineBarrier(vk->vk_command_buffer,
 		src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &vk_barrier);
@@ -1757,6 +1908,7 @@ vk_init_image(
 
 		image->width = vk->vk_extent.width;
 		image->height = vk->vk_extent.height;
+		image->levels = 1;
 
 		break;
 	}
@@ -1772,6 +1924,7 @@ vk_init_image(
 
 		image->width = vk->vk_extent.width;
 		image->height = vk->vk_extent.height;
+		image->levels = 1;
 
 		break;
 	}
@@ -1795,6 +1948,10 @@ vk_init_image(
 
 		image->width = width;
 		image->height = height;
+		image->levels = 1 + MACRO_MIN(
+			MACRO_LOG2(MACRO_MAX(width, height)),
+			vk->vk_mipmap_levels
+			);
 
 		break;
 	}
@@ -1806,6 +1963,12 @@ vk_init_image(
 
 	default: assert_unreachable();
 
+	}
+
+
+	if(image->levels > 1)
+	{
+		image->usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
 
 
@@ -1822,7 +1985,7 @@ vk_init_image(
 			image->height,
 			1
 		},
-		.mipLevels = 1,
+		.mipLevels = image->levels,
 		.arrayLayers = 1,
 		.samples = image->samples,
 		.tiling = VK_IMAGE_TILING_OPTIMAL,
@@ -1879,7 +2042,7 @@ vk_init_image(
 		{
 			.aspectMask = image->aspect,
 			.baseMipLevel = 0,
-			.levelCount = 1,
+			.levelCount = image->levels,
 			.baseArrayLayer = 0,
 			.layerCount = 1
 		}
@@ -1898,8 +2061,18 @@ vk_init_image(
 
 		stbi_image_free(data);
 
-		vk_transition_image_layout(vk, image,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		if(image->levels > 1)
+		{
+			vk_generate_texture_mipmaps(vk, image);
+
+			vk_transition_image_layout(vk, image,
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		}
+		else
+		{
+			vk_transition_image_layout(vk, image,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		}
 	}
 }
 
@@ -2422,13 +2595,13 @@ vk_init_models(
 		.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
 		.addressModeV = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
 		.addressModeW = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
-		.mipLodBias = 0.0f,
+		.mipLodBias = -0.1f,
 		.anisotropyEnable = VK_TRUE,
 		.maxAnisotropy = vk->vk_anisotropy,
 		.compareEnable = VK_FALSE,
 		.compareOp = VK_COMPARE_OP_ALWAYS,
 		.minLod = 0.0f,
-		.maxLod = 0.0f,
+		.maxLod = vk->vk_mipmap_levels,
 		.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
 		.unnormalizedCoordinates = VK_FALSE
 	};
@@ -2707,7 +2880,7 @@ vk_init_swapchain(
 		.flags = 0,
 		.surface = vk->vk_surface,
 		.minImageCount = vk->vk_image_count,
-		.imageFormat = VK_FORMAT_R8G8B8A8_SRGB,
+		.imageFormat = vk->vk_format,
 		.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
 		.imageExtent = vk->vk_extent,
 		.imageArrayLayers = 1,
@@ -2894,7 +3067,7 @@ vk_init_framebuffers(
 			.flags = 0,
 			.image = vk_frame->image,
 			.viewType = VK_IMAGE_VIEW_TYPE_2D,
-			.format = VK_FORMAT_R8G8B8A8_SRGB,
+			.format = vk->vk_format,
 			.components =
 			{
 				.r = VK_COMPONENT_SWIZZLE_IDENTITY,
