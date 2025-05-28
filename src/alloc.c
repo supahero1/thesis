@@ -1631,8 +1631,12 @@ alloc_free_h(
 	assert_not_null(handle, fprintf(stderr,
 		"Size 0 specified for non-empty pointer (you passed invalid parameters to alloc_free())\n"));
 
+	alloc_handle_impl_t* handle_impl = (void*) handle;
+	bool is_virtual = alloc_handle_is_virtual(handle_impl);
+
 	assert_eq((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(size), 0,
 		{
+			if(is_virtual) break;
 			char format[256];
 			snprintf(format, sizeof(format),
 				"Invalid pointer alignment, got ptr = %s and size = %s "
@@ -1665,8 +1669,13 @@ alloc_free_uh(
 	assert_not_null(handle, fprintf(stderr,
 		"Size 0 specified for non-empty pointer (you passed invalid parameters to alloc_free())\n"));
 
+	alloc_handle_impl_t* handle_impl = (void*) handle;
+	alloc_header_t* header = alloc_get_base_ptr(handle_impl, ptr);
+	bool is_virtual = alloc_handle_is_virtual(handle_impl);
+
 	assert_eq((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(size), 0,
 		{
+			if(is_virtual) break;
 			char format[256];
 			snprintf(format, sizeof(format),
 				"Invalid pointer alignment, got ptr = %s and size = %s "
@@ -1676,11 +1685,9 @@ alloc_free_uh(
 		}
 		);
 
-	alloc_handle_impl_t* handle_impl = (void*) handle;
-	alloc_header_t* header = alloc_get_base_ptr(handle_impl, ptr);
-
 	assert_eq(header->alloc_size, handle_impl->alloc_size,
 		{
+			if(is_virtual) break;
 			char format[256];
 			snprintf(format, sizeof(format),
 				"Mismatch between passed size %s and (next or equal power of 2) "
@@ -1690,8 +1697,7 @@ alloc_free_uh(
 		}
 		);
 
-	handle_impl->free_fn(handle_impl,
-		alloc_get_base_ptr(handle_impl, ptr), (void*) ptr, size);
+	handle_impl->free_fn(handle_impl, header, (void*) ptr, size);
 
 #ifdef ALLOC_VALGRIND
 	VALGRIND_FREELIKE_BLOCK(ptr, 0);

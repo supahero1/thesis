@@ -53,11 +53,13 @@ vk_image_type_t;
 
 typedef struct vk_image
 {
-	const char* path;
+	str_t path;
+	void* data;
 
 	uint32_t width;
 	uint32_t height;
 	uint32_t levels;
+	uint32_t layers;
 
 	VkFormat format;
 	vk_image_type_t type;
@@ -1222,7 +1224,7 @@ vk_get_extent(
 	vk->vk_scissor =
 	(VkRect2D)
 	{
-		.offset = {0, 0},
+		.offset = { 0, 0 },
 		.extent = vk->vk_extent
 	};
 }
@@ -1675,80 +1677,85 @@ vk_copy_to_buffer(
 
 
 private void
-vk_copy_texture_to_image_explicit(
+vk_copy_texture_to_image(
 	vk_t vk,
 	vk_image_t* image,
-	const void* data,
-	uint32_t width,
-	uint32_t height,
-	uint32_t level
+	uint32_t level,
+	uint32_t layer
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(image);
 
-	uint32_t size = width * height * 4;
-	assert_ptr(data, size);
+	uint32_t num_layers;
+	if(layer == -1)
+	{
+		num_layers = image->layers;
+		layer = 0;
+	}
+	else
+	{
+		num_layers = 1;
+	}
+
+	uint32_t width = MACRO_MAX(1, image->width >> level);
+	uint32_t height = MACRO_MAX(1, image->height >> level);
+	uint32_t layer_size = width * height * 4;
+	uint32_t total_size = layer_size * num_layers;
+	assert_ptr(image->data, total_size);
 
 	vk_begin_command_buffer(vk);
 
 	vk_free_staging_buffer(vk);
-	vk_init_staging_buffer(vk, size);
+	vk_init_staging_buffer(vk, total_size);
 
 	void* mapped_data;
 	VkResult vk_result = vk->vk_table.vkMapMemory(
-		vk->vk_device, vk->vk_staging_buffer_memory, 0, size, 0, &mapped_data);
+		vk->vk_device, vk->vk_staging_buffer_memory, 0, total_size, 0, &mapped_data);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
-	memcpy(mapped_data, data, size);
+	memcpy(mapped_data, image->data, total_size);
 
 	vk->vk_table.vkUnmapMemory(vk->vk_device, vk->vk_staging_buffer_memory);
 
-	VkBufferImageCopy vk_buffer_image_copy =
+	VkBufferImageCopy vk_buffer_image_copies[num_layers];
+	VkBufferImageCopy* vk_buffer_image_copy = vk_buffer_image_copies;
+	VkBufferImageCopy* vk_buffer_image_copy_end = vk_buffer_image_copy + num_layers;
+
+	uint32_t i = layer;
+
+	while(vk_buffer_image_copy < vk_buffer_image_copy_end)
 	{
-		.bufferOffset = 0,
-		.bufferRowLength = 0,
-		.bufferImageHeight = 0,
-		.imageSubresource =
+		*vk_buffer_image_copy =
+		(VkBufferImageCopy)
 		{
-			.aspectMask = image->aspect,
-			.mipLevel = level,
-			.baseArrayLayer = 0,
-			.layerCount = 1
-		},
-		.imageOffset =
-		{
-			.x = 0,
-			.y = 0,
-			.z = 0
-		},
-		.imageExtent =
-		{
-			width,
-			height,
-			1
-		}
-	};
+			.bufferOffset = i * layer_size,
+			.bufferRowLength = 0,
+			.bufferImageHeight = 0,
+			.imageSubresource =
+			{
+				.aspectMask = image->aspect,
+				.mipLevel = level,
+				.baseArrayLayer = i,
+				.layerCount = 1
+			},
+			.imageOffset =
+			{
+				.x = 0,
+				.y = 0,
+				.z = 0
+			},
+			.imageExtent = { width, height, 1 }
+		};
+
+		++vk_buffer_image_copy;
+		++i;
+	}
 
 	vk->vk_table.vkCmdCopyBufferToImage(vk->vk_command_buffer, vk->vk_staging_buffer,
-		image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &vk_buffer_image_copy);
+		image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_layers, vk_buffer_image_copies);
 
 	vk_end_command_buffer(vk);
-}
-
-
-private void
-vk_copy_texture_to_image(
-	vk_t vk,
-	vk_image_t* image,
-	const void* data
-	)
-{
-	assert_not_null(vk);
-	assert_not_null(image);
-
-	vk_copy_texture_to_image_explicit(vk,
-		image, data, image->width, image->height, 0);
 }
 
 
@@ -1781,7 +1788,7 @@ vk_transition_image_layout_inline(
 			.baseMipLevel = 0,
 			.levelCount = image->levels,
 			.baseArrayLayer = 0,
-			.layerCount = 1
+			.layerCount = image->layers
 		}
 	};
 
@@ -1868,21 +1875,39 @@ vk_generate_texture_gpu_mipmaps(
 			.baseMipLevel = 0,
 			.levelCount = 1,
 			.baseArrayLayer = 0,
-			.layerCount = 1
+			.layerCount = image->layers
 		}
+	};
+
+	VkImageBlit vk_blit =
+	{
+		.srcSubresource =
+		{
+			.aspectMask = image->aspect,
+			.baseArrayLayer = 0,
+			.layerCount = image->layers
+		},
+		.srcOffsets = { { 0, 0, 0 }, { 0, 0, 1 } },
+		.dstSubresource =
+		{
+			.aspectMask = image->aspect,
+			.baseArrayLayer = 0,
+			.layerCount = image->layers
+		},
+		.dstOffsets = { { 0, 0, 0 }, { 0, 0, 1 } }
 	};
 
 	uint32_t mip_width = image->width;
 	uint32_t mip_height = image->height;
 
-	uint32_t i = 1;
+	uint32_t level = 1;
 	while(1)
 	{
 		vk->vk_table.vkCmdPipelineBarrier(vk->vk_command_buffer,
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			0, 0, NULL, 0, NULL, 1, &vk_barrier);
 
-		if(i == image->levels)
+		if(level == image->levels)
 		{
 			break;
 		}
@@ -1892,33 +1917,12 @@ vk_generate_texture_gpu_mipmaps(
 		uint32_t next_mip_width = MACRO_MAX(1, mip_width >> 1);
 		uint32_t next_mip_height = MACRO_MAX(1, mip_height >> 1);
 
-		VkImageBlit vk_blit =
-		{
-			.srcSubresource =
-			{
-				.aspectMask = image->aspect,
-				.mipLevel = i - 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1
-			},
-			.srcOffsets =
-			{
-				{0, 0, 0},
-				{mip_width, mip_height, 1}
-			},
-			.dstSubresource =
-			{
-				.aspectMask = image->aspect,
-				.mipLevel = i,
-				.baseArrayLayer = 0,
-				.layerCount = 1
-			},
-			.dstOffsets =
-			{
-				{0, 0, 0},
-				{next_mip_width, next_mip_height, 1}
-			}
-		};
+		vk_blit.srcSubresource.mipLevel = level - 1;
+		vk_blit.srcOffsets[1].x = mip_width;
+		vk_blit.srcOffsets[1].y = mip_height;
+		vk_blit.dstSubresource.mipLevel = level;
+		vk_blit.dstOffsets[1].x = next_mip_width;
+		vk_blit.dstOffsets[1].y = next_mip_height;
 
 		vk->vk_table.vkCmdBlitImage(vk->vk_command_buffer, image->image,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image->image,
@@ -1928,7 +1932,7 @@ vk_generate_texture_gpu_mipmaps(
 		mip_width = next_mip_width;
 		mip_height = next_mip_height;
 
-		++i;
+		++level;
 	}
 
 	vk_transition_image_layout_inline(vk, image,
@@ -1942,8 +1946,7 @@ vk_generate_texture_gpu_mipmaps(
 private void
 vk_generate_texture_cpu_mipmaps(
 	vk_t vk,
-	vk_image_t* image,
-	void* data
+	vk_image_t* image
 	)
 {
 	assert_not_null(vk);
@@ -1951,20 +1954,29 @@ vk_generate_texture_cpu_mipmaps(
 
 	uint32_t mip_width = image->width;
 	uint32_t mip_height = image->height;
+	uint32_t layer_size = mip_width * mip_height * 4;
 
-	for(uint32_t i = 1; i < image->levels; ++i)
+	for(uint32_t level = 1; level < image->levels; ++level)
 	{
 		uint32_t next_mip_width = MACRO_MAX(1, mip_width >> 1);
 		uint32_t next_mip_height = MACRO_MAX(1, mip_height >> 1);
+		uint32_t next_layer_size = next_mip_width * next_mip_height * 4;
 
-		void* result = stbir_resize_uint8_linear(data, mip_width,
-			mip_height, 0, data, next_mip_width, next_mip_height, 0, STBIR_RGBA);
-		assert_eq(result, data);
+		for(uint32_t layer = 0; layer < image->layers; ++layer)
+		{
+			void* src_data = image->data + layer * layer_size;
+			void* dest_data = image->data + layer * next_layer_size;
+
+			void* result = stbir_resize_uint8_linear(src_data, mip_width,
+				mip_height, 0, dest_data, next_mip_width, next_mip_height, 0, STBIR_RGBA);
+			assert_eq(result, dest_data);
+		}
 
 		mip_width = next_mip_width;
 		mip_height = next_mip_height;
+		layer_size = next_layer_size;
 
-		vk_copy_texture_to_image_explicit(vk, image, data, mip_width, mip_height, i);
+		vk_copy_texture_to_image(vk, image, level, -1);
 	}
 
 	vk_transition_image_layout(vk, image,
@@ -1982,7 +1994,8 @@ vk_init_image(
 	assert_not_null(vk);
 	assert_not_null(image);
 
-	void* data;
+	VkImageCreateFlags vk_create_flags = 0;
+	VkImageViewType vk_view_type = VK_IMAGE_VIEW_TYPE_2D;
 
 
 	switch(image->type)
@@ -1990,6 +2003,8 @@ vk_init_image(
 
 	case VK_IMAGE_TYPE_DEPTH_STENCIL:
 	{
+		image->data = NULL;
+
 		image->format = VK_FORMAT_D32_SFLOAT;
 
 		image->aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -1999,12 +2014,15 @@ vk_init_image(
 		image->width = vk->vk_extent.width;
 		image->height = vk->vk_extent.height;
 		image->levels = 1;
+		image->layers = 1;
 
 		break;
 	}
 
 	case VK_IMAGE_TYPE_MULTISAMPLED:
 	{
+		image->data = NULL;
+
 		image->format = VK_FORMAT_R8G8B8A8_SRGB;
 
 		image->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -2015,6 +2033,7 @@ vk_init_image(
 		image->width = vk->vk_extent.width;
 		image->height = vk->vk_extent.height;
 		image->levels = 1;
+		image->layers = 1;
 
 		break;
 	}
@@ -2024,8 +2043,15 @@ vk_init_image(
 		int width;
 		int height;
 		stbi_set_flip_vertically_on_load(1);
-		data = stbi_load(image->path, &width, &height, NULL, 4);
+		void* data = stbi_load(image->path->str, &width, &height, NULL, 4);
 		hard_assert_not_null(data);
+
+		uint32_t size = width * height * 4;
+		image->data = alloc_malloc(size);
+		assert_not_null(image->data);
+
+		memcpy(image->data, data, size);
+		stbi_image_free(data);
 
 		image->format = VK_FORMAT_R8G8B8A8_SRGB;
 
@@ -2040,12 +2066,91 @@ vk_init_image(
 			MACRO_LOG2(MACRO_MAX(width, height)),
 			vk->vk_mipmap_levels
 			);
+		image->layers = 1;
 
 		break;
 	}
 
 	case VK_IMAGE_TYPE_CUBE:
 	{
+		char path[256];
+		memcpy(path, image->path->str, image->path->len);
+		char* path_end = path + image->path->len;
+
+		stbi_set_flip_vertically_on_load(1);
+
+		int width;
+		int height;
+
+		memcpy(path_end, "px.png", 7);
+		void* data = stbi_load(path, &width, &height, NULL, 4);
+		hard_assert_not_null(data);
+
+		uint32_t size = width * height * 4;
+		image->data = alloc_malloc(size * 6);
+		assert_not_null(image->data);
+
+		memcpy(image->data, data, size);
+		void* image_data = image->data + size;
+		stbi_image_free(data);
+
+		memcpy(path_end, "nx.png", 7);
+		data = stbi_load(path, &width, &height, NULL, 4);
+		hard_assert_not_null(data);
+
+		memcpy(image_data, data, size);
+		image_data += size;
+		stbi_image_free(data);
+
+		memcpy(path_end, "py.png", 7);
+		data = stbi_load(path, &width, &height, NULL, 4);
+		hard_assert_not_null(data);
+
+		memcpy(image_data, data, size);
+		image_data += size;
+		stbi_image_free(data);
+
+		memcpy(path_end, "ny.png", 7);
+		data = stbi_load(path, &width, &height, NULL, 4);
+		hard_assert_not_null(data);
+
+		memcpy(image_data, data, size);
+		image_data += size;
+		stbi_image_free(data);
+
+		memcpy(path_end, "pz.png", 7);
+		data = stbi_load(path, &width, &height, NULL, 4);
+		hard_assert_not_null(data);
+
+		memcpy(image_data, data, size);
+		image_data += size;
+		stbi_image_free(data);
+
+		memcpy(path_end, "nz.png", 7);
+		data = stbi_load(path, &width, &height, NULL, 4);
+		hard_assert_not_null(data);
+
+		memcpy(image_data, data, size);
+		stbi_image_free(data);
+
+		image->format = VK_FORMAT_R8G8B8A8_SRGB;
+
+		image->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		image->usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		image->samples = VK_SAMPLE_COUNT_1_BIT;
+
+		image->width = width;
+		image->height = height;
+		image->levels = 1 + MACRO_MIN(
+			MACRO_LOG2(MACRO_MAX(width, height)),
+			vk->vk_mipmap_levels
+			);
+		image->layers = 6;
+
+		vk_create_flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+		vk_view_type = VK_IMAGE_VIEW_TYPE_CUBE;
+
 		break;
 	}
 
@@ -2054,7 +2159,7 @@ vk_init_image(
 	}
 
 
-	if(image->levels > 1)
+	if(image->levels > 1 && vk->vk_gpu_mipmaps)
 	{
 		image->usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
@@ -2064,17 +2169,12 @@ vk_init_image(
 	{
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.pNext = NULL,
-		.flags = 0,
+		.flags = vk_create_flags,
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = image->format,
-		.extent =
-		{
-			image->width,
-			image->height,
-			1
-		},
+		.extent = { image->width, image->height, 1 },
 		.mipLevels = image->levels,
-		.arrayLayers = 1,
+		.arrayLayers = image->layers,
 		.samples = image->samples,
 		.tiling = VK_IMAGE_TILING_OPTIMAL,
 		.usage = image->usage,
@@ -2117,7 +2217,7 @@ vk_init_image(
 		.pNext = NULL,
 		.flags = 0,
 		.image = image->image,
-		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.viewType = vk_view_type,
 		.format = image->format,
 		.components =
 		{
@@ -2132,7 +2232,7 @@ vk_init_image(
 			.baseMipLevel = 0,
 			.levelCount = image->levels,
 			.baseArrayLayer = 0,
-			.layerCount = 1
+			.layerCount = image->layers
 		}
 	};
 
@@ -2146,7 +2246,7 @@ vk_init_image(
 			VK_IMAGE_LAYOUT_UNDEFINED,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-		vk_copy_texture_to_image(vk, image, data);
+		vk_copy_texture_to_image(vk, image, 0, -1);
 
 		if(image->levels > 1)
 		{
@@ -2156,7 +2256,7 @@ vk_init_image(
 			}
 			else
 			{
-				vk_generate_texture_cpu_mipmaps(vk, image, data);
+				vk_generate_texture_cpu_mipmaps(vk, image);
 			}
 		}
 		else
@@ -2165,8 +2265,12 @@ vk_init_image(
 				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
+	}
 
-		stbi_image_free(data);
+	if(image->data)
+	{
+		alloc_free(image->data, image->width * image->height * image->layers * 4);
+		image->data = NULL;
 	}
 }
 
@@ -2560,7 +2664,7 @@ vk_init_pipeline(
 		.logicOp = VK_LOGIC_OP_COPY,
 		.attachmentCount = 1,
 		.pAttachments = &vk_color_blend_attachment,
-		.blendConstants = {0.0f, 0.0f, 0.0f, 0.0f}
+		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
 	VkDescriptorSetLayoutBinding vk_descriptor_set_layout_bindings[] =
@@ -2686,10 +2790,10 @@ vk_init_models(
 		.magFilter = VK_FILTER_LINEAR,
 		.minFilter = VK_FILTER_LINEAR,
 		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-		.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
-		.addressModeV = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
-		.addressModeW = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
-		.mipLodBias = -0.1f,
+		.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.mipLodBias = 0.0f,
 		.anisotropyEnable = !!vk->vk_anisotropy,
 		.maxAnisotropy = vk->vk_anisotropy,
 		.compareEnable = VK_FALSE,
@@ -2848,11 +2952,11 @@ vk_init_models(
 
 			if(!str_is_empty(material->texture))
 			{
-				vk_material->texture.path = material->texture->str;
+				vk_material->texture.path = str_init_copy(material->texture);
 			}
 			else
 			{
-				vk_material->texture.path = "assets/blank.png";
+				vk_material->texture.path = str_init_copy_cstr("assets/blank.png");
 			}
 
 			vk_init_image(vk, &vk_material->texture);
@@ -2939,6 +3043,7 @@ vk_free_models(
 	while(vk_material < vk_material_end)
 	{
 		vk_free_image(vk, &vk_material->texture);
+		str_free(vk_material->texture.path);
 		++vk_material;
 	}
 
@@ -3296,7 +3401,7 @@ vk_draw(
 	VkClearValue vk_clear_values[] =
 	{
 		{
-			.color = {{0.0f, 0.0f, 0.0f, 1.0f}}
+			.color = {{ 0.0f, 0.0f, 0.0f, 1.0f }}
 		},
 		{
 			.depthStencil = { 1.0f, 0 }
@@ -3326,7 +3431,7 @@ vk_draw(
 		.framebuffer = vk_frame->framebuffer,
 		.renderArea =
 		{
-			.offset = {0, 0},
+			.offset = { 0, 0 },
 			.extent = vk->vk_extent
 		},
 		.clearValueCount = MACRO_ARRAY_LEN(vk_clear_values),
@@ -3784,7 +3889,7 @@ vk_window_key_up_fn(
 {
 	assert_not_null(vk);
 
-	vec3 pos = {0.0f, 0.0f, 0.0f};
+	vec3 pos = { 0.0f, 0.0f, 0.0f };
 
 
 	switch(event_data->key)
