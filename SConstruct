@@ -14,12 +14,15 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import os
+import os, subprocess
 
 
 env = Environment(tools = ["mingw"] if os.name == "nt" else ["default"], ENV=os.environ)
 
 flags = Split("-std=gnu23 -Wall -Iinclude/ -D_GNU_SOURCE")
+
+libs_flags = subprocess.check_output(["pkg-config", "--cflags", "vips", "assimp"], text=True)
+flags.extend(Split(libs_flags))
 
 release = int(ARGUMENTS["RELEASE"] if "RELEASE" in ARGUMENTS else os.environ.get("RELEASE", "0"))
 if release <= 0:
@@ -34,11 +37,16 @@ else:
 
 env.Append(CPPFLAGS=flags)
 
-libs = Split("m SDL3 assimp openxr_loader")
+libs = Split("m SDL3 openxr_loader")
+
+libs_libs_flags = subprocess.check_output(["pkg-config", "--libs", "vips", "assimp"], text=True)
+libs.extend(Split(libs_libs_flags))
+
 if os.name == "nt":
 	libs.extend(Split("vulkan-1 ws2_32"))
 else:
 	libs.extend(Split("vulkan"))
+
 env.Append(LIBS=libs)
 
 

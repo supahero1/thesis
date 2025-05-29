@@ -28,6 +28,8 @@
 #include <vulkan/vulkan.h>
 #include <volk.h>
 
+#include <vips/vips.h>
+
 #include <signal.h>
 #include <string.h>
 #include <stdatomic.h>
@@ -38,7 +40,7 @@
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
 #define VK_WINDOW_SENSITIVITY 0.005f
-#define VK_WINDOW_SPEED 200.0f
+#define VK_WINDOW_SPEED 500.0f
 
 
 typedef enum vk_image_type
@@ -2020,9 +2022,27 @@ vk_generate_texture_cpu_mipmaps(
 			void* src_data = image->data + layer * layer_size;
 			void* dest_data = image->data + layer * next_layer_size;
 
-			void* result = stbir_resize_uint8_linear(src_data, mip_width,
-				mip_height, 0, dest_data, next_mip_width, next_mip_height, 0, STBIR_RGBA);
-			assert_eq(result, dest_data);
+			VipsImage* src = vips_image_new_from_memory(
+				src_data, mip_width * mip_height * 4,
+				mip_width, mip_height, 4, VIPS_FORMAT_UCHAR);
+
+			double scale_x = (double) next_mip_width / mip_width;
+			double scale_y = (double) next_mip_height / mip_height;
+
+			VipsImage* resized = NULL;
+			int status = vips_resize(src, &resized, scale_x, "vscale", scale_y, NULL);
+			assert_false(status, fprintf(stderr, "%s\n", vips_error_buffer()));
+
+			size_t out_size;
+			void* out_mem = vips_image_write_to_memory(resized, &out_size);
+			assert_not_null(out_mem);
+			assert_eq(out_size, next_layer_size);
+
+			memcpy(dest_data, out_mem, out_size);
+			g_free(out_mem);
+
+			g_object_unref(src);
+			g_object_unref(resized);
 		}
 
 		mip_width = next_mip_width;
@@ -4182,6 +4202,9 @@ vk_init_vk(
 {
 	assert_not_null(vk);
 
+	int status = VIPS_INIT("thesis");
+	hard_assert_false(status);
+
 	vk_init_instance(vk);
 	vk_init_surface(vk);
 	vk_init_device(vk);
@@ -4218,6 +4241,8 @@ vk_free_vk(
 	vk_free_device(vk);
 	vk_free_surface(vk);
 	vk_free_instance(vk);
+
+	vips_shutdown();
 }
 
 
