@@ -57,6 +57,9 @@ app_init(
 	int status = chdir(dir);
 	hard_assert_eq(status, 0);
 
+	hard_assert_true(dir_exists("assets"));
+	hard_assert_true(dir_exists("shaders"));
+
 	sigset_t set;
 	sigemptyset(&set);
 	sigaddset(&set, SIGINT);
@@ -71,8 +74,9 @@ app_init(
 			.angle = { 0.0f, 180.0f, 180.0f },
 			.fov = 60.0f,
 			.near = 10.0f,
-			.far = 50000.0f
-		}
+			.far = 100000.0f
+		},
+		"assets/skybox-clouds-in-the-sky-spatial-io"
 		);
 
 	simulation_add_entity(

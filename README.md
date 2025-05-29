@@ -4,6 +4,6 @@ My engineering thesis.
 
 `assets/ccity-building-set-1`: [Author](https://sketchfab.com/3d-models/ccity-building-set-1-a2d5c7bfcc2148fb8994864c43dfcc97), [License](https://creativecommons.org/licenses/by/4.0/)
 
-`assets/sky_24_2k`: [Source](https://freestylized.com/skybox/sky_24/)
+`assets/skybox-clouds-in-the-sky-spatial-io`: [Author](https://sketchfab.com/3d-models/skybox-clouds-in-the-sky-spatial-io-c7cac39cba83447eab8c6c90116ee1fc), [License](https://creativecommons.org/licenses/by/4.0/)
 
 All other files are licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).

@@ -40,6 +40,8 @@ struct simulation
 
 	hash_table_t model_table;
 
+	str_t skybox_path;
+
 	simulation_entity_t* entities;
 	uint32_t entity_count;
 
@@ -51,7 +53,8 @@ struct simulation
 
 simulation_t
 simulation_init(
-	simulation_camera_t camera
+	simulation_camera_t camera,
+	const char* skybox_path
 	)
 {
 	simulation_t simulation = alloc_malloc(sizeof(*simulation));
@@ -67,6 +70,8 @@ simulation_init(
 	simulation->model_count = 0;
 
 	simulation->model_table = hash_table_init(8, NULL, NULL);
+
+	simulation->skybox_path = str_init_copy_cstr(skybox_path);
 
 	simulation->entities = NULL;
 	simulation->entity_count = 0;
@@ -95,6 +100,8 @@ simulation_free(
 	event_target_free(&simulation->event_table.free_target);
 
 	alloc_free(simulation->entities, sizeof(*simulation->entities) * simulation->entity_count);
+
+	str_free(simulation->skybox_path);
 
 	hash_table_free(simulation->model_table);
 
@@ -257,6 +264,17 @@ simulation_get_models(
 }
 
 
+const str_t
+simulation_get_skybox_path(
+	simulation_t simulation
+	)
+{
+	assert_not_null(simulation);
+
+	return simulation->skybox_path;
+}
+
+
 void
 simulation_modify_position(
 	simulation_t simulation,
@@ -268,8 +286,8 @@ simulation_modify_position(
 	mat4 rotation;
 	glm_mat4_identity(rotation);
 
-	glm_rotate(rotation, simulation->camera.angle[1], (vec3){0.0f, 1.0f, 0.0f});
-	glm_rotate(rotation, simulation->camera.angle[0], (vec3){1.0f, 0.0f, 0.0f});
+	glm_rotate(rotation, simulation->camera.angle[1], (vec3){ 0.0f, 1.0f, 0.0f });
+	glm_rotate(rotation, simulation->camera.angle[0], (vec3){ 1.0f, 0.0f, 0.0f });
 
 	vec3 rotated_pos;
 	glm_mat4_mulv3(rotation, pos, 1.0f, rotated_pos);

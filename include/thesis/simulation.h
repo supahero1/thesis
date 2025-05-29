@@ -77,7 +77,8 @@ simulation_transform_t;
 
 extern simulation_t
 simulation_init(
-	simulation_camera_t camera
+	simulation_camera_t camera,
+	const char* skybox_path
 	);
 
 
@@ -126,6 +127,12 @@ extern model_t**
 simulation_get_models(
 	simulation_t simulation,
 	uint32_t* model_count
+	);
+
+
+extern const str_t
+simulation_get_skybox_path(
+	simulation_t simulation
 	);
 
 

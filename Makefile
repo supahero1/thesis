@@ -67,11 +67,11 @@ app: shaders
 	scons app -j $(shell nproc)
 
 	if [[ ! -d thesis/assets/ ]]; then \
-		$(CP) -r assets/ thesis/; \
+		$(CP) -r assets/ thesis/assets/; \
 	fi
 
 	if [[ ! -d thesis/shaders/ ]]; then \
-		$(CP) -r bin/shaders/ thesis/; \
+		$(CP) -r bin/shaders/ thesis/shaders/; \
 	fi
 
 	$(CP) bin/thesis_app thesis/

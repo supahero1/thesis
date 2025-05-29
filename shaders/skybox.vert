@@ -30,8 +30,8 @@ layout(location = 0) out vec3 outPosition;
 void
 main()
 {
-	mat4 viewNoTranslation = mat4(mat3(consts.view));
-	gl_Position = consts.projection * viewNoTranslation * vec4(inPosition, 1.0);
+	gl_Position = consts.projection * consts.view * vec4(inPosition, 1.0);
+	gl_Position.z = gl_Position.w;
 
 	outPosition = inPosition;
 }
