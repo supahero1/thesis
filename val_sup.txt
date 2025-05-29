@@ -134,3 +134,10 @@
 	...
 }
 
+{
+	Glib
+	Memcheck:Leak
+	...
+	fun:g_*
+	...
+}

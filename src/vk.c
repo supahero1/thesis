@@ -3030,7 +3030,7 @@ vk_init_mesh_pipeline(
 		.flags = 0,
 		.depthTestEnable = VK_TRUE,
 		.depthWriteEnable = VK_TRUE,
-		.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+		.depthCompareOp = VK_COMPARE_OP_GREATER,
 		.depthBoundsTestEnable = VK_FALSE,
 		.stencilTestEnable = VK_FALSE,
 		.front = {0},
@@ -3892,7 +3892,7 @@ vk_draw(
 			.color = {{ 0.0f, 0.0f, 0.0f, 1.0f }}
 		},
 		{
-			.depthStencil = { 1.0f, 0 }
+			.depthStencil = { 0.0f, 0 }
 		}
 	};
 

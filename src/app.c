@@ -74,7 +74,7 @@ app_init(
 			.angle = { 0.0f, 180.0f, 180.0f },
 			.fov = 60.0f,
 			.near = 10.0f,
-			.far = 100000.0f
+			.far = 1000000.0f
 		},
 		"assets/skybox-clouds-in-the-sky-spatial-io"
 		);

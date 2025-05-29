@@ -236,7 +236,7 @@ simulation_get_transform(
 
 	glm_mat4_identity(transform.projection);
 	glm_perspective(simulation->camera.fov, width / height,
-		simulation->camera.near, simulation->camera.far, transform.projection);
+		simulation->camera.far, simulation->camera.near, transform.projection);
 
 	glm_mat4_identity(transform.view);
 	glm_euler_xyz(simulation->camera.angle, transform.view);
