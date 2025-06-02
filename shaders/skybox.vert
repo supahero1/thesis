@@ -18,8 +18,7 @@
 
 layout(push_constant) uniform Constants
 {
-	mat4 projection;
-	mat4 view;
+	mat4 transform;
 }
 consts;
 
@@ -30,7 +29,7 @@ layout(location = 0) out vec3 outPosition;
 void
 main()
 {
-	gl_Position = consts.projection * consts.view * vec4(inPosition, 1.0);
+	gl_Position = consts.transform * vec4(inPosition, 1.0);
 	gl_Position.z = gl_Position.w;
 
 	outPosition = inPosition;

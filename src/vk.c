@@ -76,19 +76,30 @@ typedef struct vk_image
 }
 vk_image_t;
 
-typedef struct vk_mesh_constant_data
+typedef struct vk_buffer
+{
+	VkBuffer buffer;
+	VkDeviceMemory memory;
+}
+vk_buffer_t;
+
+typedef struct vk_mesh_vert_ubo_data
 {
 	mat4 projection;
 	mat4 view;
+}
+vk_mesh_vert_ubo_data_t;
+
+typedef struct vk_mesh_frag_constant_data
+{
 	vec4 diffuse;
 	vec4 ambient;
 }
-vk_mesh_constant_data_t;
+vk_mesh_frag_constant_data_t;
 
 typedef struct vk_skybox_constant_data
 {
-	mat4 projection;
-	mat4 view;
+	mat4 transform;
 }
 vk_skybox_constant_data_t;
 
@@ -128,11 +139,8 @@ typedef struct vk_mesh
 	uint32_t vertex_count;
 	uint32_t index_count;
 
-	VkBuffer vertex_buffer;
-	VkDeviceMemory vertex_memory;
-
-	VkBuffer index_buffer;
-	VkDeviceMemory index_memory;
+	vk_buffer_t vertex_buffer;
+	vk_buffer_t index_buffer;
 }
 vk_mesh_t;
 
@@ -141,8 +149,7 @@ typedef struct vk_model
 	vk_mesh_t* meshes;
 	uint32_t mesh_count;
 
-	VkBuffer instance_buffer;
-	VkDeviceMemory instance_memory;
+	vk_buffer_t instance_buffer;
 }
 vk_model_t;
 
@@ -245,35 +252,35 @@ struct vk
 	VkCommandBuffer vk_command_buffer;
 	VkFence vk_fence;
 
-	VkBuffer vk_staging_buffer;
-	VkDeviceMemory vk_staging_buffer_memory;
+	vk_buffer_t vk_staging_buffer;
 
 	vk_image_t vk_depth_image;
 	vk_image_t vk_multisampled_image;
 
 	VkRenderPass vk_render_pass;
+	VkDescriptorPool vk_ubo_descriptor_pool;
 
 	VkDescriptorSetLayout vk_skybox_descriptor_set_layout;
 	VkPipelineLayout vk_skybox_pipeline_layout;
 	VkPipeline vk_skybox_pipeline;
 
-	VkDescriptorSetLayout vk_mesh_descriptor_set_layout;
+	VkDescriptorSetLayout vk_mesh_ubo_descriptor_set_layout;
+	VkDescriptorSetLayout vk_mesh_sampler_descriptor_set_layout;
 	VkPipelineLayout vk_mesh_pipeline_layout;
 	VkPipeline vk_mesh_pipeline;
+	vk_buffer_t vk_mesh_ubo_buffer;
+	VkDescriptorSet vk_mesh_ubo_descriptor_set;
 
 	VkSampler vk_sampler;
-	VkDescriptorPool vk_descriptor_pool;
+	VkDescriptorPool vk_sampler_descriptor_pool;
 
 	vk_material_t* vk_materials;
 	vk_model_t* vk_models;
 	uint32_t vk_material_count;
 	uint32_t vk_model_count;
 
-	VkBuffer vk_skybox_vertex_buffer;
-	VkDeviceMemory vk_skybox_vertex_memory;
-
-	VkBuffer vk_skybox_index_buffer;
-	VkDeviceMemory vk_skybox_index_memory;
+	vk_buffer_t vk_skybox_vertex_buffer;
+	vk_buffer_t vk_skybox_index_buffer;
 
 	vk_image_t vk_skybox_image;
 	VkDescriptorSet vk_skybox_descriptor_set;
@@ -1095,7 +1102,7 @@ vk_get_device_properties(
 
 	if(
 		properties.limits.maxPushConstantsSize <
-			MACRO_MAX(sizeof(vk_mesh_constant_data_t), sizeof(vk_skybox_constant_data_t))
+			sizeof(vk_skybox_constant_data_t)
 		)
 	{
 		hard_assert_log("%u\n", properties.limits.maxPushConstantsSize);
@@ -1562,13 +1569,11 @@ vk_init_buffer(
 	VkDeviceSize size,
 	VkBufferUsageFlags usage,
 	VkMemoryPropertyFlags flags,
-	VkBuffer* buffer,
-	VkDeviceMemory* buffer_memory
+	vk_buffer_t* buffer
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(buffer);
-	assert_not_null(buffer_memory);
 
 	VkBufferCreateInfo vk_buffer_info =
 	{
@@ -1583,12 +1588,12 @@ vk_init_buffer(
 	};
 
 	VkResult vk_result = vk->vk_table.vkCreateBuffer(
-		vk->vk_device, &vk_buffer_info, NULL, buffer);
+		vk->vk_device, &vk_buffer_info, NULL, &buffer->buffer);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	VkMemoryRequirements vk_memory_requirements;
 	vk->vk_table.vkGetBufferMemoryRequirements(
-		vk->vk_device, *buffer, &vk_memory_requirements);
+		vk->vk_device, buffer->buffer, &vk_memory_requirements);
 
 	uint32_t memory_type_index = vk_get_memory(
 		vk, vk_memory_requirements.memoryTypeBits, flags);
@@ -1602,11 +1607,11 @@ vk_init_buffer(
 	};
 
 	vk_result = vk->vk_table.vkAllocateMemory(
-		vk->vk_device, &vk_memory_info, NULL, buffer_memory);
+		vk->vk_device, &vk_memory_info, NULL, &buffer->memory);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	vk_result = vk->vk_table.vkBindBufferMemory(
-		vk->vk_device, *buffer, *buffer_memory, 0);
+		vk->vk_device, buffer->buffer, buffer->memory, 0);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 }
 
@@ -1614,14 +1619,13 @@ vk_init_buffer(
 private void
 vk_free_buffer(
 	vk_t vk,
-	VkBuffer buffer,
-	VkDeviceMemory buffer_memory
+	vk_buffer_t* buffer
 	)
 {
 	assert_not_null(vk);
 
-	vk->vk_table.vkFreeMemory(vk->vk_device, buffer_memory, NULL);
-	vk->vk_table.vkDestroyBuffer(vk->vk_device, buffer, NULL);
+	vk->vk_table.vkFreeMemory(vk->vk_device, buffer->memory, NULL);
+	vk->vk_table.vkDestroyBuffer(vk->vk_device, buffer->buffer, NULL);
 }
 
 
@@ -1635,7 +1639,7 @@ vk_init_staging_buffer(
 
 	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		&vk->vk_staging_buffer, &vk->vk_staging_buffer_memory);
+		&vk->vk_staging_buffer);
 }
 
 
@@ -1646,7 +1650,7 @@ vk_free_staging_buffer(
 {
 	assert_not_null(vk);
 
-	vk_free_buffer(vk, vk->vk_staging_buffer, vk->vk_staging_buffer_memory);
+	vk_free_buffer(vk, &vk->vk_staging_buffer);
 }
 
 
@@ -1654,17 +1658,15 @@ private void
 vk_init_vertex_buffer(
 	vk_t vk,
 	VkDeviceSize size,
-	VkBuffer* buffer,
-	VkDeviceMemory* buffer_memory
+	vk_buffer_t* buffer
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(buffer);
-	assert_not_null(buffer_memory);
 
 	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-		buffer, buffer_memory);
+		buffer);
 }
 
 
@@ -1672,30 +1674,83 @@ private void
 vk_init_index_buffer(
 	vk_t vk,
 	VkDeviceSize size,
-	VkBuffer* buffer,
-	VkDeviceMemory* buffer_memory
+	vk_buffer_t* buffer
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(buffer);
-	assert_not_null(buffer_memory);
 
 	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 		VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-		buffer, buffer_memory);
+		buffer);
+}
+
+
+private void
+vk_init_ubo_buffer(
+	vk_t vk,
+	VkDeviceSize size,
+	vk_buffer_t* buffer,
+	VkDescriptorSet* descriptor_set,
+	VkDescriptorSetLayout descriptor_set_layout
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(buffer);
+
+	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		buffer);
+
+	VkDescriptorSetAllocateInfo vk_descriptor_set_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.pNext = NULL,
+		.descriptorPool = vk->vk_ubo_descriptor_pool,
+		.descriptorSetCount = 1,
+		.pSetLayouts = &descriptor_set_layout
+	};
+
+	VkResult vk_result = vk->vk_table.vkAllocateDescriptorSets(
+		vk->vk_device, &vk_descriptor_set_info, descriptor_set);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	VkDescriptorBufferInfo vk_descriptor_buffer_info =
+	{
+		.buffer = buffer->buffer,
+		.offset = 0,
+		.range = VK_WHOLE_SIZE
+	};
+
+	VkWriteDescriptorSet vk_write_descriptor_set =
+	{
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.pNext = NULL,
+		.dstSet = *descriptor_set,
+		.dstBinding = 0,
+		.dstArrayElement = 0,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.pImageInfo = NULL,
+		.pBufferInfo = &vk_descriptor_buffer_info,
+		.pTexelBufferView = NULL
+	};
+
+	vk->vk_table.vkUpdateDescriptorSets(
+		vk->vk_device, 1, &vk_write_descriptor_set, 0, NULL);
 }
 
 
 private void
 vk_copy_to_buffer(
 	vk_t vk,
-	VkBuffer dst_buffer,
+	vk_buffer_t* buffer,
 	const void* data,
 	VkDeviceSize size
 	)
 {
 	assert_not_null(vk);
-	assert_not_null(dst_buffer);
+	assert_not_null(buffer);
 	assert_ptr(data, size);
 
 	if(!size)
@@ -1710,12 +1765,12 @@ vk_copy_to_buffer(
 
 	void* mapped_data;
 	VkResult vk_result = vk->vk_table.vkMapMemory(
-		vk->vk_device, vk->vk_staging_buffer_memory, 0, size, 0, &mapped_data);
+		vk->vk_device, vk->vk_staging_buffer.memory, 0, size, 0, &mapped_data);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	memcpy(mapped_data, data, size);
 
-	vk->vk_table.vkUnmapMemory(vk->vk_device, vk->vk_staging_buffer_memory);
+	vk->vk_table.vkUnmapMemory(vk->vk_device, vk->vk_staging_buffer.memory);
 
 	VkBufferCopy vk_buffer_copy =
 	{
@@ -1725,7 +1780,7 @@ vk_copy_to_buffer(
 	};
 
 	vk->vk_table.vkCmdCopyBuffer(vk->vk_command_buffer,
-		vk->vk_staging_buffer, dst_buffer, 1, &vk_buffer_copy);
+		vk->vk_staging_buffer.buffer, buffer->buffer, 1, &vk_buffer_copy);
 
 	vk_end_command_buffer(vk);
 }
@@ -1766,12 +1821,12 @@ vk_copy_texture_to_image(
 
 	void* mapped_data;
 	VkResult vk_result = vk->vk_table.vkMapMemory(
-		vk->vk_device, vk->vk_staging_buffer_memory, 0, total_size, 0, &mapped_data);
+		vk->vk_device, vk->vk_staging_buffer.memory, 0, total_size, 0, &mapped_data);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	memcpy(mapped_data, image->data, total_size);
 
-	vk->vk_table.vkUnmapMemory(vk->vk_device, vk->vk_staging_buffer_memory);
+	vk->vk_table.vkUnmapMemory(vk->vk_device, vk->vk_staging_buffer.memory);
 
 	VkBufferImageCopy vk_buffer_image_copies[num_layers];
 	VkBufferImageCopy* vk_buffer_image_copy = vk_buffer_image_copies;
@@ -1807,7 +1862,7 @@ vk_copy_texture_to_image(
 		++i;
 	}
 
-	vk->vk_table.vkCmdCopyBufferToImage(vk->vk_command_buffer, vk->vk_staging_buffer,
+	vk->vk_table.vkCmdCopyBufferToImage(vk->vk_command_buffer, vk->vk_staging_buffer.buffer,
 		image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_layers, vk_buffer_image_copies);
 
 	vk_end_command_buffer(vk);
@@ -2578,6 +2633,29 @@ vk_init_render_pass(
 	VkResult vk_result = vk->vk_table.vkCreateRenderPass(vk->vk_device,
 		&vk_render_pass_info, NULL, &vk->vk_render_pass);
 	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
+	VkDescriptorPoolSize vk_pool_sizes[] =
+	{
+		{
+			.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.descriptorCount = 1
+		}
+	};
+
+	VkDescriptorPoolCreateInfo vk_pool_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.maxSets = 1,
+		.poolSizeCount = MACRO_ARRAY_LEN(vk_pool_sizes),
+		.pPoolSizes = vk_pool_sizes
+	};
+
+	vk_result = vk->vk_table.vkCreateDescriptorPool(
+		vk->vk_device, &vk_pool_info, NULL, &vk->vk_ubo_descriptor_pool);
+	hard_assert_eq(vk_result, VK_SUCCESS);
 }
 
 
@@ -2588,6 +2666,7 @@ vk_free_render_pass(
 {
 	assert_not_null(vk);
 
+	vk->vk_table.vkDestroyDescriptorPool(vk->vk_device, vk->vk_ubo_descriptor_pool, NULL);
 	vk->vk_table.vkDestroyRenderPass(vk->vk_device, vk->vk_render_pass, NULL);
 }
 
@@ -3068,9 +3147,9 @@ vk_init_mesh_pipeline(
 	{
 		{
 			.binding = 0,
-			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			.descriptorCount = 1,
-			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
 			.pImmutableSamplers = NULL
 		}
 	};
@@ -3085,17 +3164,39 @@ vk_init_mesh_pipeline(
 	};
 
 	VkResult vk_result = vk->vk_table.vkCreateDescriptorSetLayout(vk->vk_device,
-		&vk_descriptor_set_layout_info, NULL, &vk->vk_mesh_descriptor_set_layout);
+		&vk_descriptor_set_layout_info, NULL, &vk->vk_mesh_ubo_descriptor_set_layout);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
+	vk_descriptor_set_layout_bindings[0] =
+	(VkDescriptorSetLayoutBinding)
+	{
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.pImmutableSamplers = NULL
+	};
+
+	vk_result = vk->vk_table.vkCreateDescriptorSetLayout(vk->vk_device,
+		&vk_descriptor_set_layout_info, NULL, &vk->vk_mesh_sampler_descriptor_set_layout);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
 	VkPushConstantRange vk_push_constants[] =
 	{
 		{
-			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 			.offset = 0,
-			.size = sizeof(vk_mesh_constant_data_t)
+			.size = sizeof(vk_mesh_frag_constant_data_t)
 		}
+	};
+
+
+	VkDescriptorSetLayout vk_descriptor_set_layouts[] =
+	{
+		vk->vk_mesh_ubo_descriptor_set_layout,
+		vk->vk_mesh_sampler_descriptor_set_layout
 	};
 
 	VkPipelineLayoutCreateInfo vk_mesh_pipeline_layout_info =
@@ -3103,9 +3204,9 @@ vk_init_mesh_pipeline(
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.setLayoutCount = 1,
-		.pSetLayouts = &vk->vk_mesh_descriptor_set_layout,
-		.pushConstantRangeCount = MACRO_ARRAY_LEN(vk_push_constants),
+		.setLayoutCount = MACRO_ARRAY_LEN(vk_descriptor_set_layouts),
+		.pSetLayouts = vk_descriptor_set_layouts,
+		.pushConstantRangeCount = 1,
 		.pPushConstantRanges = vk_push_constants
 	};
 
@@ -3145,6 +3246,10 @@ vk_init_mesh_pipeline(
 	{
 		vk_destroy_shader(vk, vk_shader_stages[i].module);
 	}
+
+
+	vk_init_ubo_buffer(vk, sizeof(vk_mesh_vert_ubo_data_t), &vk->vk_mesh_ubo_buffer,
+		&vk->vk_mesh_ubo_descriptor_set, vk->vk_mesh_ubo_descriptor_set_layout);
 }
 
 
@@ -3155,12 +3260,16 @@ vk_free_mesh_pipeline(
 {
 	assert_not_null(vk);
 
+	vk_free_buffer(vk, &vk->vk_mesh_ubo_buffer);
+
 	vk->vk_table.vkDestroyPipeline(vk->vk_device,
 		vk->vk_mesh_pipeline, NULL);
 	vk->vk_table.vkDestroyPipelineLayout(vk->vk_device,
 		vk->vk_mesh_pipeline_layout, NULL);
 	vk->vk_table.vkDestroyDescriptorSetLayout(vk->vk_device,
-		vk->vk_mesh_descriptor_set_layout, NULL);
+		vk->vk_mesh_sampler_descriptor_set_layout, NULL);
+	vk->vk_table.vkDestroyDescriptorSetLayout(vk->vk_device,
+		vk->vk_mesh_ubo_descriptor_set_layout, NULL);
 }
 
 
@@ -3254,7 +3363,7 @@ vk_init_models(
 	};
 
 	vk_result = vk->vk_table.vkCreateDescriptorPool(
-		vk->vk_device, &vk_pool_info, NULL, &vk->vk_descriptor_pool);
+		vk->vk_device, &vk_pool_info, NULL, &vk->vk_sampler_descriptor_pool);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
@@ -3278,14 +3387,14 @@ vk_init_models(
 
 	while(vk_descriptor_set_layout < vk_descriptor_set_layout_end)
 	{
-		*(vk_descriptor_set_layout++) = vk->vk_mesh_descriptor_set_layout;
+		*(vk_descriptor_set_layout++) = vk->vk_mesh_sampler_descriptor_set_layout;
 	}
 
 	VkDescriptorSetAllocateInfo vk_descriptor_set_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 		.pNext = NULL,
-		.descriptorPool = vk->vk_descriptor_pool,
+		.descriptorPool = vk->vk_sampler_descriptor_pool,
 		.descriptorSetCount = vk->vk_material_count,
 		.pSetLayouts = vk_descriptor_set_layouts
 	};
@@ -3348,15 +3457,15 @@ vk_init_models(
 			}
 
 			vk_init_vertex_buffer(vk, sizeof(*vk_vertex_data) *
-				mesh->vertex_count, &vk_mesh->vertex_buffer, &vk_mesh->vertex_memory);
-			vk_copy_to_buffer(vk, vk_mesh->vertex_buffer,
+				mesh->vertex_count, &vk_mesh->vertex_buffer);
+			vk_copy_to_buffer(vk, &vk_mesh->vertex_buffer,
 				vk_vertex_data, sizeof(*vk_vertex_data) * mesh->vertex_count);
 
 			alloc_free(vk_vertex_data, sizeof(*vk_vertex_data) * mesh->vertex_count);
 
 			vk_init_index_buffer(vk, sizeof(*mesh->indexes) *
-				mesh->index_count, &vk_mesh->index_buffer, &vk_mesh->index_memory);
-			vk_copy_to_buffer(vk, vk_mesh->index_buffer,
+				mesh->index_count, &vk_mesh->index_buffer);
+			vk_copy_to_buffer(vk, &vk_mesh->index_buffer,
 				mesh->indexes, sizeof(*mesh->indexes) * mesh->index_count);
 
 			++vk_mesh;
@@ -3423,23 +3532,21 @@ vk_init_models(
 
 
 		vk_init_vertex_buffer(vk, sizeof(vk_mesh_instance_data_t) *
-			VK_MAX_INSTANCES, &vk_model->instance_buffer, &vk_model->instance_memory);
+			VK_MAX_INSTANCES, &vk_model->instance_buffer);
 
 
 		++vk_model;
 	}
 
 
-	vk_init_vertex_buffer(vk, sizeof(vk_skybox_vertex_data),
-		&vk->vk_skybox_vertex_buffer, &vk->vk_skybox_vertex_memory);
+	vk_init_vertex_buffer(vk, sizeof(vk_skybox_vertex_data), &vk->vk_skybox_vertex_buffer);
 
-	vk_copy_to_buffer(vk, vk->vk_skybox_vertex_buffer,
+	vk_copy_to_buffer(vk, &vk->vk_skybox_vertex_buffer,
 		vk_skybox_vertex_data, sizeof(vk_skybox_vertex_data));
 
-	vk_init_index_buffer(vk, sizeof(vk_skybox_index_data),
-		&vk->vk_skybox_index_buffer, &vk->vk_skybox_index_memory);
+	vk_init_index_buffer(vk, sizeof(vk_skybox_index_data), &vk->vk_skybox_index_buffer);
 
-	vk_copy_to_buffer(vk, vk->vk_skybox_index_buffer,
+	vk_copy_to_buffer(vk, &vk->vk_skybox_index_buffer,
 		vk_skybox_index_data, sizeof(vk_skybox_index_data));
 
 
@@ -3497,23 +3604,23 @@ vk_free_models(
 
 	vk_free_image(vk, &vk->vk_skybox_image);
 
-	vk_free_buffer(vk, vk->vk_skybox_index_buffer, vk->vk_skybox_index_memory);
-	vk_free_buffer(vk, vk->vk_skybox_vertex_buffer, vk->vk_skybox_vertex_memory);
+	vk_free_buffer(vk, &vk->vk_skybox_index_buffer);
+	vk_free_buffer(vk, &vk->vk_skybox_vertex_buffer);
 
 	vk_model_t* vk_model = vk->vk_models;
 	vk_model_t* vk_model_end = vk_model + vk->vk_model_count;
 
 	while(vk_model < vk_model_end)
 	{
-		vk_free_buffer(vk, vk_model->instance_buffer, vk_model->instance_memory);
+		vk_free_buffer(vk, &vk_model->instance_buffer);
 
 		vk_mesh_t* vk_mesh = vk_model->meshes;
 		vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
 
 		while(vk_mesh < vk_mesh_end)
 		{
-			vk_free_buffer(vk, vk_mesh->index_buffer, vk_mesh->index_memory);
-			vk_free_buffer(vk, vk_mesh->vertex_buffer, vk_mesh->vertex_memory);
+			vk_free_buffer(vk, &vk_mesh->index_buffer);
+			vk_free_buffer(vk, &vk_mesh->vertex_buffer);
 
 			++vk_mesh;
 		}
@@ -3537,7 +3644,7 @@ vk_free_models(
 
 	alloc_free(vk->vk_materials, sizeof(*vk->vk_materials) * vk->vk_material_count);
 
-	vk->vk_table.vkDestroyDescriptorPool(vk->vk_device, vk->vk_descriptor_pool, NULL);
+	vk->vk_table.vkDestroyDescriptorPool(vk->vk_device, vk->vk_sampler_descriptor_pool, NULL);
 	vk->vk_table.vkDestroySampler(vk->vk_device, vk->vk_sampler, NULL);
 }
 
@@ -3935,29 +4042,32 @@ vk_draw(
 
 	simulation_transform_t transform = simulation_get_transform(
 		vk->simulation, vk->vk_extent.width, vk->vk_extent.height);
-	vk_mesh_constant_data_t vk_constant_data;
-	glm_mat4_copy(transform.projection, vk_constant_data.projection);
-	glm_mat4_copy(transform.view, vk_constant_data.view);
+	vk_mesh_vert_ubo_data_t vk_mesh_vert_ubo_data;
+	glm_mat4_copy(transform.projection, vk_mesh_vert_ubo_data.projection);
+	glm_mat4_copy(transform.view, vk_mesh_vert_ubo_data.view);
 
+	vk_copy_to_buffer(vk, &vk->vk_mesh_ubo_buffer, &vk_mesh_vert_ubo_data, sizeof(vk_mesh_vert_ubo_data));
 
 	vk_skybox_constant_data_t vk_skybox_constant_data;
-	memcpy(&vk_skybox_constant_data, &vk_constant_data, sizeof(vk_skybox_constant_data_t));
-	vk_skybox_constant_data.view[3][0] = 0.0f;
-	vk_skybox_constant_data.view[3][1] = 0.0f;
-	vk_skybox_constant_data.view[3][2] = 0.0f;
+	glm_mat4_copy(vk_mesh_vert_ubo_data.projection, vk_skybox_constant_data.transform);
+
+	transform.view[3][0] = 0.0f;
+	transform.view[3][1] = 0.0f;
+	transform.view[3][2] = 0.0f;
+	glm_mat4_mul(vk_skybox_constant_data.transform, transform.view, vk_skybox_constant_data.transform);
 
 	vk->vk_table.vkCmdBindPipeline(vk->vk_barrier->command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_skybox_pipeline);
 
 	vk->vk_table.vkCmdPushConstants(vk->vk_barrier->command_buffer,
 		vk->vk_skybox_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
-		0, sizeof(vk_skybox_constant_data_t), &vk_skybox_constant_data);
+		0, sizeof(vk_skybox_constant_data), &vk_skybox_constant_data);
 
 	vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
-		0, 1, &vk->vk_skybox_vertex_buffer, (VkDeviceSize[]){0});
+		0, 1, &vk->vk_skybox_vertex_buffer.buffer, (VkDeviceSize[]){0});
 
 	vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
-		vk->vk_skybox_index_buffer, 0, VK_INDEX_TYPE_UINT16);
+		vk->vk_skybox_index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
 
 	vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_skybox_pipeline_layout,
@@ -3969,6 +4079,10 @@ vk_draw(
 
 	vk->vk_table.vkCmdBindPipeline(vk->vk_barrier->command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_mesh_pipeline);
+
+	vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_mesh_pipeline_layout,
+		0, 1, &vk->vk_mesh_ubo_descriptor_set, 0, NULL);
 
 	uint32_t entity_count;
 	simulation_entity_data_t* entity_data =
@@ -4040,33 +4154,36 @@ vk_draw(
 				++vk_instance;
 			}
 
-			vk_copy_to_buffer(vk, vk_model->instance_buffer, vk_instance_data, vk_instance_data_size);
+			vk_copy_to_buffer(vk, &vk_model->instance_buffer, vk_instance_data, vk_instance_data_size);
 			alloc_free(vk_instance_data, vk_instance_data_size);
 
 			vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
-				1, 1, &vk_model->instance_buffer, (VkDeviceSize[]){0});
+				1, 1, &vk_model->instance_buffer.buffer, (VkDeviceSize[]){0});
 
 			vk_mesh_t* vk_mesh = vk_model->meshes;
 			vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
 
 			while(vk_mesh < vk_mesh_end)
 			{
-				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].ambient, vk_constant_data.ambient);
-				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].diffuse, vk_constant_data.diffuse);
+				vk_mesh_frag_constant_data_t vk_mesh_frag_constant_data;
+				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].ambient,
+					vk_mesh_frag_constant_data.ambient);
+				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].diffuse,
+					vk_mesh_frag_constant_data.diffuse);
 
 				vk->vk_table.vkCmdPushConstants(
 					vk->vk_barrier->command_buffer, vk->vk_mesh_pipeline_layout,
-					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-					0, sizeof(vk_mesh_constant_data_t), &vk_constant_data);
+					VK_SHADER_STAGE_FRAGMENT_BIT,
+					0, sizeof(vk_mesh_frag_constant_data), &vk_mesh_frag_constant_data);
 
 				vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
-					0, 1, &vk_mesh->vertex_buffer, (VkDeviceSize[]){0});
+					0, 1, &vk_mesh->vertex_buffer.buffer, (VkDeviceSize[]){0});
 
 				vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
-					vk_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+					vk_mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 				vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
-					VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_mesh_pipeline_layout, 0, 1,
+					VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_mesh_pipeline_layout, 1, 1,
 					&vk->vk_materials[vk_mesh->material_idx].descriptor_set, 0, NULL);
 
 				vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,

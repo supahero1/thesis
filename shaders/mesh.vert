@@ -16,12 +16,10 @@
 
 #version 450
 
-layout(push_constant) uniform Constants
+layout(binding = 0) uniform UBO
 {
 	mat4 projection;
 	mat4 view;
-	vec4 ambient;
-	vec4 diffuse;
 }
 consts;
 
