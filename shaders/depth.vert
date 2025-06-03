@@ -24,8 +24,10 @@ consts;
 
 layout(location = 0) in vec3 inPosition;
 
+layout(location = 1) in mat4 inTransform;
+
 void
 main()
 {
-	gl_Position = consts.transform * vec4(inPosition, 1.0);
+	gl_Position = consts.transform * inTransform * vec4(inPosition, 1.0);
 }
