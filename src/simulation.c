@@ -14,13 +14,23 @@
  *  limitations under the License.
  */
 
+#include <thesis/stb.h>
 #include <thesis/hash.h>
 #include <thesis/debug.h>
 #include <thesis/alloc_ext.h>
 #include <thesis/simulation.h>
 
+#include <vips/vips.h>
+
 #include <stdatomic.h>
 
+
+typedef struct simulation_texture_info
+{
+	uint32_t model_idx;
+	simulation_texture_t* texture;
+}
+simulation_texture_info_t;
 
 typedef struct simulation_entity
 {
@@ -35,9 +45,7 @@ struct simulation
 {
 	simulation_camera_t camera;
 
-	model_t** models;
-	uint32_t model_count;
-
+	simulation_model_info_t info;
 	hash_table_t model_table;
 
 	str_t skybox_path;
@@ -51,13 +59,33 @@ struct simulation
 };
 
 
+private void
+simulation_model_table_value_free_fn(
+	simulation_texture_info_t* info
+	)
+{
+	assert_not_null(info);
+
+	if(info->texture)
+	{
+		alloc_free(info->texture->data, info->texture->size);
+		alloc_free(info->texture, sizeof(*info->texture));
+	}
+
+	alloc_free(info, sizeof(*info));
+}
+
+
 simulation_t
 simulation_init(
 	simulation_camera_t camera,
 	const char* skybox_path
 	)
 {
-	simulation_t simulation = alloc_malloc(sizeof(*simulation));
+	int status = VIPS_INIT("thesis");
+	hard_assert_false(status);
+
+	simulation_t simulation = alloc_calloc(sizeof(*simulation));
 	assert_not_null(simulation);
 
 	camera.fov = glm_rad(camera.fov);
@@ -66,15 +94,9 @@ simulation_init(
 	camera.angle[2] = glm_rad(camera.angle[2]);
 	simulation->camera = camera;
 
-	simulation->models = NULL;
-	simulation->model_count = 0;
-
-	simulation->model_table = hash_table_init(8, NULL, NULL);
+	simulation->model_table = hash_table_init(8, NULL, (void*) simulation_model_table_value_free_fn);
 
 	simulation->skybox_path = str_init_copy_cstr(skybox_path);
-
-	simulation->entities = NULL;
-	simulation->entity_count = 0;
 
 	atomic_flag_clear(&simulation->stopped);
 
@@ -99,20 +121,24 @@ simulation_free(
 
 	event_target_free(&simulation->event_table.free_target);
 
-	alloc_free(simulation->entities, sizeof(*simulation->entities) * simulation->entity_count);
+	alloc_free(simulation->entities,
+		sizeof(*simulation->entities) * simulation->entity_count);
 
 	str_free(simulation->skybox_path);
 
 	hash_table_free(simulation->model_table);
 
-	for(uint32_t i = 0; i < simulation->model_count; ++i)
+	for(uint32_t i = 0; i < simulation->info.model_count; ++i)
 	{
-		model_free(simulation->models[i]);
+		model_free(simulation->info.models[i]);
 	}
 
-	alloc_free(simulation->models, sizeof(*simulation->models) * simulation->model_count);
+	alloc_free(simulation->info.models,
+		sizeof(*simulation->info.models) * simulation->info.model_count);
 
 	alloc_free(simulation, sizeof(*simulation));
+
+	vips_shutdown();
 }
 
 
@@ -144,32 +170,33 @@ simulation_add_entity(
 
 	simulation_entity_t* entity = &simulation->entities[simulation->entity_count++];
 
-	uintptr_t model = (uintptr_t) hash_table_get(
+	simulation_texture_info_t* info = hash_table_get(
 		simulation->model_table,
 		entity_init.model_path
 		);
 
-	if(!model)
+	if(!info)
 	{
-		simulation->models = alloc_remalloc(
-			simulation->models,
-			sizeof(*simulation->models) * simulation->model_count,
-			sizeof(*simulation->models) * (simulation->model_count + 1)
+		simulation->info.models = alloc_remalloc(
+			simulation->info.models,
+			sizeof(*simulation->info.models) * simulation->info.model_count,
+			sizeof(*simulation->info.models) * (simulation->info.model_count + 1)
 			);
-		assert_not_null(simulation->models);
+		assert_not_null(simulation->info.models);
 
-		simulation->models[simulation->model_count++] =
-			model_init(entity_init.model_path);
+		model_t* model = model_init(entity_init.model_path);
+		simulation->info.material_count += model->material_count;
+		simulation->info.models[simulation->info.model_count] = model;
 
-		hash_table_set(
-			simulation->model_table,
-			entity_init.model_path,
-			(void*) (uintptr_t) simulation->model_count
-			);
-		model = simulation->model_count;
+		info = alloc_calloc(sizeof(*info));
+		assert_not_null(info);
+
+		info->model_idx = simulation->info.model_count++;
+
+		hash_table_set(simulation->model_table, entity_init.model_path, info);
 	}
 
-	entity->model_idx = --model;
+	entity->model_idx = info->model_idx;
 
 	glm_vec3_copy(entity_init.translation, entity->translation);
 	glm_vec3_copy(entity_init.rotation, entity->rotation);
@@ -247,20 +274,201 @@ simulation_get_transform(
 }
 
 
-model_t**
-simulation_get_models(
-	simulation_t simulation,
-	uint32_t* model_count
+simulation_model_info_t
+simulation_get_model_info(
+	simulation_t simulation
 	)
 {
 	assert_not_null(simulation);
 
-	if(model_count)
+	return simulation->info;
+}
+
+
+private simulation_texture_t*
+simulation_load_texture(
+	str_t path,
+	bool is_cube_map
+	)
+{
+	assert_not_null(path);
+
+	simulation_texture_t* texture = alloc_calloc(sizeof(*texture));
+	assert_not_null(texture);
+
+	int width;
+	int height;
+	void* data;
+
+	char full_path[256];
+	memcpy(full_path, path->str, path->len);
+	char* full_path_end = full_path + path->len;
+
+	stbi_set_flip_vertically_on_load(1);
+
+	if(!is_cube_map)
 	{
-		*model_count = simulation->model_count;
+		data = stbi_load(path->str, &width, &height, NULL, 4);
+		hard_assert_not_null(data, stbi_print_failure());
+
+		texture->layers = 1;
+	}
+	else
+	{
+		memcpy(full_path_end, "/nx.png", 8);
+		data = stbi_load(full_path, &width, &height, NULL, 4);
+		hard_assert_not_null(data, stbi_print_failure());
+
+		texture->layers = 6;
 	}
 
-	return simulation->models;
+	texture->width = width;
+	texture->height = height;
+	texture->levels = 1 + MACRO_LOG2(MACRO_MAX(width, height));
+
+	uint32_t size = 0;
+	for(uint32_t i = 0; i < texture->levels; ++i)
+	{
+		size += width * height;
+		width = MACRO_MAX(width >> 1, 1);
+		height = MACRO_MAX(height >> 1, 1);
+	}
+	size *= texture->layers * 4;
+	texture->size = size;
+
+	texture->data = alloc_malloc(texture->size);
+	assert_not_null(texture->data);
+
+	uint32_t mip_size = texture->width * texture->height * 4;
+	memcpy(texture->data, data, mip_size);
+	stbi_image_free(data);
+
+	if(is_cube_map)
+	{
+		void* image_data = texture->data + mip_size;
+
+		memcpy(full_path_end, "/px.png", 8);
+		data = stbi_load(full_path, &width, &height, NULL, 4);
+		hard_assert_not_null(data, stbi_print_failure());
+
+		memcpy(image_data, data, mip_size);
+		image_data += mip_size;
+		stbi_image_free(data);
+
+		stbi_set_flip_vertically_on_load(0);
+
+		memcpy(full_path_end, "/ny.png", 8);
+		data = stbi_load(full_path, &width, &height, NULL, 4);
+		hard_assert_not_null(data, stbi_print_failure());
+
+		stbi_flip_horizontally(data, width, height);
+		memcpy(image_data, data, mip_size);
+		image_data += mip_size;
+		stbi_image_free(data);
+
+		memcpy(full_path_end, "/py.png", 8);
+		data = stbi_load(full_path, &width, &height, NULL, 4);
+		hard_assert_not_null(data, stbi_print_failure());
+
+		stbi_flip_horizontally(data, width, height);
+		memcpy(image_data, data, mip_size);
+		image_data += mip_size;
+		stbi_image_free(data);
+
+		stbi_set_flip_vertically_on_load(1);
+
+		memcpy(full_path_end, "/nz.png", 8);
+		data = stbi_load(full_path, &width, &height, NULL, 4);
+		hard_assert_not_null(data, stbi_print_failure());
+
+		memcpy(image_data, data, mip_size);
+		image_data += mip_size;
+		stbi_image_free(data);
+
+		memcpy(full_path_end, "/pz.png", 8);
+		data = stbi_load(full_path, &width, &height, NULL, 4);
+		hard_assert_not_null(data, stbi_print_failure());
+
+		memcpy(image_data, data, mip_size);
+		stbi_image_free(data);
+	}
+
+	uint32_t mip_width = texture->width;
+	uint32_t mip_height = texture->height;
+	data = texture->data;
+
+	for(uint32_t level = 1; level < texture->levels; ++level)
+	{
+		uint32_t next_mip_width = MACRO_MAX(mip_width >> 1, 1);
+		uint32_t next_mip_height = MACRO_MAX(mip_height >> 1, 1);
+		uint32_t next_mip_size = next_mip_width * next_mip_height * 4;
+		void* next_data = data + mip_size * texture->layers;
+
+		for(uint32_t layer = 0; layer < texture->layers; ++layer)
+		{
+			void* src_data = data + layer * mip_size;
+			void* dest_data = next_data + layer * next_mip_size;
+
+			VipsImage* src = vips_image_new_from_memory(
+				src_data, mip_size, mip_width,
+				mip_height, 4, VIPS_FORMAT_UCHAR
+				);
+
+			double scale_x = (double) next_mip_width / mip_width;
+			double scale_y = (double) next_mip_height / mip_height;
+
+			VipsImage* resized = NULL;
+			int status = vips_resize(src, &resized, scale_x, "vscale", scale_y, NULL);
+			assert_false(status, fprintf(stderr, "%s\n", vips_error_buffer()));
+
+			size_t out_size;
+			void* out_mem = vips_image_write_to_memory(resized, &out_size);
+			assert_not_null(out_mem);
+			assert_eq(out_size, next_mip_size);
+
+			memcpy(dest_data, out_mem, out_size);
+			g_free(out_mem);
+
+			g_object_unref(src);
+			g_object_unref(resized);
+		}
+
+		mip_width = next_mip_width;
+		mip_height = next_mip_height;
+		mip_size = next_mip_size;
+		data = next_data;
+	}
+
+	return texture;
+}
+
+
+simulation_texture_t*
+simulation_get_texture(
+	simulation_t simulation,
+	str_t path,
+	bool is_cube_map
+	)
+{
+	assert_not_null(simulation);
+	assert_not_null(path);
+
+	simulation_texture_info_t* info = hash_table_get(simulation->model_table, path->str);
+
+	if(!info)
+	{
+		info = alloc_calloc(sizeof(*info));
+		assert_not_null(info);
+
+		hash_table_set(simulation->model_table, path->str, info);
+	}
+
+	if(!info->texture)
+	{
+		info->texture = simulation_load_texture(path, is_cube_map);
+	}
+
+	return info->texture;
 }
 
 

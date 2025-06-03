@@ -74,6 +74,25 @@ typedef struct simulation_transform
 }
 simulation_transform_t;
 
+typedef struct simulation_texture
+{
+	void* data;
+	uint32_t size;
+	uint32_t width;
+	uint32_t height;
+	uint32_t layers;
+	uint32_t levels;
+}
+simulation_texture_t;
+
+typedef struct simulation_model_info
+{
+	model_t** models;
+	uint32_t model_count;
+	uint32_t material_count;
+}
+simulation_model_info_t;
+
 
 extern simulation_t
 simulation_init(
@@ -123,10 +142,17 @@ simulation_get_transform(
 	);
 
 
-extern model_t**
-simulation_get_models(
+extern simulation_model_info_t
+simulation_get_model_info(
+	simulation_t simulation
+	);
+
+
+extern simulation_texture_t*
+simulation_get_texture(
 	simulation_t simulation,
-	uint32_t* model_count
+	str_t path,
+	bool is_cube_map
 	);
 
 

@@ -16,4 +16,20 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #include <stb/stb_image.h>
+
+
+extern void
+stbi_print_failure(
+	void
+	);
+
+
+extern void
+stbi_flip_horizontally(
+	uint32_t* data,
+	uint32_t width,
+	uint32_t height
+	);
