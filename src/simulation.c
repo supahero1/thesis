@@ -44,6 +44,7 @@ simulation_entity_t;
 struct simulation
 {
 	simulation_camera_t camera;
+	simulation_light_t light;
 
 	simulation_model_info_t info;
 	hash_table_t model_table;
@@ -79,6 +80,7 @@ simulation_model_table_value_free_fn(
 simulation_t
 simulation_init(
 	simulation_camera_t camera,
+	simulation_light_t light,
 	const char* skybox_path
 	)
 {
@@ -93,6 +95,8 @@ simulation_init(
 	camera.angle[1] = glm_rad(camera.angle[1]);
 	camera.angle[2] = glm_rad(camera.angle[2]);
 	simulation->camera = camera;
+
+	simulation->light = light;
 
 	simulation->model_table = hash_table_init(8, NULL, (void*) simulation_model_table_value_free_fn);
 
@@ -270,6 +274,20 @@ simulation_get_transform(
 	glm_translate(transform.view, (vec3){ -simulation->camera.pos[0],
 		-simulation->camera.pos[1], -simulation->camera.pos[2] });
 
+	glm_mat4_identity(transform.light_transform);
+
+	vec3 light_up = { 0.0f, -1.0f, 0.0f };
+	mat4 light_view;
+	glm_lookat(simulation->light.pos, simulation->light.target, light_up, light_view);
+
+	mat4 light_proj;
+	glm_ortho(simulation->light.left, simulation->light.right, simulation->light.bottom,
+		simulation->light.top, simulation->light.near, simulation->light.far, light_proj);
+
+	glm_mat4_mul(light_proj, light_view, transform.light_transform);
+
+	glm_vec3_copy(simulation->light.pos, transform.light_position);
+
 	return transform;
 }
 
@@ -315,7 +333,7 @@ simulation_load_texture(
 	}
 	else
 	{
-		memcpy(full_path_end, "/nx.png", 8);
+		memcpy(full_path_end, "/px.png", 8);
 		data = stbi_load(full_path, &width, &height, NULL, 4);
 		hard_assert_not_null(data, stbi_print_failure());
 
@@ -347,7 +365,7 @@ simulation_load_texture(
 	{
 		void* image_data = texture->data + mip_size;
 
-		memcpy(full_path_end, "/px.png", 8);
+		memcpy(full_path_end, "/nx.png", 8);
 		data = stbi_load(full_path, &width, &height, NULL, 4);
 		hard_assert_not_null(data, stbi_print_failure());
 
@@ -355,13 +373,10 @@ simulation_load_texture(
 		image_data += mip_size;
 		stbi_image_free(data);
 
-		stbi_set_flip_vertically_on_load(0);
-
 		memcpy(full_path_end, "/ny.png", 8);
 		data = stbi_load(full_path, &width, &height, NULL, 4);
 		hard_assert_not_null(data, stbi_print_failure());
 
-		stbi_flip_horizontally(data, width, height);
 		memcpy(image_data, data, mip_size);
 		image_data += mip_size;
 		stbi_image_free(data);
@@ -370,14 +385,11 @@ simulation_load_texture(
 		data = stbi_load(full_path, &width, &height, NULL, 4);
 		hard_assert_not_null(data, stbi_print_failure());
 
-		stbi_flip_horizontally(data, width, height);
 		memcpy(image_data, data, mip_size);
 		image_data += mip_size;
 		stbi_image_free(data);
 
-		stbi_set_flip_vertically_on_load(1);
-
-		memcpy(full_path_end, "/nz.png", 8);
+		memcpy(full_path_end, "/pz.png", 8);
 		data = stbi_load(full_path, &width, &height, NULL, 4);
 		hard_assert_not_null(data, stbi_print_failure());
 
@@ -385,7 +397,7 @@ simulation_load_texture(
 		image_data += mip_size;
 		stbi_image_free(data);
 
-		memcpy(full_path_end, "/pz.png", 8);
+		memcpy(full_path_end, "/nz.png", 8);
 		data = stbi_load(full_path, &width, &height, NULL, 4);
 		hard_assert_not_null(data, stbi_print_failure());
 

@@ -88,4 +88,6 @@ app: shaders
 	cd thesis; $(VALGRIND_CALL) ./thesis_app --runtime=$$runtime \
 		--vk_sample_shading=$(VK_SAMPLE_SHADING) \
 		--vk_mipmap_levels=$(VK_MIPMAP_LEVELS) \
-		--vk_anisotropy=$(VK_ANISOTROPY)
+		--vk_anisotropy=$(VK_ANISOTROPY) \
+		--vk_depth_map_size=$(VK_DEPTH_MAP_SIZE) \
+		--vk_preview_depth_map=$(VK_PREVIEW_DEPTH_MAP)

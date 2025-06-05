@@ -1,5 +1,9 @@
 My engineering thesis.
 
+# Latest screenshot
+
+![Latest screenshot](img/latest.png)
+
 # License
 
 `assets/ccity-building-set-1`: [Author](https://sketchfab.com/3d-models/ccity-building-set-1-a2d5c7bfcc2148fb8994864c43dfcc97), [License](https://creativecommons.org/licenses/by/4.0/)

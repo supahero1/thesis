@@ -51,6 +51,19 @@ typedef struct simulation_camera
 }
 simulation_camera_t;
 
+typedef struct simulation_light
+{
+	vec3 pos;
+	vec3 target;
+	float left;
+	float right;
+	float bottom;
+	float top;
+	float near;
+	float far;
+}
+simulation_light_t;
+
 typedef struct simulation_entity_init
 {
 	const char* model_path;
@@ -71,6 +84,8 @@ typedef struct simulation_transform
 {
 	mat4 projection;
 	mat4 view;
+	mat4 light_transform;
+	vec4 light_position;
 }
 simulation_transform_t;
 
@@ -97,6 +112,7 @@ simulation_model_info_t;
 extern simulation_t
 simulation_init(
 	simulation_camera_t camera,
+	simulation_light_t light,
 	const char* skybox_path
 	);
 

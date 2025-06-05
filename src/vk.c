@@ -110,6 +110,8 @@ typedef struct vk_mesh_vert_ubo_data
 {
 	mat4 projection;
 	mat4 view;
+	mat4 light_transform;
+	vec4 light_position;
 }
 vk_mesh_vert_ubo_data_t;
 
@@ -179,6 +181,7 @@ typedef struct vk_frame
 	{
 		VkFramebuffer framebuffer;
 		vk_image_t image;
+		VkDescriptorSet set;
 	}
 	shadow;
 
@@ -242,6 +245,8 @@ struct vk
 
 	bool vk_sample_shading;
 	uint32_t vk_mipmap_levels;
+	uint32_t vk_depth_map_size;
+	bool vk_preview_depth_map;
 
 	thread_t vk_thread;
 	_Atomic bool vk_running;
@@ -325,7 +330,8 @@ struct vk
 		struct
 		{
 			VkDescriptorSetLayout ubo_set_layout;
-			VkDescriptorSetLayout sampler_set_layout;
+			VkDescriptorSetLayout texture_set_layout;
+			VkDescriptorSetLayout depth_map_set_layout;
 			VkPipelineLayout pipeline_layout;
 			VkPipeline pipeline;
 
@@ -333,6 +339,14 @@ struct vk
 			VkDescriptorSet ubo_set;
 		}
 		mesh;
+
+		struct
+		{
+			VkDescriptorSetLayout set_layout;
+			VkPipelineLayout pipeline_layout;
+			VkPipeline pipeline;
+		}
+		depth_map;
 	}
 	vk_scene;
 
@@ -467,6 +481,34 @@ vk_init_options(
 		vk->vk_anisotropy = 100.0f;
 	}
 	printf("- vk_anisotropy: %.1f\n", vk->vk_anisotropy);
+
+	str_t depth_map_size = options_get(global_options, "vk_depth_map_size");
+	if(depth_map_size && !str_is_empty(depth_map_size))
+	{
+		uint32_t depth_map_size_value = strtoul(depth_map_size->str, NULL, 10);
+		if(depth_map_size_value <= 0)
+		{
+			depth_map_size_value = 4096;
+		}
+
+		vk->vk_depth_map_size = depth_map_size_value;
+	}
+	else
+	{
+		vk->vk_depth_map_size = 4096;
+	}
+	printf("- vk_depth_map_size: %u\n", vk->vk_depth_map_size);
+
+	str_t preview_depth_map = options_get(global_options, "vk_preview_depth_map");
+	if(preview_depth_map && !str_is_empty(preview_depth_map))
+	{
+		vk->vk_preview_depth_map = str_case_cmp_len(preview_depth_map, "true", 4);
+	}
+	else
+	{
+		vk->vk_preview_depth_map = false;
+	}
+	printf("- vk_preview_depth_map: %d\n", vk->vk_preview_depth_map);
 }
 
 
@@ -2050,8 +2092,8 @@ vk_init_image(
 
 		image->data = NULL;
 		image->size = 0;
-		image->width = 4096;
-		image->height = 4096;
+		image->width = vk->vk_depth_map_size;
+		image->height = vk->vk_depth_map_size;
 		image->levels = 1;
 		image->layers = 1;
 
@@ -2284,8 +2326,8 @@ vk_init_depth_sampler(
 		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.magFilter = VK_FILTER_NEAREST,
-		.minFilter = VK_FILTER_NEAREST,
+		.magFilter = VK_FILTER_LINEAR,
+		.minFilter = VK_FILTER_LINEAR,
 		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
 		.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
 		.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
@@ -2293,11 +2335,11 @@ vk_init_depth_sampler(
 		.mipLodBias = 0.0f,
 		.anisotropyEnable = VK_FALSE,
 		.maxAnisotropy = 1.0f,
-		.compareEnable = VK_FALSE,
-		.compareOp = VK_COMPARE_OP_ALWAYS,
+		.compareEnable = VK_TRUE,
+		.compareOp = VK_COMPARE_OP_LESS,
 		.minLod = 0.0f,
 		.maxLod = 1.0f,
-		.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+		.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
 		.unnormalizedCoordinates = VK_FALSE
 	};
 
@@ -2585,8 +2627,8 @@ vk_init_shadow_pipeline(
 	{
 		.x = 0.0f,
 		.y = 0.0f,
-		.width = 4096,
-		.height = 4096,
+		.width = vk->vk_depth_map_size,
+		.height = vk->vk_depth_map_size,
 		.minDepth = 0.0f,
 		.maxDepth = 1.0f
 	};
@@ -2616,12 +2658,12 @@ vk_init_shadow_pipeline(
 		.depthClampEnable = VK_FALSE,
 		.rasterizerDiscardEnable = VK_FALSE,
 		.polygonMode = VK_POLYGON_MODE_FILL,
-		.cullMode = VK_CULL_MODE_FRONT_BIT,
+		.cullMode = VK_CULL_MODE_NONE,
 		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-		.depthBiasEnable = VK_FALSE,
-		.depthBiasConstantFactor = 0.0f,
+		.depthBiasEnable = VK_TRUE,
+		.depthBiasConstantFactor = 1.25f,
 		.depthBiasClamp = 0.0f,
-		.depthBiasSlopeFactor = 0.0f,
+		.depthBiasSlopeFactor = 1.75f,
 		.lineWidth = 1.0f
 	};
 
@@ -2645,7 +2687,7 @@ vk_init_shadow_pipeline(
 		.flags = 0,
 		.depthTestEnable = VK_TRUE,
 		.depthWriteEnable = VK_TRUE,
-		.depthCompareOp = VK_COMPARE_OP_GREATER,
+		.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
 		.depthBoundsTestEnable = VK_FALSE,
 		.stencilTestEnable = VK_FALSE,
 		.front = {0},
@@ -2689,7 +2731,7 @@ vk_init_shadow_pipeline(
 		}
 	};
 
-	VkPipelineLayoutCreateInfo vk_mesh_pipeline_layout_info =
+	VkPipelineLayoutCreateInfo vk_pipeline_layout_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.pNext = NULL,
@@ -2701,7 +2743,7 @@ vk_init_shadow_pipeline(
 	};
 
 	VkResult vk_result = vk->vk_table.vkCreatePipelineLayout(vk->vk_device,
-		&vk_mesh_pipeline_layout_info, NULL, &vk->vk_shadow.depth.pipeline_layout);
+		&vk_pipeline_layout_info, NULL, &vk->vk_shadow.depth.pipeline_layout);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
@@ -2757,45 +2799,6 @@ vk_init_shadow_consts(
 	)
 {
 	assert_not_null(vk);
-
-	/*
-	VkDescriptorSetAllocateInfo vk_set_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-		.pNext = NULL,
-		.descriptorPool = vk->vk_descriptor_pool,
-		.descriptorSetCount = 1,
-		.pSetLayouts = &vk->vk_shadow.depth.set_layout
-	};
-
-	VkResult vk_result = vk->vk_table.vkAllocateDescriptorSets(
-		vk->vk_device, &vk_set_info, &vk->vk_shadow.depth.set);
-	hard_assert_eq(vk_result, VK_SUCCESS);
-
-
-	VkDescriptorImageInfo vk_image_info =
-	{
-		.sampler = vk->vk_depth_sampler,
-		.imageView = vk->vk_shadow.depth_image.view,
-		.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
-	};
-
-	VkWriteDescriptorSet vk_write_set =
-	{
-		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-		.pNext = NULL,
-		.dstSet = vk->vk_shadow.depth.set,
-		.dstBinding = 0,
-		.dstArrayElement = 0,
-		.descriptorCount = 1,
-		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-		.pImageInfo = &vk_image_info,
-		.pBufferInfo = NULL,
-		.pTexelBufferView = NULL
-	};
-
-	vk->vk_table.vkUpdateDescriptorSets(vk->vk_device, 1, &vk_write_set, 0, NULL);
-	*/
 }
 
 
@@ -3571,7 +3574,22 @@ vk_init_mesh_pipeline(
 	};
 
 	vk_result = vk->vk_table.vkCreateDescriptorSetLayout(vk->vk_device,
-		&vk_set_layout_info, NULL, &vk->vk_scene.mesh.sampler_set_layout);
+		&vk_set_layout_info, NULL, &vk->vk_scene.mesh.texture_set_layout);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
+	vk_set_layout_bindings[0] =
+	(VkDescriptorSetLayoutBinding)
+	{
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.pImmutableSamplers = NULL
+	};
+
+	vk_result = vk->vk_table.vkCreateDescriptorSetLayout(vk->vk_device,
+		&vk_set_layout_info, NULL, &vk->vk_scene.mesh.depth_map_set_layout);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
@@ -3587,10 +3605,11 @@ vk_init_mesh_pipeline(
 	VkDescriptorSetLayout vk_set_layouts[] =
 	{
 		vk->vk_scene.mesh.ubo_set_layout,
-		vk->vk_scene.mesh.sampler_set_layout
+		vk->vk_scene.mesh.texture_set_layout,
+		vk->vk_scene.mesh.depth_map_set_layout
 	};
 
-	VkPipelineLayoutCreateInfo vk_mesh_pipeline_layout_info =
+	VkPipelineLayoutCreateInfo vk_pipeline_layout_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.pNext = NULL,
@@ -3602,7 +3621,7 @@ vk_init_mesh_pipeline(
 	};
 
 	vk_result = vk->vk_table.vkCreatePipelineLayout(vk->vk_device,
-		&vk_mesh_pipeline_layout_info, NULL, &vk->vk_scene.mesh.pipeline_layout);
+		&vk_pipeline_layout_info, NULL, &vk->vk_scene.mesh.pipeline_layout);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
@@ -3649,7 +3668,8 @@ vk_free_mesh_pipeline(
 
 	vk->vk_table.vkDestroyPipeline(vk->vk_device, vk->vk_scene.mesh.pipeline, NULL);
 	vk->vk_table.vkDestroyPipelineLayout(vk->vk_device, vk->vk_scene.mesh.pipeline_layout, NULL);
-	vk->vk_table.vkDestroyDescriptorSetLayout(vk->vk_device, vk->vk_scene.mesh.sampler_set_layout, NULL);
+	vk->vk_table.vkDestroyDescriptorSetLayout(vk->vk_device, vk->vk_scene.mesh.depth_map_set_layout, NULL);
+	vk->vk_table.vkDestroyDescriptorSetLayout(vk->vk_device, vk->vk_scene.mesh.texture_set_layout, NULL);
 	vk->vk_table.vkDestroyDescriptorSetLayout(vk->vk_device, vk->vk_scene.mesh.ubo_set_layout, NULL);
 }
 
@@ -3679,6 +3699,263 @@ vk_free_mesh_consts(
 
 
 private void
+vk_init_depth_map_pipeline(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkPipelineShaderStageCreateInfo vk_shader_stages[] =
+	{
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_VERTEX_BIT,
+			.module = vk_create_shader(vk, "shaders/depth_map.vert.spv"),
+			.pName = "main",
+			.pSpecializationInfo = NULL
+		},
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+			.module = vk_create_shader(vk, "shaders/depth_map.frag.spv"),
+			.pName = "main",
+			.pSpecializationInfo = NULL
+		}
+	};
+
+	VkDynamicState vk_dynamic_states[] =
+	{
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+
+	VkPipelineDynamicStateCreateInfo vk_dynamic_state_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.dynamicStateCount = MACRO_ARRAY_LEN(vk_dynamic_states),
+		.pDynamicStates = vk_dynamic_states
+	};
+
+	VkPipelineVertexInputStateCreateInfo vk_vertex_input_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.vertexBindingDescriptionCount = 0,
+		.pVertexBindingDescriptions = NULL,
+		.vertexAttributeDescriptionCount = 0,
+		.pVertexAttributeDescriptions = NULL
+	};
+
+	VkPipelineInputAssemblyStateCreateInfo vk_input_assembly_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+		.primitiveRestartEnable = VK_FALSE
+	};
+
+	VkPipelineViewportStateCreateInfo vk_viewport_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.viewportCount = 1,
+		.pViewports = NULL,
+		.scissorCount = 1,
+		.pScissors = NULL
+	};
+
+	VkPipelineRasterizationStateCreateInfo vk_rasterization_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.depthClampEnable = VK_FALSE,
+		.rasterizerDiscardEnable = VK_FALSE,
+		.polygonMode = VK_POLYGON_MODE_FILL,
+		.cullMode = VK_CULL_MODE_NONE,
+		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+		.depthBiasEnable = VK_FALSE,
+		.depthBiasConstantFactor = 0.0f,
+		.depthBiasClamp = 0.0f,
+		.depthBiasSlopeFactor = 0.0f,
+		.lineWidth = 1.0f
+	};
+
+	VkPipelineMultisampleStateCreateInfo vk_multisample_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.rasterizationSamples = vk->vk_samples,
+		.sampleShadingEnable = !!vk->vk_sample_shading,
+		.minSampleShading = 0.2f,
+		.pSampleMask = NULL,
+		.alphaToCoverageEnable = VK_FALSE,
+		.alphaToOneEnable = VK_FALSE
+	};
+
+	VkPipelineDepthStencilStateCreateInfo vk_depth_stencil_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.depthTestEnable = VK_FALSE,
+		.depthWriteEnable = VK_FALSE,
+		.depthCompareOp = VK_COMPARE_OP_NEVER,
+		.depthBoundsTestEnable = VK_FALSE,
+		.stencilTestEnable = VK_FALSE,
+		.front = {0},
+		.back = {0},
+		.minDepthBounds = 0.0f,
+		.maxDepthBounds = 1.0f
+	};
+
+	VkPipelineColorBlendAttachmentState vk_color_blend_attachment =
+	{
+		.blendEnable = VK_FALSE,
+		.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+		.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+		.colorBlendOp = VK_BLEND_OP_ADD,
+		.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+		.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+		.alphaBlendOp = VK_BLEND_OP_ADD,
+		.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+	};
+
+	VkPipelineColorBlendStateCreateInfo vk_color_blend_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.logicOpEnable = VK_FALSE,
+		.logicOp = VK_LOGIC_OP_COPY,
+		.attachmentCount = 1,
+		.pAttachments = &vk_color_blend_attachment,
+		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
+	};
+
+	VkDescriptorSetLayoutBinding vk_set_layout_bindings[] =
+	{
+		{
+			.binding = 0,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+			.pImmutableSamplers = NULL
+		}
+	};
+
+	VkDescriptorSetLayoutCreateInfo vk_set_layout_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.bindingCount = MACRO_ARRAY_LEN(vk_set_layout_bindings),
+		.pBindings = vk_set_layout_bindings
+	};
+
+	VkResult vk_result = vk->vk_table.vkCreateDescriptorSetLayout(vk->vk_device,
+		&vk_set_layout_info, NULL, &vk->vk_scene.depth_map.set_layout);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
+	VkDescriptorSetLayout vk_set_layouts[] =
+	{
+		vk->vk_scene.depth_map.set_layout
+	};
+
+	VkPipelineLayoutCreateInfo vk_pipeline_layout_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.setLayoutCount = MACRO_ARRAY_LEN(vk_set_layouts),
+		.pSetLayouts = vk_set_layouts,
+		.pushConstantRangeCount = 0,
+		.pPushConstantRanges = NULL
+	};
+
+	vk_result = vk->vk_table.vkCreatePipelineLayout(vk->vk_device,
+		&vk_pipeline_layout_info, NULL, &vk->vk_scene.depth_map.pipeline_layout);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+
+	VkGraphicsPipelineCreateInfo vk_pipeline_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.stageCount = MACRO_ARRAY_LEN(vk_shader_stages),
+		.pStages = vk_shader_stages,
+		.pVertexInputState = &vk_vertex_input_info,
+		.pInputAssemblyState = &vk_input_assembly_info,
+		.pTessellationState = NULL,
+		.pViewportState = &vk_viewport_info,
+		.pRasterizationState = &vk_rasterization_info,
+		.pMultisampleState = &vk_multisample_info,
+		.pDepthStencilState = &vk_depth_stencil_info,
+		.pColorBlendState = &vk_color_blend_info,
+		.pDynamicState = &vk_dynamic_state_info,
+		.layout = vk->vk_scene.depth_map.pipeline_layout,
+		.renderPass = vk->vk_scene.render_pass,
+		.subpass = 0,
+		.basePipelineHandle = VK_NULL_HANDLE,
+		.basePipelineIndex = -1
+	};
+
+	vk_result = vk->vk_table.vkCreateGraphicsPipelines(
+		vk->vk_device, VK_NULL_HANDLE, 1, &vk_pipeline_info, NULL, &vk->vk_scene.depth_map.pipeline);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	for(uint32_t i = 0; i < MACRO_ARRAY_LEN(vk_shader_stages); ++i)
+	{
+		vk_destroy_shader(vk, vk_shader_stages[i].module);
+	}
+}
+
+
+private void
+vk_free_depth_map_pipeline(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk->vk_table.vkDestroyPipeline(vk->vk_device, vk->vk_scene.depth_map.pipeline, NULL);
+	vk->vk_table.vkDestroyPipelineLayout(vk->vk_device, vk->vk_scene.depth_map.pipeline_layout, NULL);
+	vk->vk_table.vkDestroyDescriptorSetLayout(vk->vk_device, vk->vk_scene.depth_map.set_layout, NULL);
+}
+
+
+private void
+vk_init_depth_map_consts(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+}
+
+
+private void
+vk_free_depth_map_consts(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+}
+
+
+private void
 vk_init_scene(
 	vk_t vk
 	)
@@ -3690,6 +3967,8 @@ vk_init_scene(
 	vk_init_skybox_consts(vk);
 	vk_init_mesh_pipeline(vk);
 	vk_init_mesh_consts(vk);
+	vk_init_depth_map_pipeline(vk);
+	vk_init_depth_map_consts(vk);
 }
 
 
@@ -3700,6 +3979,8 @@ vk_free_scene(
 {
 	assert_not_null(vk);
 
+	vk_free_depth_map_consts(vk);
+	vk_free_depth_map_pipeline(vk);
 	vk_free_mesh_consts(vk);
 	vk_free_mesh_pipeline(vk);
 	vk_free_skybox_consts(vk);
@@ -3725,7 +4006,7 @@ vk_init_pipelines(
 		},
 		{
 			.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.descriptorCount = info.material_count + 2
+			.descriptorCount = info.material_count + 1 + VK_MAX_FRAMES
 		}
 	};
 
@@ -3734,7 +4015,7 @@ vk_init_pipelines(
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.maxSets = info.material_count + 3,
+		.maxSets = info.material_count + 2 + VK_MAX_FRAMES,
 		.poolSizeCount = MACRO_ARRAY_LEN(vk_pool_sizes),
 		.pPoolSizes = vk_pool_sizes
 	};
@@ -3815,7 +4096,7 @@ vk_init_models(
 
 	while(vk_set_layout < vk_set_layout_end)
 	{
-		*(vk_set_layout++) = vk->vk_scene.mesh.sampler_set_layout;
+		*(vk_set_layout++) = vk->vk_scene.mesh.texture_set_layout;
 	}
 
 	VkDescriptorSetAllocateInfo vk_set_info =
@@ -4292,6 +4573,43 @@ vk_init_framebuffers(
 			vk->vk_device, &vk_framebuffer_info, NULL, &vk_frame->shadow.framebuffer);
 
 
+		VkDescriptorSetAllocateInfo vk_set_info =
+		{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.pNext = NULL,
+			.descriptorPool = vk->vk_descriptor_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &vk->vk_scene.mesh.depth_map_set_layout
+		};
+
+		VkResult vk_result = vk->vk_table.vkAllocateDescriptorSets(
+			vk->vk_device, &vk_set_info, &vk_frame->shadow.set);
+		hard_assert_eq(vk_result, VK_SUCCESS);
+
+		VkDescriptorImageInfo vk_image_info =
+		{
+			.sampler = vk->vk_depth_sampler,
+			.imageView = vk_frame->shadow.image.view,
+			.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+		};
+
+		VkWriteDescriptorSet vk_write_set =
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = NULL,
+			.dstSet = vk_frame->shadow.set,
+			.dstBinding = 0,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &vk_image_info,
+			.pBufferInfo = NULL,
+			.pTexelBufferView = NULL
+		};
+
+		vk->vk_table.vkUpdateDescriptorSets(vk->vk_device, 1, &vk_write_set, 0, NULL);
+
+
 		++vk_frame;
 		++vk_image;
 	}
@@ -4368,7 +4686,7 @@ vk_draw_shadow(
 	VkClearValue vk_clear_values[] =
 	{
 		{
-			.depthStencil = { 0.0f, 0 }
+			.depthStencil = { 1.0f, 0 }
 		}
 	};
 
@@ -4394,7 +4712,7 @@ vk_draw_shadow(
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_shadow.depth.pipeline);
 
 	vk_depth_vert_constant_data_t vk_depth_vert_constant_data;
-	glm_mat4_copy(transform->projection, vk_depth_vert_constant_data.transform);
+	glm_mat4_copy(transform->light_transform, vk_depth_vert_constant_data.transform);
 
 	vk->vk_table.vkCmdPushConstants(vk->vk_barrier->command_buffer,
 		vk->vk_shadow.depth.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
@@ -4486,6 +4804,8 @@ vk_draw_mesh(
 	vk_mesh_vert_ubo_data_t vk_mesh_vert_ubo_data;
 	glm_mat4_copy(transform->projection, vk_mesh_vert_ubo_data.projection);
 	glm_mat4_copy(transform->view, vk_mesh_vert_ubo_data.view);
+	glm_mat4_copy(transform->light_transform, vk_mesh_vert_ubo_data.light_transform);
+	glm_vec4_copy(transform->light_position, vk_mesh_vert_ubo_data.light_position);
 
 	vk_copy_to_buffer(vk, &vk->vk_scene.mesh.ubo_buffer,
 		&vk_mesh_vert_ubo_data, sizeof(vk_mesh_vert_ubo_data));
@@ -4493,10 +4813,12 @@ vk_draw_mesh(
 	vk_skybox_constant_data_t vk_skybox_constant_data;
 	glm_mat4_copy(vk_mesh_vert_ubo_data.projection, vk_skybox_constant_data.transform);
 
-	transform->view[3][0] = 0.0f;
-	transform->view[3][1] = 0.0f;
-	transform->view[3][2] = 0.0f;
-	glm_mat4_mul(vk_skybox_constant_data.transform, transform->view, vk_skybox_constant_data.transform);
+	mat4 view;
+	glm_mat4_copy(vk_mesh_vert_ubo_data.view, view);
+	view[3][0] = 0.0f;
+	view[3][1] = 0.0f;
+	view[3][2] = 0.0f;
+	glm_mat4_mul(vk_skybox_constant_data.transform, view, vk_skybox_constant_data.transform);
 
 	vk->vk_table.vkCmdBindPipeline(vk->vk_barrier->command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.skybox.pipeline);
@@ -4525,6 +4847,10 @@ vk_draw_mesh(
 	vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.mesh.pipeline_layout,
 		0, 1, &vk->vk_scene.mesh.ubo_set, 0, NULL);
+
+	vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.mesh.pipeline_layout,
+		2, 1, &vk_frame->shadow.set, 0, NULL);
 
 	vk_entities_per_model_t* vk_entities_per_model = vk_entity_data;
 	vk_entities_per_model_t* vk_entities_per_model_end =
@@ -4578,6 +4904,18 @@ vk_draw_mesh(
 
 		++vk_entities_per_model;
 		++vk_model;
+	}
+
+	if(vk->vk_preview_depth_map)
+	{
+		vk->vk_table.vkCmdBindPipeline(vk->vk_barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.depth_map.pipeline);
+
+		vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.depth_map.pipeline_layout,
+			0, 1, &vk_frame->shadow.set, 0, NULL);
+
+		vk->vk_table.vkCmdDraw(vk->vk_barrier->command_buffer, 6, 1, 0, 0);
 	}
 
 	vk->vk_table.vkCmdEndRenderPass(vk->vk_barrier->command_buffer);

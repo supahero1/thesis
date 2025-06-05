@@ -20,6 +20,8 @@ layout(binding = 0) uniform UBO
 {
 	mat4 projection;
 	mat4 view;
+	mat4 light_transform;
+	vec4 light_position;
 }
 consts;
 
@@ -32,14 +34,29 @@ layout(location = 3) in mat4 inTransform;
 layout(location = 0) out vec3 outPosition;
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec2 outCoords;
+layout(location = 3) out vec3 outView;
+layout(location = 4) out vec3 outLight;
+layout(location = 5) out vec4 outShadowCoords;
+
+const mat4 toClip = mat4(
+	0.5, 0.0, 0.0, 0.0,
+	0.0, 0.5, 0.0, 0.0,
+	0.0, 0.0, 1.0, 0.0,
+	0.5, 0.5, 0.0, 1.0
+	);
 
 void
 main()
 {
-	vec4 worldPos = inTransform * vec4(inPosition, 1.0);
-    gl_Position = consts.projection * consts.view * worldPos;
+	vec4 inPos = vec4(inPosition, 1.0);
+	vec4 worldPos = inTransform * inPos;
+	gl_Position = consts.projection * consts.view * worldPos;
 
-    outPosition = worldPos.xyz;
-    outNormal = mat3(inTransform) * inNormal;
-    outCoords = inCoords;
+	outPosition = worldPos.xyz;
+	outNormal = mat3(inTransform) * inNormal;
+	outCoords = inCoords;
+
+	outLight = normalize(consts.light_position.xyz - worldPos.xyz);
+	outView = -worldPos.xyz;
+	outShadowCoords = (toClip * consts.light_transform) * worldPos;
 }
