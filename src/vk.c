@@ -2302,6 +2302,85 @@ vk_destroy_shader(
 }
 
 
+private VkPipelineCache
+vk_init_pipeline_cache(
+	vk_t vk,
+	const char* path
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(path);
+
+	VkPipelineCacheCreateInfo vk_pipeline_cache_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.initialDataSize = 0,
+		.pInitialData = NULL
+	};
+
+	file_t file = {0};
+	VkPipelineCache vk_pipeline_cache;
+
+	if(file_exists(path))
+	{
+		bool status = file_read(path, &file);
+		if(status)
+		{
+			vk_pipeline_cache_info.initialDataSize = file.len;
+			vk_pipeline_cache_info.pInitialData = file.data;
+		}
+		else
+		{
+			hard_assert_log("file_read(\"%s\")", path);
+		}
+	}
+
+	VkResult vk_result = vk->vk_table.vkCreatePipelineCache(
+		vk->vk_device, &vk_pipeline_cache_info, NULL, &vk_pipeline_cache);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	file_free(file);
+
+	return vk_pipeline_cache;
+}
+
+
+private void
+vk_free_pipeline_cache(
+	vk_t vk,
+	const char* path,
+	VkPipelineCache vk_pipeline_cache
+	)
+{
+	assert_not_null(vk);
+
+	file_t file;
+	VkResult vk_result = vk->vk_table.vkGetPipelineCacheData(vk->vk_device,
+		vk_pipeline_cache, &file.len, NULL);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	file.data = alloc_malloc(file.len);
+	assert_ptr(file.data, file.len);
+
+	vk_result = vk->vk_table.vkGetPipelineCacheData(vk->vk_device,
+		vk_pipeline_cache, &file.len, file.data);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	bool status = file_write(path, file);
+	if(!status)
+	{
+		hard_assert_log("file_write(\"%s\")", path);
+	}
+
+	file_free(file);
+
+	vk->vk_table.vkDestroyPipelineCache(vk->vk_device, vk_pipeline_cache, NULL);
+
+}
+
+
 private void
 vk_free_sampler(
 	vk_t vk,
@@ -2770,9 +2849,14 @@ vk_init_shadow_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	vk_result = vk->vk_table.vkCreateGraphicsPipelines(
-		vk->vk_device, VK_NULL_HANDLE, 1, &vk_pipeline_info, NULL, &vk->vk_shadow.depth.pipeline);
+	static const char* vk_pipeline_cache_path = "cache/vk_shadow_pipeline.bin";
+	VkPipelineCache vk_pipeline_cache = vk_init_pipeline_cache(vk, vk_pipeline_cache_path);
+
+	vk_result = vk->vk_table.vkCreateGraphicsPipelines(vk->vk_device,
+		vk_pipeline_cache, 1, &vk_pipeline_info, NULL, &vk->vk_shadow.depth.pipeline);
 	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_free_pipeline_cache(vk, vk_pipeline_cache_path, vk_pipeline_cache);
 
 	for(uint32_t i = 0; i < MACRO_ARRAY_LEN(vk_shader_stages); ++i)
 	{
@@ -3229,9 +3313,14 @@ vk_init_skybox_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	vk_result = vk->vk_table.vkCreateGraphicsPipelines(
-		vk->vk_device, VK_NULL_HANDLE, 1, &vk_pipeline_info, NULL, &vk->vk_scene.skybox.pipeline);
+	static const char* vk_pipeline_cache_path = "cache/vk_skybox_pipeline.bin";
+	VkPipelineCache vk_pipeline_cache = vk_init_pipeline_cache(vk, vk_pipeline_cache_path);
+
+	vk_result = vk->vk_table.vkCreateGraphicsPipelines(vk->vk_device,
+		vk_pipeline_cache, 1, &vk_pipeline_info, NULL, &vk->vk_scene.skybox.pipeline);
 	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_free_pipeline_cache(vk, vk_pipeline_cache_path, vk_pipeline_cache);
 
 	for(uint32_t i = 0; i < MACRO_ARRAY_LEN(vk_shader_stages); ++i)
 	{
@@ -3648,9 +3737,14 @@ vk_init_mesh_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	vk_result = vk->vk_table.vkCreateGraphicsPipelines(
-		vk->vk_device, VK_NULL_HANDLE, 1, &vk_pipeline_info, NULL, &vk->vk_scene.mesh.pipeline);
+	static const char* vk_pipeline_cache_path = "cache/vk_mesh_pipeline.bin";
+	VkPipelineCache vk_pipeline_cache = vk_init_pipeline_cache(vk, vk_pipeline_cache_path);
+
+	vk_result = vk->vk_table.vkCreateGraphicsPipelines(vk->vk_device,
+		vk_pipeline_cache, 1, &vk_pipeline_info, NULL, &vk->vk_scene.mesh.pipeline);
 	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_free_pipeline_cache(vk, vk_pipeline_cache_path, vk_pipeline_cache);
 
 	for(uint32_t i = 0; i < MACRO_ARRAY_LEN(vk_shader_stages); ++i)
 	{
@@ -3913,9 +4007,14 @@ vk_init_depth_map_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	vk_result = vk->vk_table.vkCreateGraphicsPipelines(
-		vk->vk_device, VK_NULL_HANDLE, 1, &vk_pipeline_info, NULL, &vk->vk_scene.depth_map.pipeline);
+	static const char* vk_pipeline_cache_path = "cache/vk_depth_map_pipeline.bin";
+	VkPipelineCache vk_pipeline_cache = vk_init_pipeline_cache(vk, vk_pipeline_cache_path);
+
+	vk_result = vk->vk_table.vkCreateGraphicsPipelines(vk->vk_device,
+		vk_pipeline_cache, 1, &vk_pipeline_info, NULL, &vk->vk_scene.depth_map.pipeline);
 	hard_assert_eq(vk_result, VK_SUCCESS);
+
+	vk_free_pipeline_cache(vk, vk_pipeline_cache_path, vk_pipeline_cache);
 
 	for(uint32_t i = 0; i < MACRO_ARRAY_LEN(vk_shader_stages); ++i)
 	{
@@ -4006,7 +4105,7 @@ vk_init_pipelines(
 		},
 		{
 			.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.descriptorCount = info.material_count + 1 + VK_MAX_FRAMES
+			.descriptorCount = info.material_count + 2 + VK_MAX_FRAMES
 		}
 	};
 
@@ -4015,7 +4114,7 @@ vk_init_pipelines(
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.maxSets = info.material_count + 2 + VK_MAX_FRAMES,
+		.maxSets = info.material_count + 3 + VK_MAX_FRAMES,
 		.poolSizeCount = MACRO_ARRAY_LEN(vk_pool_sizes),
 		.pPoolSizes = vk_pool_sizes
 	};

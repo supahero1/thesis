@@ -76,16 +76,16 @@ app: shaders
 
 	$(CP) bin/thesis_app thesis/
 
-	kill -0 "$$(cat /run/user/1000/monado.pid)" 2>/dev/null; \
-	runtime=; \
-	if [[ "$$?" -eq 0 ]]; then \
+	pid_file=/run/user/1000/monado.pid; \
+	if [[ ! -e "$$pid_file" ]] || ! kill -0 "$$(cat $$pid_file 2>/dev/null)" 2>/dev/null; then \
 		$(CP) /etc/openxr/1/monado_runtime.json ~/.config/openxr/1/active_runtime.json; \
-		runtime=monado; \
+		xr_runtime=monado; \
 	else \
 		$(CP) /etc/openxr/1/wivrn_runtime.json ~/.config/openxr/1/active_runtime.json; \
-		runtime=wivrn; \
+		xr_runtime=wivrn; \
 	fi; \
-	cd thesis; $(VALGRIND_CALL) ./thesis_app --runtime=$$runtime \
+	cd thesis; $(VALGRIND_CALL) ./thesis_app \
+		--xr_runtime=$$xr_runtime \
 		--vk_sample_shading=$(VK_SAMPLE_SHADING) \
 		--vk_mipmap_levels=$(VK_MIPMAP_LEVELS) \
 		--vk_anisotropy=$(VK_ANISOTROPY) \

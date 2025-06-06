@@ -60,6 +60,11 @@ app_init(
 	hard_assert_true(dir_exists("assets"));
 	hard_assert_true(dir_exists("shaders"));
 
+	if(!dir_exists("cache"))
+	{
+		dir_create("cache");
+	}
+
 	sigset_t set;
 	sigemptyset(&set);
 	sigaddset(&set, SIGINT);
@@ -78,14 +83,14 @@ app_init(
 		},
 		(simulation_light_t)
 		{
-			.pos = { 2500.0f, 100.0f, 5000.0f },
+			.pos = { 2500.0f, 500.0f, 5000.0f },
 			.target = { 0.0f, 0.0f, 0.0f },
-			.left = -38000.0f,
-			.right = 26000.0f,
-			.bottom = -4100.0f,
-			.top = 300.0f,
-			.near = 100.0f,
-			.far = 40000.0f
+			.left = -35000.0f,
+			.right = 25000.0f,
+			.bottom = -5300.0f,
+			.top = 500.0f,
+			.near = 1000.0f,
+			.far = 50000.0f
 		},
 		"assets/skybox-clouds-in-the-sky-spatial-io"
 		);
