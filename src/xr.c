@@ -17,103 +17,20 @@
 
 #include <thesis/xr.h>
 #include <thesis/debug.h>
+#include <thesis/openxr.h>
+#include <thesis/shared.h>
+#include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
-
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-#include <volk.h>
-
-#define XR_USE_PLATFORM_WAYLAND
-#define XR_USE_GRAPHICS_API_VULKAN
-#include <openxr/openxr_platform.h>
-
-#define VULKAN_MAX_IMAGES 8
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 
-typedef struct graphics_frame
+struct xr
 {
-	VkImage image;
-	VkImageView view;
-	VkFramebuffer frame_buffer;
-	VkCommandBuffer command_buffer;
-}
-graphics_frame_t;
-
-typedef enum graphics_barrier_semaphore
-{
-	GRAPHICS_BARRIER_SEMAPHORE_IMAGE_AVAILABLE,
-	GRAPHICS_BARRIER_SEMAPHORE_RENDER_FINISHED,
-	MACRO_ENUM_BITS(GRAPHICS_BARRIER_SEMAPHORE)
-}
-graphics_barrier_semaphore_t;
-
-typedef enum graphics_barrier_fence
-{
-	GRAPHICS_BARRIER_FENCE_IN_FLIGHT,
-	MACRO_ENUM_BITS(GRAPHICS_BARRIER_FENCE)
-}
-graphics_barrier_fence_t;
-
-typedef struct graphics_barrier
-{
-	VkSemaphore semaphores[GRAPHICS_BARRIER_SEMAPHORE__COUNT];
-	VkFence fences[GRAPHICS_BARRIER_FENCE__COUNT];
-}
-graphics_barrier_t;
-
-typedef enum graphics_image_type
-{
-	GRAPHICS_IMAGE_TYPE_DEPTH_STENCIL,
-	GRAPHICS_IMAGE_TYPE_MULTISAMPLED,
-	GRAPHICS_IMAGE_TYPE_TEXTURE,
-	MACRO_ENUM_BITS(GRAPHICS_IMAGE_TYPE)
-}
-graphics_image_type_t;
-
-typedef struct graphics_image
-{
-	const char* path;
-
-	uint32_t width;
-	uint32_t height;
-	uint32_t layers;
-
-	VkFormat format;
-	graphics_image_type_t type;
-
-	VkImage image;
-	VkImageView view;
-	VkDeviceMemory memory;
-
-	VkImageAspectFlags aspect;
-	VkImageUsageFlags usage;
-	VkSampleCountFlagBits samples;
-}
-graphics_image_t;
-
-typedef struct graphics_vertex_input
-{
-	pair_t pos;
-	pair_t tex_coord;
-}
-graphics_vertex_input_t;
-
-typedef struct graphics_vertex_consts
-{
-	pair_t window_size;
-}
-graphics_vertex_consts_t;
-
-struct graphics
-{
-	window_t window;
-
-	graphics_event_table_t event_table;
+	simulation_t simulation;
 
 #ifndef NDEBUG
 	XrDebugUtilsMessengerEXT xr_debug_messenger;
@@ -154,62 +71,10 @@ struct graphics
 	uint32_t min_image_count;
 	VkSurfaceTransformFlagBitsKHR transform;
 	VkPresentModeKHR present_mode;
-
-	VkSwapchainKHR swapchain;
-	uint32_t image_count;
-	graphics_frame_t frames[VULKAN_MAX_IMAGES];
-
-	graphics_barrier_t barriers[VULKAN_MAX_IMAGES];
-	graphics_barrier_t* barrier;
-
-	VkViewport viewport;
-	VkRect2D scissor;
-
-	VkBuffer copy_buffer;
-	VkDeviceMemory copy_buffer_memory;
-
-	VkSampler sampler;
-
-	graphics_image_t depth_buffer;
-	graphics_image_t multisampling_buffer;
-
-	graphics_image_t textures[1];
-
-	VkBuffer vertex_input_buffer;
-	VkDeviceMemory vertex_input_memory;
-
-	VkBuffer instance_input_buffer;
-	VkDeviceMemory instance_input_memory;
-
-	VkBuffer draw_count_buffer;
-	VkDeviceMemory draw_count_memory;
-
-	graphics_vertex_consts_t consts;
-
-	VkDescriptorSetLayout descriptors;
-	VkRenderPass render_pass;
-	VkPipelineLayout pipeline_layout;
-	VkPipeline pipeline;
-	VkDescriptorPool descriptor_pool;
-	VkDescriptorSet descriptor_set;
-
-	graphics_draw_data_t* draw_data_buffer;
-	uint32_t draw_data_used;
-	uint32_t draw_data_size;
-
-	thread_t thread;
-	uint32_t frame_number;
-	_Atomic uint8_t should_run;
-
-	sync_mtx_t resize_mtx;
-	sync_cond_t resize_cond;
-	bool resized;
-
-	sync_mtx_t window_mtx;
 };
 
 
-private const char* graphics_xr_instance_extensions[] =
+private const char* xr_xr_instance_extensions[] =
 {
 #ifndef NDEBUG
 	XR_EXT_DEBUG_UTILS_EXTENSION_NAME,
@@ -219,34 +84,34 @@ private const char* graphics_xr_instance_extensions[] =
 	XR_EXT_HAND_TRACKING_EXTENSION_NAME,
 };
 
-private const char* graphics_xr_instance_layers[] =
+private const char* xr_xr_instance_layers[] =
 {
 #ifndef NDEBUG
 	"XR_APILAYER_LUNARG_core_validation",
 #endif
 };
 
-private const char* graphics_vk_instance_extensions[] =
+private const char* xr_vk_instance_extensions[] =
 {
 #ifndef NDEBUG
 	VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #endif
 };
 
-private const char* graphics_vk_instance_layers[] =
+private const char* xr_vk_instance_layers[] =
 {
 #ifndef NDEBUG
 	"VK_LAYER_KHRONOS_validation"
 #endif
 };
 
-private const char* graphics_vk_device_extensions[] =
+private const char* xr_vk_device_extensions[] =
 {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 	VK_KHR_MULTIVIEW_EXTENSION_NAME,
 };
 
-private const char* graphics_vk_device_layers[] =
+private const char* xr_vk_device_layers[] =
 {
 #ifndef NDEBUG
 	"VK_LAYER_KHRONOS_validation"
@@ -254,10 +119,22 @@ private const char* graphics_vk_device_layers[] =
 };
 
 
+private void
+xr_init_options(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	puts("\nXR options:");
+
+}
+
+
 #ifndef NDEBUG
 
 private XRAPI_ATTR XrBool32 XRAPI_CALL
-graphics_xr_debug_callback(
+xr_xr_debug_callback(
 	XrDebugUtilsMessageSeverityFlagsEXT severity,
 	XrDebugUtilsMessageTypeFlagsEXT type,
 	const XrDebugUtilsMessengerCallbackDataEXT* data,
@@ -269,7 +146,7 @@ graphics_xr_debug_callback(
 }
 
 private VKAPI_ATTR VkBool32 VKAPI_CALL
-graphics_vk_debug_callback(
+xr_vk_debug_callback(
 	VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 	VkDebugUtilsMessageTypeFlagsEXT type,
 	const VkDebugUtilsMessengerCallbackDataEXT* data,
@@ -284,16 +161,16 @@ graphics_vk_debug_callback(
 
 
 private void*
-graphics_xr_get_func(
-	graphics_t graphics,
+xr_xr_get_func(
+	xr_t xr,
 	const char* name
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(name);
 
 	PFN_xrVoidFunction func;
-	XrResult xr_result = xrGetInstanceProcAddr(graphics->xr_instance, name, &func);
+	XrResult xr_result = xrGetInstanceProcAddr(xr->xr_instance, name, &func);
 	assert_eq(xr_result, XR_SUCCESS);
 	assert_not_null(func);
 
@@ -302,15 +179,15 @@ graphics_xr_get_func(
 
 
 private void*
-graphics_vk_get_func(
-	graphics_t graphics,
+xr_vk_get_func(
+	xr_t xr,
 	const char* name
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(name);
 
-	void* func = graphics->vkGetInstanceProcAddr(graphics->vk_instance, name);
+	void* func = xr->vkGetInstanceProcAddr(xr->vk_instance, name);
 	assert_not_null(func);
 
 	return func;
@@ -318,7 +195,7 @@ graphics_vk_get_func(
 
 
 private void
-graphics_free_str_array(
+xr_free_str_array(
 	const char** start,
 	const char** end
 	)
@@ -334,12 +211,12 @@ graphics_free_str_array(
 
 
 private const char**
-graphics_xr_get_instance_extensions(
-	graphics_t graphics,
+xr_xr_get_instance_extensions(
+	xr_t xr,
 	const char** extension
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(extension);
 
 	uint32_t xr_instance_extension_count = 0;
@@ -374,14 +251,14 @@ graphics_xr_get_instance_extensions(
 
 	puts("");
 
-	const char* const* graphics_xr_instance_extension = graphics_xr_instance_extensions;
-	const char* const* graphics_xr_instance_extension_end =
-		graphics_xr_instance_extension + MACRO_ARRAY_LEN(graphics_xr_instance_extensions);
+	const char* const* xr_xr_instance_extension = xr_xr_instance_extensions;
+	const char* const* xr_xr_instance_extension_end =
+		xr_xr_instance_extension + MACRO_ARRAY_LEN(xr_xr_instance_extensions);
 
-	while(graphics_xr_instance_extension < graphics_xr_instance_extension_end)
+	while(xr_xr_instance_extension < xr_xr_instance_extension_end)
 	{
 		bool found = false;
-		const char* extension_name = *(graphics_xr_instance_extension++);
+		const char* extension_name = *(xr_xr_instance_extension++);
 
 		xr_instance_extension = xr_instance_extensions;
 		while(xr_instance_extension < xr_instance_extension_end)
@@ -404,12 +281,12 @@ graphics_xr_get_instance_extensions(
 
 
 private const char**
-graphics_xr_get_instance_layers(
-	graphics_t graphics,
+xr_xr_get_instance_layers(
+	xr_t xr,
 	const char** layer
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(layer);
 
 	uint32_t xr_instance_layer_count = 0;
@@ -444,14 +321,14 @@ graphics_xr_get_instance_layers(
 
 	puts("");
 
-	const char* const* graphics_xr_instance_layer = graphics_xr_instance_layers;
-	const char* const* graphics_xr_instance_layer_end =
-		graphics_xr_instance_layer + MACRO_ARRAY_LEN(graphics_xr_instance_layers);
+	const char* const* xr_xr_instance_layer = xr_xr_instance_layers;
+	const char* const* xr_xr_instance_layer_end =
+		xr_xr_instance_layer + MACRO_ARRAY_LEN(xr_xr_instance_layers);
 
-	while(graphics_xr_instance_layer < graphics_xr_instance_layer_end)
+	while(xr_xr_instance_layer < xr_xr_instance_layer_end)
 	{
 		bool found = false;
-		const char* layer_name = *(graphics_xr_instance_layer++);
+		const char* layer_name = *(xr_xr_instance_layer++);
 
 		xr_instance_layer = xr_instance_layers;
 		while(xr_instance_layer < xr_instance_layer_end)
@@ -474,21 +351,21 @@ graphics_xr_get_instance_layers(
 
 
 private void
-graphics_init_xr_instance(
-	graphics_t graphics
+xr_init_xr_instance(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
 	const char* xr_instance_extensions[64];
 	const char** xr_instance_extension =
-		graphics_xr_get_instance_extensions(graphics, xr_instance_extensions);
+		xr_xr_get_instance_extensions(xr, xr_instance_extensions);
 	assert_lt(xr_instance_extension,
 		xr_instance_extensions + MACRO_ARRAY_LEN(xr_instance_extensions));
 
 	const char* xr_instance_layers[64];
 	const char** xr_instance_layer =
-		graphics_xr_get_instance_layers(graphics, xr_instance_layers);
+		xr_xr_get_instance_layers(xr, xr_instance_layers);
 	assert_lt(xr_instance_layer,
 		xr_instance_layers + MACRO_ARRAY_LEN(xr_instance_layers));
 
@@ -524,30 +401,30 @@ graphics_init_xr_instance(
 			XR_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
 			XR_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT |
 			XR_DEBUG_UTILS_MESSAGE_TYPE_CONFORMANCE_BIT_EXT,
-		.userCallback = graphics_xr_debug_callback,
+		.userCallback = xr_xr_debug_callback,
 		.userData = NULL
 	};
 
 	xr_instance_info.next = &xr_debug_info;
 #endif
 
-	XrResult xr_result = xrCreateInstance(&xr_instance_info, &graphics->xr_instance);
+	XrResult xr_result = xrCreateInstance(&xr_instance_info, &xr->xr_instance);
 	assert_eq(xr_result, XR_SUCCESS);
 
-	graphics_free_str_array(xr_instance_extensions, xr_instance_extension);
-	graphics_free_str_array(xr_instance_layers, xr_instance_layer);
+	xr_free_str_array(xr_instance_extensions, xr_instance_extension);
+	xr_free_str_array(xr_instance_layers, xr_instance_layer);
 
 #ifndef NDEBUG
 	PFN_xrCreateDebugUtilsMessengerEXT xrCreateDebugUtilsMessengerEXT =
-		graphics_xr_get_func(graphics, "xrCreateDebugUtilsMessengerEXT");
+		xr_xr_get_func(xr, "xrCreateDebugUtilsMessengerEXT");
 
 	xr_result = xrCreateDebugUtilsMessengerEXT(
-		graphics->xr_instance, &xr_debug_info, &graphics->xr_debug_messenger);
+		xr->xr_instance, &xr_debug_info, &xr->xr_debug_messenger);
 	assert_eq(xr_result, XR_SUCCESS);
 #endif
 
 	XrInstanceProperties xr_instance_properties = {XR_TYPE_INSTANCE_PROPERTIES};
-	xr_result = xrGetInstanceProperties(graphics->xr_instance, &xr_instance_properties);
+	xr_result = xrGetInstanceProperties(xr->xr_instance, &xr_instance_properties);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	printf(
@@ -564,7 +441,7 @@ graphics_init_xr_instance(
 		.next = NULL,
 		.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY
 	};
-	xr_result = xrGetSystem(graphics->xr_instance, &xr_system_info, &graphics->xr_system);
+	xr_result = xrGetSystem(xr->xr_instance, &xr_system_info, &xr->xr_system);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	XrSystemHandTrackingPropertiesEXT xr_hand_tracking_properties =
@@ -579,8 +456,8 @@ graphics_init_xr_instance(
 		.next = &xr_hand_tracking_properties
 	};
 
-	xr_result = xrGetSystemProperties(graphics->xr_instance,
-		graphics->xr_system, &xr_system_properties);
+	xr_result = xrGetSystemProperties(xr->xr_instance,
+		xr->xr_system, &xr_system_properties);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	assert_true(xr_hand_tracking_properties.supportsHandTracking);
@@ -604,30 +481,30 @@ graphics_init_xr_instance(
 
 
 private void
-graphics_free_xr_instance(
-	graphics_t graphics
+xr_free_xr_instance(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
 #ifndef NDEBUG
 	PFN_xrDestroyDebugUtilsMessengerEXT xrDestroyDebugUtilsMessengerEXT =
-		graphics_xr_get_func(graphics, "xrDestroyDebugUtilsMessengerEXT");
+		xr_xr_get_func(xr, "xrDestroyDebugUtilsMessengerEXT");
 
-	xrDestroyDebugUtilsMessengerEXT(graphics->xr_debug_messenger);
+	xrDestroyDebugUtilsMessengerEXT(xr->xr_debug_messenger);
 #endif
 
-	xrDestroyInstance(graphics->xr_instance);
+	xrDestroyInstance(xr->xr_instance);
 }
 
 
 private const char**
-graphics_vk_get_instance_extensions(
-	graphics_t graphics,
+xr_vk_get_instance_extensions(
+	xr_t xr,
 	const char** extension
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(extension);
 
 	uint32_t vk_instance_extension_count = 0;
@@ -663,14 +540,14 @@ graphics_vk_get_instance_extensions(
 
 	puts("");
 
-	const char* const* graphics_vk_instance_extension = graphics_vk_instance_extensions;
-	const char* const* graphics_vk_instance_extension_end =
-		graphics_vk_instance_extension + MACRO_ARRAY_LEN(graphics_vk_instance_extensions);
+	const char* const* xr_vk_instance_extension = xr_vk_instance_extensions;
+	const char* const* xr_vk_instance_extension_end =
+		xr_vk_instance_extension + MACRO_ARRAY_LEN(xr_vk_instance_extensions);
 
-	while(graphics_vk_instance_extension < graphics_vk_instance_extension_end)
+	while(xr_vk_instance_extension < xr_vk_instance_extension_end)
 	{
 		bool found = false;
-		const char* extension_name = *(graphics_vk_instance_extension++);
+		const char* extension_name = *(xr_vk_instance_extension++);
 
 		vk_instance_extension = vk_instance_extensions;
 		while(vk_instance_extension < vk_instance_extension_end)
@@ -723,12 +600,12 @@ graphics_vk_get_instance_extensions(
 
 
 private const char**
-graphics_vk_get_instance_layers(
-	graphics_t graphics,
+xr_vk_get_instance_layers(
+	xr_t xr,
 	const char** layer
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(layer);
 
 	uint32_t vk_instance_layer_count = 0;
@@ -762,14 +639,14 @@ graphics_vk_get_instance_layers(
 
 	puts("");
 
-	const char* const* graphics_vk_instance_layer = graphics_vk_instance_layers;
-	const char* const* graphics_vk_instance_layer_end =
-		graphics_vk_instance_layer + MACRO_ARRAY_LEN(graphics_vk_instance_layers);
+	const char* const* xr_vk_instance_layer = xr_vk_instance_layers;
+	const char* const* xr_vk_instance_layer_end =
+		xr_vk_instance_layer + MACRO_ARRAY_LEN(xr_vk_instance_layers);
 
-	while(graphics_vk_instance_layer < graphics_vk_instance_layer_end)
+	while(xr_vk_instance_layer < xr_vk_instance_layer_end)
 	{
 		bool found = false;
-		const char* layer_name = *(graphics_vk_instance_layer++);
+		const char* layer_name = *(xr_vk_instance_layer++);
 
 		vk_instance_layer = vk_instance_layers;
 		while(vk_instance_layer < vk_instance_layer_end)
@@ -792,18 +669,18 @@ graphics_vk_get_instance_layers(
 
 
 private void
-graphics_init_vk_instance(
-	graphics_t graphics
+xr_init_vk_instance(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
-	graphics->vkGetInstanceProcAddr = window_get_vulkan_proc_addr_fn();
-	assert_not_null(graphics->vkGetInstanceProcAddr);
+	xr->vkGetInstanceProcAddr = window_get_vulkan_proc_addr_fn();
+	assert_not_null(xr->vkGetInstanceProcAddr);
 
-	volkInitializeCustom(graphics->vkGetInstanceProcAddr);
+	volkInitializeCustom(xr->vkGetInstanceProcAddr);
 
-	XrGraphicsRequirementsVulkanKHR xr_graphics_requirements =
+	XrGraphicsRequirementsVulkanKHR xr_xr_requirements =
 	{
 		.type = XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR,
 		.next = NULL,
@@ -812,21 +689,21 @@ graphics_init_vk_instance(
 	};
 
 	PFN_xrGetVulkanGraphicsRequirementsKHR xrGetVulkanGraphicsRequirementsKHR =
-		graphics_xr_get_func(graphics, "xrGetVulkanGraphicsRequirementsKHR");
+		xr_xr_get_func(xr, "xrGetVulkanGraphicsRequirementsKHR");
 
 	XrResult xr_result = xrGetVulkanGraphicsRequirementsKHR(
-		graphics->xr_instance, graphics->xr_system, &xr_graphics_requirements);
+		xr->xr_instance, xr->xr_system, &xr_xr_requirements);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	const char* vk_instance_extensions[64];
 	const char** vk_instance_extension =
-		graphics_vk_get_instance_extensions(graphics, vk_instance_extensions);
+		xr_vk_get_instance_extensions(xr, vk_instance_extensions);
 	assert_lt(vk_instance_extension,
 		vk_instance_extensions + MACRO_ARRAY_LEN(vk_instance_extensions));
 
 	const char* vk_instance_layers[64];
 	const char** vk_instance_layer =
-		graphics_vk_get_instance_layers(graphics, vk_instance_layers);
+		xr_vk_get_instance_layers(xr, vk_instance_layers);
 	assert_lt(vk_instance_layer,
 		vk_instance_layers + MACRO_ARRAY_LEN(vk_instance_layers));
 
@@ -864,7 +741,7 @@ graphics_init_vk_instance(
 			VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
 			VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
 			VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-		.pfnUserCallback = graphics_vk_debug_callback,
+		.pfnUserCallback = xr_vk_debug_callback,
 		.pUserData = NULL
 	};
 
@@ -875,7 +752,7 @@ graphics_init_vk_instance(
 	{
 		.type = XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR,
 		.next = NULL,
-		.systemId = graphics->xr_system,
+		.systemId = xr->xr_system,
 		.createFlags = 0,
 		.pfnGetInstanceProcAddr = vkGetInstanceProcAddr,
 		.vulkanCreateInfo = &vk_instance_info,
@@ -883,80 +760,80 @@ graphics_init_vk_instance(
 	};
 
 	PFN_xrCreateVulkanInstanceKHR xrCreateVulkanInstanceKHR =
-		graphics_xr_get_func(graphics, "xrCreateVulkanInstanceKHR");
+		xr_xr_get_func(xr, "xrCreateVulkanInstanceKHR");
 
 	VkResult vk_result;
-	xr_result = xrCreateVulkanInstanceKHR(graphics->xr_instance,
-		&xr_vk_instance_info, &graphics->vk_instance, &vk_result);
+	xr_result = xrCreateVulkanInstanceKHR(xr->xr_instance,
+		&xr_vk_instance_info, &xr->vk_instance, &vk_result);
 	assert_eq(xr_result, XR_SUCCESS);
 	assert_eq(vk_result, VK_SUCCESS);
 
-	graphics_free_str_array(vk_instance_extensions, vk_instance_extension);
-	graphics_free_str_array(vk_instance_layers, vk_instance_layer);
+	xr_free_str_array(vk_instance_extensions, vk_instance_extension);
+	xr_free_str_array(vk_instance_layers, vk_instance_layer);
 
 #ifndef NDEBUG
 	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT =
-		graphics_vk_get_func(graphics, "vkCreateDebugUtilsMessengerEXT");
+		xr_vk_get_func(xr, "vkCreateDebugUtilsMessengerEXT");
 
-	vk_result = vkCreateDebugUtilsMessengerEXT(graphics->vk_instance,
-		&vk_debug_info, NULL, &graphics->vk_debug_messenger);
+	vk_result = vkCreateDebugUtilsMessengerEXT(xr->vk_instance,
+		&vk_debug_info, NULL, &xr->vk_debug_messenger);
 	assert_eq(vk_result, VK_SUCCESS);
 #endif
 
-	volkLoadInstanceOnly(graphics->vk_instance);
+	volkLoadInstanceOnly(xr->vk_instance);
 }
 
 
 private void
-graphics_free_vk_instance(
-	graphics_t graphics
+xr_free_vk_instance(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
 #ifndef NDEBUG
 	/* Volk loaded the function already */
 	vkDestroyDebugUtilsMessengerEXT(
-		graphics->vk_instance, graphics->vk_debug_messenger, NULL);
+		xr->vk_instance, xr->vk_debug_messenger, NULL);
 #endif
 
-	vkDestroyInstance(graphics->vk_instance, NULL);
+	vkDestroyInstance(xr->vk_instance, NULL);
 
 	volkFinalize();
 }
 
 
 private void
-graphics_init_vk_physical_device(
-	graphics_t graphics
+xr_init_vk_physical_device(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
 	XrVulkanGraphicsDeviceGetInfoKHR xr_vk_device_info =
 	{
 		.type = XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR,
 		.next = NULL,
-		.systemId = graphics->xr_system,
-		.vulkanInstance = graphics->vk_instance
+		.systemId = xr->xr_system,
+		.vulkanInstance = xr->vk_instance
 	};
 
 	PFN_xrGetVulkanGraphicsDevice2KHR xrGetVulkanGraphicsDevice2KHR =
-		graphics_xr_get_func(graphics, "xrGetVulkanGraphicsDevice2KHR");
+		xr_xr_get_func(xr, "xrGetVulkanGraphicsDevice2KHR");
 
 	XrResult xr_result = xrGetVulkanGraphicsDevice2KHR(
-		graphics->xr_instance, &xr_vk_device_info, &graphics->vk_physical_device);
+		xr->xr_instance, &xr_vk_device_info, &xr->vk_physical_device);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	uint32_t vk_queue_family_count = 0;
 	vkGetPhysicalDeviceQueueFamilyProperties(
-		graphics->vk_physical_device, &vk_queue_family_count, NULL);
+		xr->vk_physical_device, &vk_queue_family_count, NULL);
 	assert_gt(vk_queue_family_count, 0);
 
 	VkQueueFamilyProperties vk_queue_family_properties[vk_queue_family_count];
 
 	vkGetPhysicalDeviceQueueFamilyProperties(
-		graphics->vk_physical_device, &vk_queue_family_count, vk_queue_family_properties);
+		xr->vk_physical_device, &vk_queue_family_count, vk_queue_family_properties);
 	assert_gt(vk_queue_family_count, 0);
 
 	VkQueueFamilyProperties* vk_queue_family_property = vk_queue_family_properties;
@@ -974,33 +851,33 @@ graphics_init_vk_physical_device(
 	}
 
 	assert_lt(vk_queue_family_property, vk_queue_family_property_end);
-	graphics->vk_queue_id = vk_queue_family_property - vk_queue_family_properties;
+	xr->vk_queue_id = vk_queue_family_property - vk_queue_family_properties;
 }
 
 
 private void
-graphics_free_vk_physical_device(
-	graphics_t graphics
+xr_free_vk_physical_device(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
 	/* Physical devices are not freed */
 }
 
 
 private const char**
-graphics_vk_get_device_extensions(
-	graphics_t graphics,
+xr_vk_get_device_extensions(
+	xr_t xr,
 	const char** extension
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(extension);
 
 	uint32_t vk_device_extension_count = 0;
 	vkEnumerateDeviceExtensionProperties(
-		graphics->vk_physical_device, NULL, &vk_device_extension_count, NULL);
+		xr->vk_physical_device, NULL, &vk_device_extension_count, NULL);
 
 	VkExtensionProperties vk_device_extensions[vk_device_extension_count];
 
@@ -1008,7 +885,7 @@ graphics_vk_get_device_extensions(
 	VkExtensionProperties* vk_device_extension_end =
 		vk_device_extension + vk_device_extension_count;
 
-	vkEnumerateDeviceExtensionProperties(graphics->vk_physical_device,
+	vkEnumerateDeviceExtensionProperties(xr->vk_physical_device,
 		NULL, &vk_device_extension_count, vk_device_extensions);
 
 	puts("VK device extensions:");
@@ -1024,14 +901,14 @@ graphics_vk_get_device_extensions(
 
 	puts("");
 
-	const char* const* graphics_vk_device_extension = graphics_vk_device_extensions;
-	const char* const* graphics_vk_device_extension_end =
-		graphics_vk_device_extension + MACRO_ARRAY_LEN(graphics_vk_device_extensions);
+	const char* const* xr_vk_device_extension = xr_vk_device_extensions;
+	const char* const* xr_vk_device_extension_end =
+		xr_vk_device_extension + MACRO_ARRAY_LEN(xr_vk_device_extensions);
 
-	while(graphics_vk_device_extension < graphics_vk_device_extension_end)
+	while(xr_vk_device_extension < xr_vk_device_extension_end)
 	{
 		bool found = false;
-		const char* extension_name = *(graphics_vk_device_extension++);
+		const char* extension_name = *(xr_vk_device_extension++);
 
 		vk_device_extension = vk_device_extensions;
 		while(vk_device_extension < vk_device_extension_end)
@@ -1052,16 +929,16 @@ graphics_vk_get_device_extensions(
 	uint32_t xr_vk_device_extension_count = 0;
 
 	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensionsKHR =
-		graphics_xr_get_func(graphics, "xrGetVulkanDeviceExtensionsKHR");
+		xr_xr_get_func(xr, "xrGetVulkanDeviceExtensionsKHR");
 
-	XrResult xr_result = xrGetVulkanDeviceExtensionsKHR(graphics->xr_instance,
-		graphics->xr_system, 0, &xr_vk_device_extension_count, NULL);
+	XrResult xr_result = xrGetVulkanDeviceExtensionsKHR(xr->xr_instance,
+		xr->xr_system, 0, &xr_vk_device_extension_count, NULL);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	char xr_vk_device_extensions[xr_vk_device_extension_count + 1];
 	xr_vk_device_extensions[xr_vk_device_extension_count] = '\0';
 
-	xr_result = xrGetVulkanDeviceExtensionsKHR(graphics->xr_instance, graphics->xr_system,
+	xr_result = xrGetVulkanDeviceExtensionsKHR(xr->xr_instance, xr->xr_system,
 		xr_vk_device_extension_count, &xr_vk_device_extension_count, xr_vk_device_extensions);
 	assert_eq(xr_result, XR_SUCCESS);
 
@@ -1095,24 +972,24 @@ graphics_vk_get_device_extensions(
 
 
 private const char**
-graphics_vk_get_device_layers(
-	graphics_t graphics,
+xr_vk_get_device_layers(
+	xr_t xr,
 	const char** layer
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 	assert_not_null(layer);
 
 	uint32_t vk_device_layer_count = 0;
 	vkEnumerateDeviceLayerProperties(
-		graphics->vk_physical_device, &vk_device_layer_count, NULL);
+		xr->vk_physical_device, &vk_device_layer_count, NULL);
 
 	VkLayerProperties vk_device_layers[vk_device_layer_count];
 
 	VkLayerProperties* vk_device_layer = vk_device_layers;
 	VkLayerProperties* vk_device_layer_end = vk_device_layer + vk_device_layer_count;
 
-	vkEnumerateDeviceLayerProperties(graphics->vk_physical_device,
+	vkEnumerateDeviceLayerProperties(xr->vk_physical_device,
 		&vk_device_layer_count, vk_device_layers);
 
 	puts("VK device layers:");
@@ -1128,14 +1005,14 @@ graphics_vk_get_device_layers(
 
 	puts("");
 
-	const char* const* graphics_vk_device_layer = graphics_vk_device_layers;
-	const char* const* graphics_vk_device_layer_end =
-		graphics_vk_device_layer + MACRO_ARRAY_LEN(graphics_vk_device_layers);
+	const char* const* xr_vk_device_layer = xr_vk_device_layers;
+	const char* const* xr_vk_device_layer_end =
+		xr_vk_device_layer + MACRO_ARRAY_LEN(xr_vk_device_layers);
 
-	while(graphics_vk_device_layer < graphics_vk_device_layer_end)
+	while(xr_vk_device_layer < xr_vk_device_layer_end)
 	{
 		bool found = false;
-		const char* layer_name = *(graphics_vk_device_layer++);
+		const char* layer_name = *(xr_vk_device_layer++);
 
 		vk_device_layer = vk_device_layers;
 		while(vk_device_layer < vk_device_layer_end)
@@ -1158,21 +1035,21 @@ graphics_vk_get_device_layers(
 
 
 private void
-graphics_init_vk_logical_device(
-	graphics_t graphics
+xr_init_vk_logical_device(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
 	const char* vk_device_extensions[64];
 	const char** vk_device_extension =
-		graphics_vk_get_device_extensions(graphics, vk_device_extensions);
+		xr_vk_get_device_extensions(xr, vk_device_extensions);
 	assert_lt(vk_device_extension,
 		vk_device_extensions + MACRO_ARRAY_LEN(vk_device_extensions));
 
 	const char* vk_device_layers[64];
 	const char** vk_device_layer =
-		graphics_vk_get_device_layers(graphics, vk_device_layers);
+		xr_vk_get_device_layers(xr, vk_device_layers);
 	assert_lt(vk_device_layer,
 		vk_device_layers + MACRO_ARRAY_LEN(vk_device_layers));
 
@@ -1183,7 +1060,7 @@ graphics_init_vk_logical_device(
 		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.queueFamilyIndex = graphics->vk_queue_id,
+		.queueFamilyIndex = xr->vk_queue_id,
 		.queueCount = 1,
 		.pQueuePriorities = &vk_queue_priority
 	};
@@ -1222,62 +1099,62 @@ graphics_init_vk_logical_device(
 	{
 		.type = XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR,
 		.next = NULL,
-		.systemId = graphics->xr_system,
+		.systemId = xr->xr_system,
 		.createFlags = 0,
-		.pfnGetInstanceProcAddr = graphics->vkGetInstanceProcAddr,
-		.vulkanPhysicalDevice = graphics->vk_physical_device,
+		.pfnGetInstanceProcAddr = xr->vkGetInstanceProcAddr,
+		.vulkanPhysicalDevice = xr->vk_physical_device,
 		.vulkanCreateInfo = &vk_device_info,
 		.vulkanAllocator = NULL
 	};
 
 	PFN_xrCreateVulkanDeviceKHR xrCreateVulkanDeviceKHR =
-		graphics_xr_get_func(graphics, "xrCreateVulkanDeviceKHR");
+		xr_xr_get_func(xr, "xrCreateVulkanDeviceKHR");
 
 	VkResult vk_result;
 	XrResult xr_result = xrCreateVulkanDeviceKHR(
-		graphics->xr_instance, &xr_vk_device_info, &graphics->vk_device, &vk_result);
+		xr->xr_instance, &xr_vk_device_info, &xr->vk_device, &vk_result);
 	assert_eq(xr_result, XR_SUCCESS);
 	assert_eq(vk_result, VK_SUCCESS);
 
-	graphics_free_str_array(vk_device_extensions, vk_device_extension);
-	graphics_free_str_array(vk_device_layers, vk_device_layer);
+	xr_free_str_array(vk_device_extensions, vk_device_extension);
+	xr_free_str_array(vk_device_layers, vk_device_layer);
 
-	volkLoadDeviceTable(&graphics->vk_table, graphics->vk_device);
+	volkLoadDeviceTable(&xr->vk_table, xr->vk_device);
 
-	graphics->vk_table.vkGetDeviceQueue(graphics->vk_device,
-		graphics->vk_queue_id, 0, &graphics->vk_queue);
+	xr->vk_table.vkGetDeviceQueue(xr->vk_device,
+		xr->vk_queue_id, 0, &xr->vk_queue);
 
 	// vkGetPhysicalDeviceMemoryProperties(
-	// 	graphics->vk_physical_device, &graphics->vk_memory_properties);
+	// 	xr->vk_physical_device, &xr->vk_memory_properties);
 }
 
 
 private void
-graphics_free_vk_logical_device(
-	graphics_t graphics
+xr_free_vk_logical_device(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
-	graphics->vk_table.vkDestroyDevice(graphics->vk_device, NULL);
+	xr->vk_table.vkDestroyDevice(xr->vk_device, NULL);
 }
 
 
 private void
-graphics_init_xr_session(
-	graphics_t graphics
+xr_init_xr_session(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
 	XrGraphicsBindingVulkanKHR xr_vk_binding =
 	{
 		.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR,
 		.next = NULL,
-		.instance = graphics->vk_instance,
-		.physicalDevice = graphics->vk_physical_device,
-		.device = graphics->vk_device,
-		.queueFamilyIndex = graphics->vk_queue_id,
+		.instance = xr->vk_instance,
+		.physicalDevice = xr->vk_physical_device,
+		.device = xr->vk_device,
+		.queueFamilyIndex = xr->vk_queue_id,
 		.queueIndex = 0
 	};
 
@@ -1286,104 +1163,97 @@ graphics_init_xr_session(
 		.type = XR_TYPE_SESSION_CREATE_INFO,
 		.next = &xr_vk_binding,
 		.createFlags = 0,
-		.systemId = graphics->xr_system
+		.systemId = xr->xr_system
 	};
 
 	XrResult xr_result = xrCreateSession(
-		graphics->xr_instance, &xr_session_info, &graphics->xr_session);
+		xr->xr_instance, &xr_session_info, &xr->xr_session);
 	assert_eq(xr_result, XR_SUCCESS);
 }
 
 
 private void
-graphics_free_xr_session(
-	graphics_t graphics
+xr_free_xr_session(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
-	XrResult xr_result = xrDestroySession(graphics->xr_session);
+	XrResult xr_result = xrDestroySession(xr->xr_session);
 	assert_eq(xr_result, XR_SUCCESS);
 }
 
 
 private void
-graphics_init_xr(
-	graphics_t graphics,
-	window_init_event_data_t* event_data
+xr_init_xr(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
-	graphics_init_xr_instance(graphics);
-	graphics_init_vk_instance(graphics);
-	graphics_init_vk_physical_device(graphics);
-	graphics_init_vk_logical_device(graphics);
-	graphics_init_xr_session(graphics);
+	xr_init_xr_instance(xr);
+	xr_init_vk_instance(xr);
+	xr_init_vk_physical_device(xr);
+	xr_init_vk_logical_device(xr);
+	xr_init_xr_session(xr);
 }
 
 
 private void
-graphics_free_xr(
-	graphics_t graphics
+xr_free_xr(
+	xr_t xr
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
-	graphics_free_xr_session(graphics);
-	graphics_free_vk_logical_device(graphics);
-	graphics_free_vk_physical_device(graphics);
-	graphics_free_vk_instance(graphics);
-	graphics_free_xr_instance(graphics);
+	xr_free_xr_session(xr);
+	xr_free_vk_logical_device(xr);
+	xr_free_vk_physical_device(xr);
+	xr_free_vk_instance(xr);
+	xr_free_xr_instance(xr);
 }
 
 
 private void
-graphics_free(
-	graphics_t graphics,
-	window_free_event_data_t* event_data
+xr_free(
+	xr_t xr,
+	simulation_free_event_data_t* event_data
 	)
 {
-	assert_not_null(graphics);
+	assert_not_null(xr);
 
-	graphics_free_xr(graphics);
+	xr_free_xr(xr);
 
-	event_target_free(&graphics->event_table.draw_target);
-
-	alloc_free(graphics, sizeof(*graphics));
+	alloc_free(xr, sizeof(*xr));
 }
 
 
-graphics_t
-graphics_init(
-	window_t window
+xr_t
+xr_init(
+	simulation_t simulation
 	)
 {
-	assert_not_null(window);
+	assert_not_null(simulation);
 
-	graphics_t graphics = alloc_malloc(sizeof(*graphics));
-	assert_ptr(graphics, sizeof(*graphics));
+	xr_t xr = alloc_calloc(sizeof(*xr));
+	assert_ptr(xr, sizeof(*xr));
 
-	graphics->window = window;
-	window_event_table_t* table = window_get_event_table(window);
+	xr_init_options(xr);
 
-	event_listener_data_t init_data =
-	{
-		.fn = (event_fn_t) graphics_init_xr,
-		.data = graphics
-	};
-	event_target_once(&table->init_target, init_data);
+	xr->simulation = simulation;
+
+	simulation_event_table_t* table = simulation_get_event_table(xr->simulation);
 
 	event_listener_data_t free_data =
 	{
-		.fn = (event_fn_t) graphics_free,
-		.data = graphics
+		.fn = (void*) xr_free,
+		.data = xr
 	};
-	(void) event_target_once(&table->free_target, free_data);
+	event_target_once(&table->free_target, free_data);
 
-	event_target_init(&graphics->event_table.draw_target);
+	xr_init_xr(xr);
 
-	return graphics;
+	return xr;
 }
 
 

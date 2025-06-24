@@ -14,15 +14,6 @@
  *  limitations under the License.
  */
 
-#pragma once
-
-#include <thesis/simulation.h>
-
-
-typedef struct xr* xr_t;
-
-
-extern xr_t
-xr_init(
-	simulation_t simulation
-	);
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+#include <volk.h>

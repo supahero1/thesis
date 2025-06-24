@@ -18,25 +18,23 @@
 #include <thesis/file.h>
 #include <thesis/debug.h>
 #include <thesis/shared.h>
+#include <thesis/vulkan.h>
 #include <thesis/window.h>
 #include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
 
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-#include <volk.h>
-
 #include <signal.h>
 #include <string.h>
 #include <stdatomic.h>
 
-#define VK_MAX_FRAMES 8
+#define VK_MAX_IMAGES 8
+#define VK_MAX_FRAMES 2
 #define VK_MAX_INSTANCES 128
 
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
-#define VK_WINDOW_SENSITIVITY 0.005f
+#define VK_WINDOW_SENSITIVITY 0.003f
 #define VK_WINDOW_SPEED 500.0f
 
 
@@ -111,7 +109,8 @@ typedef struct vk_mesh_vert_ubo_data
 	mat4 projection;
 	mat4 view;
 	mat4 light_transform;
-	vec4 light_position;
+	vec4 light_direction;
+	vec4 camera_position;
 }
 vk_mesh_vert_ubo_data_t;
 
@@ -119,6 +118,9 @@ typedef struct vk_mesh_frag_constant_data
 {
 	vec4 diffuse;
 	vec4 ambient;
+	vec4 specular;
+	float shininess;
+	float shininess_strength;
 }
 vk_mesh_frag_constant_data_t;
 
@@ -133,9 +135,7 @@ vk_mesh_vertex_data_t;
 typedef struct vk_material
 {
 	vk_image_t texture;
-	vec4 diffuse;
-	vec4 ambient;
-
+	vk_mesh_frag_constant_data_t constant_data;
 	VkDescriptorSet set;
 }
 vk_material_t;
@@ -175,6 +175,8 @@ typedef struct vk_entities_per_model
 }
 vk_entities_per_model_t;
 
+typedef struct vk_barrier vk_barrier_t;
+
 typedef struct vk_frame
 {
 	struct
@@ -192,31 +194,18 @@ typedef struct vk_frame
 		VkImage image;
 	}
 	scene;
+
+	VkSemaphore semaphore;
+	vk_barrier_t* barrier;
 }
 vk_frame_t;
 
-typedef enum vk_barrier_semaphore
+struct vk_barrier
 {
-	VK_BARRIER_SEMAPHORE_IMAGE_AVAILABLE,
-	VK_BARRIER_SEMAPHORE_RENDER_FINISHED,
-	MACRO_ENUM_BITS(VK_BARRIER_SEMAPHORE)
-}
-vk_barrier_semaphore_t;
-
-typedef enum vk_barrier_fence
-{
-	VK_BARRIER_FENCE_IN_FLIGHT,
-	MACRO_ENUM_BITS(VK_BARRIER_FENCE)
-}
-vk_barrier_fence_t;
-
-typedef struct vk_barrier
-{
-	VkSemaphore semaphores[VK_BARRIER_SEMAPHORE__COUNT];
-	VkFence fences[VK_BARRIER_FENCE__COUNT];
+	VkSemaphore semaphore;
+	VkFence fence;
 	VkCommandBuffer command_buffer;
-}
-vk_barrier_t;
+};
 
 struct vk
 {
@@ -355,7 +344,7 @@ struct vk
 	uint32_t vk_material_count;
 	uint32_t vk_model_count;
 
-	vk_frame_t vk_frames[VK_MAX_FRAMES];
+	vk_frame_t vk_frames[VK_MAX_IMAGES];
 	vk_barrier_t vk_barriers[VK_MAX_FRAMES];
 	vk_barrier_t* vk_barrier;
 
@@ -1196,7 +1185,7 @@ vk_get_device_properties(
 
 	if(
 		properties.limits.maxPushConstantsSize <
-			sizeof(vk_skybox_constant_data_t)
+			MACRO_MAX(sizeof(vk_skybox_constant_data_t), sizeof(vk_mesh_frag_constant_data_t))
 		)
 	{
 		hard_assert_log("%u\n", properties.limits.maxPushConstantsSize);
@@ -2737,7 +2726,7 @@ vk_init_shadow_pipeline(
 		.depthClampEnable = VK_FALSE,
 		.rasterizerDiscardEnable = VK_FALSE,
 		.polygonMode = VK_POLYGON_MODE_FILL,
-		.cullMode = VK_CULL_MODE_NONE,
+		.cullMode = VK_CULL_MODE_FRONT_BIT,
 		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
 		.depthBiasEnable = VK_TRUE,
 		.depthBiasConstantFactor = 1.25f,
@@ -2817,7 +2806,7 @@ vk_init_shadow_pipeline(
 		.flags = 0,
 		.setLayoutCount = 0,
 		.pSetLayouts = NULL,
-		.pushConstantRangeCount = 1,
+		.pushConstantRangeCount = MACRO_ARRAY_LEN(vk_push_constants),
 		.pPushConstantRanges = vk_push_constants
 	};
 
@@ -3682,6 +3671,13 @@ vk_init_mesh_pipeline(
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 
+	VkDescriptorSetLayout vk_set_layouts[] =
+	{
+		vk->vk_scene.mesh.ubo_set_layout,
+		vk->vk_scene.mesh.texture_set_layout,
+		vk->vk_scene.mesh.depth_map_set_layout
+	};
+
 	VkPushConstantRange vk_push_constants[] =
 	{
 		{
@@ -3691,13 +3687,6 @@ vk_init_mesh_pipeline(
 		}
 	};
 
-	VkDescriptorSetLayout vk_set_layouts[] =
-	{
-		vk->vk_scene.mesh.ubo_set_layout,
-		vk->vk_scene.mesh.texture_set_layout,
-		vk->vk_scene.mesh.depth_map_set_layout
-	};
-
 	VkPipelineLayoutCreateInfo vk_pipeline_layout_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -3705,7 +3694,7 @@ vk_init_mesh_pipeline(
 		.flags = 0,
 		.setLayoutCount = MACRO_ARRAY_LEN(vk_set_layouts),
 		.pSetLayouts = vk_set_layouts,
-		.pushConstantRangeCount = 1,
+		.pushConstantRangeCount = MACRO_ARRAY_LEN(vk_push_constants),
 		.pPushConstantRanges = vk_push_constants
 	};
 
@@ -4105,7 +4094,7 @@ vk_init_pipelines(
 		},
 		{
 			.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.descriptorCount = info.material_count + 2 + VK_MAX_FRAMES
+			.descriptorCount = info.material_count + 2 + VK_MAX_IMAGES
 		}
 	};
 
@@ -4114,7 +4103,7 @@ vk_init_pipelines(
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.maxSets = info.material_count + 3 + VK_MAX_FRAMES,
+		.maxSets = info.material_count + 3 + VK_MAX_IMAGES,
 		.poolSizeCount = MACRO_ARRAY_LEN(vk_pool_sizes),
 		.pPoolSizes = vk_pool_sizes
 	};
@@ -4307,8 +4296,11 @@ vk_init_models(
 
 			vk_init_image(vk, &vk_material->texture);
 
-			glm_vec4_copy(material->ambient, vk_material->ambient);
-			glm_vec4_copy(material->diffuse, vk_material->diffuse);
+			glm_vec3_copy(material->ambient, vk_material->constant_data.ambient);
+			glm_vec3_copy(material->diffuse, vk_material->constant_data.diffuse);
+			glm_vec3_copy(material->specular, vk_material->constant_data.specular);
+			vk_material->constant_data.shininess = material->shininess;
+			vk_material->constant_data.shininess_strength = material->shininess_strength;
 
 			*vk_descriptor_image =
 			(VkDescriptorImageInfo)
@@ -4457,7 +4449,7 @@ vk_init_frames(
 {
 	assert_not_null(vk);
 
-	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
+	VkCommandBuffer vk_command_buffers[MACRO_ARRAY_LEN(vk->vk_barriers)];
 	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
 
 	VkCommandBufferAllocateInfo vk_command_buffer_info =
@@ -4489,29 +4481,17 @@ vk_init_frames(
 	};
 
 	vk_barrier_t* vk_barrier = vk->vk_barriers;
-	vk_barrier_t* vk_barrier_end = vk_barrier + vk->vk_image_count;
+	vk_barrier_t* vk_barrier_end = vk_barrier + MACRO_ARRAY_LEN(vk->vk_barriers);
 
 	while(vk_barrier < vk_barrier_end)
 	{
-		VkSemaphore* vk_semaphore = vk_barrier->semaphores;
-		VkSemaphore* vk_semaphore_end = vk_semaphore + MACRO_ARRAY_LEN(vk_barrier->semaphores);
+		vk_result = vk->vk_table.vkCreateSemaphore(
+			vk->vk_device, &vk_semaphore_info, NULL, &vk_barrier->semaphore);
+		hard_assert_eq(vk_result, VK_SUCCESS);
 
-		while(vk_semaphore < vk_semaphore_end)
-		{
-			vk_result = vk->vk_table.vkCreateSemaphore(
-				vk->vk_device, &vk_semaphore_info, NULL, vk_semaphore++);
-			hard_assert_eq(vk_result, VK_SUCCESS);
-		}
-
-		VkFence* vk_fence = vk_barrier->fences;
-		VkFence* vk_fence_end = vk_fence + MACRO_ARRAY_LEN(vk_barrier->fences);
-
-		while(vk_fence < vk_fence_end)
-		{
-			vk_result = vk->vk_table.vkCreateFence(
-				vk->vk_device, &vk_fence_info, NULL, vk_fence++);
-			hard_assert_eq(vk_result, VK_SUCCESS);
-		}
+		vk_result = vk->vk_table.vkCreateFence(
+			vk->vk_device, &vk_fence_info, NULL, &vk_barrier->fence);
+		hard_assert_eq(vk_result, VK_SUCCESS);
 
 		vk_barrier->command_buffer = *vk_command_buffer;
 
@@ -4530,33 +4510,18 @@ vk_free_frames(
 {
 	assert_not_null(vk);
 
-	VkCommandBuffer vk_command_buffers[vk->vk_image_count];
+	VkCommandBuffer vk_command_buffers[MACRO_ARRAY_LEN(vk->vk_barriers)];
 	VkCommandBuffer* vk_command_buffer = vk_command_buffers;
 
 	vk_barrier_t* vk_barrier = vk->vk_barriers;
-	vk_barrier_t* vk_barrier_end = vk_barrier + vk->vk_image_count;
+	vk_barrier_t* vk_barrier_end = vk_barrier + MACRO_ARRAY_LEN(vk->vk_barriers);
 
 	while(vk_barrier < vk_barrier_end)
 	{
 		*vk_command_buffer = vk_barrier->command_buffer;
 
-		VkFence* vk_fence = vk_barrier->fences;
-		VkFence* vk_fence_end = vk_fence + MACRO_ARRAY_LEN(vk_barrier->fences);
-
-		while(vk_fence < vk_fence_end)
-		{
-			vk->vk_table.vkDestroyFence(vk->vk_device, *vk_fence, NULL);
-			++vk_fence;
-		}
-
-		VkSemaphore* vk_semaphore = vk_barrier->semaphores;
-		VkSemaphore* vk_semaphore_end = vk_semaphore + MACRO_ARRAY_LEN(vk_barrier->semaphores);
-
-		while(vk_semaphore < vk_semaphore_end)
-		{
-			vk->vk_table.vkDestroySemaphore(vk->vk_device, *vk_semaphore, NULL);
-			++vk_semaphore;
-		}
+		vk->vk_table.vkDestroyFence(vk->vk_device, vk_barrier->fence, NULL);
+		vk->vk_table.vkDestroySemaphore(vk->vk_device, vk_barrier->semaphore, NULL);
 
 		++vk_barrier;
 		++vk_command_buffer;
@@ -4579,7 +4544,7 @@ vk_init_framebuffers(
 		vk->vk_device, vk->vk_swapchain, &image_count, NULL);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
-	assert_lt(image_count, VK_MAX_FRAMES);
+	assert_lt(image_count, VK_MAX_IMAGES);
 	assert_ge(image_count, vk->vk_image_count);
 
 	bool vk_reinit_frames = vk->vk_image_count != image_count;
@@ -4595,6 +4560,13 @@ vk_init_framebuffers(
 		vk->vk_device, vk->vk_swapchain, &image_count, vk_images);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
+
+	VkSemaphoreCreateInfo vk_semaphore_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0
+	};
 
 	vk_frame_t* vk_frame = vk->vk_frames;
 	vk_frame_t* vk_frame_end = vk_frame + vk->vk_image_count;
@@ -4709,6 +4681,13 @@ vk_init_framebuffers(
 		vk->vk_table.vkUpdateDescriptorSets(vk->vk_device, 1, &vk_write_set, 0, NULL);
 
 
+		vk_result = vk->vk_table.vkCreateSemaphore(
+			vk->vk_device, &vk_semaphore_info, NULL, &vk_frame->semaphore);
+		hard_assert_eq(vk_result, VK_SUCCESS);
+
+		vk_frame->barrier = NULL;
+
+
 		++vk_frame;
 		++vk_image;
 	}
@@ -4727,6 +4706,8 @@ vk_free_framebuffers(
 
 	while(vk_frame < vk_frame_end)
 	{
+		vk->vk_table.vkDestroySemaphore(vk->vk_device, vk_frame->semaphore, NULL);
+
 		vk_free_image(vk, &vk_frame->shadow.image);
 		vk->vk_table.vkDestroyFramebuffer(vk->vk_device, vk_frame->shadow.framebuffer, NULL);
 
@@ -4775,6 +4756,7 @@ private void
 vk_draw_shadow(
 	vk_t vk,
 	vk_frame_t* vk_frame,
+	simulation_camera_t* camera,
 	simulation_transform_t* transform,
 	vk_entities_per_model_t* vk_entity_data
 	)
@@ -4862,6 +4844,7 @@ private void
 vk_draw_mesh(
 	vk_t vk,
 	vk_frame_t* vk_frame,
+	simulation_camera_t* camera,
 	simulation_transform_t* transform,
 	vk_entities_per_model_t* vk_entity_data
 	)
@@ -4904,7 +4887,9 @@ vk_draw_mesh(
 	glm_mat4_copy(transform->projection, vk_mesh_vert_ubo_data.projection);
 	glm_mat4_copy(transform->view, vk_mesh_vert_ubo_data.view);
 	glm_mat4_copy(transform->light_transform, vk_mesh_vert_ubo_data.light_transform);
-	glm_vec4_copy(transform->light_position, vk_mesh_vert_ubo_data.light_position);
+	glm_vec4_copy(transform->light_direction, vk_mesh_vert_ubo_data.light_direction);
+	glm_vec3_copy(camera->pos, vk_mesh_vert_ubo_data.camera_position);
+	vk_mesh_vert_ubo_data.camera_position[3] = 1.0f;
 
 	vk_copy_to_buffer(vk, &vk->vk_scene.mesh.ubo_buffer,
 		&vk_mesh_vert_ubo_data, sizeof(vk_mesh_vert_ubo_data));
@@ -4971,15 +4956,11 @@ vk_draw_mesh(
 
 			while(vk_mesh < vk_mesh_end)
 			{
-				vk_mesh_frag_constant_data_t vk_mesh_frag_constant_data;
-				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].ambient,
-					vk_mesh_frag_constant_data.ambient);
-				glm_vec4_copy(vk->vk_materials[vk_mesh->material_idx].diffuse,
-					vk_mesh_frag_constant_data.diffuse);
+				vk_material_t* vk_material = vk->vk_materials + vk_mesh->material_idx;
 
 				vk->vk_table.vkCmdPushConstants(vk->vk_barrier->command_buffer,
 					vk->vk_scene.mesh.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
-					0, sizeof(vk_mesh_frag_constant_data), &vk_mesh_frag_constant_data);
+					0, sizeof(vk_material->constant_data), &vk_material->constant_data);
 
 				vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
 					0, 1, &vk_mesh->mesh_vertex_buffer.buffer, (VkDeviceSize[]){0});
@@ -4989,7 +4970,7 @@ vk_draw_mesh(
 
 				vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
 					VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.mesh.pipeline_layout,
-					1, 1, &vk->vk_materials[vk_mesh->material_idx].set, 0, NULL);
+					1, 1, &vk_material->set, 0, NULL);
 
 				vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,
 					vk_mesh->index_count, vk_entities_per_model->entities_used, 0, 0, 0);
@@ -5028,24 +5009,37 @@ vk_draw(
 {
 	assert_not_null(vk);
 
-	VkResult vk_result = vk->vk_table.vkWaitForFences(vk->vk_device, 1,
-		vk->vk_barrier->fences + VK_BARRIER_FENCE_IN_FLIGHT, VK_TRUE, UINT64_MAX);
+	VkResult vk_result = vk->vk_table.vkWaitForFences(
+		vk->vk_device, 1, &vk->vk_barrier->fence, VK_TRUE, UINT64_MAX);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	uint32_t image_idx;
-	vk_result = vk->vk_table.vkAcquireNextImageKHR(vk->vk_device, vk->vk_swapchain, UINT64_MAX,
-		vk->vk_barrier->semaphores[VK_BARRIER_SEMAPHORE_IMAGE_AVAILABLE], VK_NULL_HANDLE, &image_idx);
+	vk_result = vk->vk_table.vkAcquireNextImageKHR(vk->vk_device,
+		vk->vk_swapchain, UINT64_MAX, vk->vk_barrier->semaphore, VK_NULL_HANDLE, &image_idx);
 	if(vk_result == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		vk_recreate_swapchain(vk);
 		return;
 	}
 
-	vk_result = vk->vk_table.vkResetFences(vk->vk_device, 1,
-		vk->vk_barrier->fences + VK_BARRIER_FENCE_IN_FLIGHT);
-	hard_assert_eq(vk_result, VK_SUCCESS);
+	if(vk_result != VK_SUCCESS && vk_result != VK_SUBOPTIMAL_KHR)
+	{
+		hard_assert_log("%d\n", vk_result);
+	}
 
 	vk_frame_t* vk_frame = vk->vk_frames + image_idx;
+
+	if(vk_frame->barrier)
+	{
+		vk_result = vk->vk_table.vkWaitForFences(vk->vk_device,
+			1, &vk_frame->barrier->fence, VK_TRUE, UINT64_MAX);
+		hard_assert_eq(vk_result, VK_SUCCESS);
+	}
+	vk_frame->barrier = vk->vk_barrier;
+
+	vk_result = vk->vk_table.vkResetFences(vk->vk_device, 1, &vk->vk_barrier->fence);
+	hard_assert_eq(vk_result, VK_SUCCESS);
+
 
 
 	vk_result = vk->vk_table.vkResetCommandBuffer(vk->vk_barrier->command_buffer, 0);
@@ -5063,6 +5057,7 @@ vk_draw(
 		vk->vk_barrier->command_buffer, &vk_command_buffer_info);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
+	simulation_camera_t camera = simulation_get_camera(vk->simulation);
 	simulation_transform_t transform = simulation_get_transform(
 		vk->simulation, vk->vk_extent.width, vk->vk_extent.height);
 
@@ -5137,8 +5132,8 @@ vk_draw(
 		++vk_model;
 	}
 
-	vk_draw_shadow(vk, vk_frame, &transform, vk_entity_data);
-	vk_draw_mesh(vk, vk_frame, &transform, vk_entity_data);
+	vk_draw_shadow(vk, vk_frame, &camera, &transform, vk_entity_data);
+	vk_draw_mesh(vk, vk_frame, &camera, &transform, vk_entity_data);
 
 	alloc_free(vk_entity_data, sizeof(*vk_entity_data) * vk->vk_model_count);
 
@@ -5158,16 +5153,15 @@ vk_draw(
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.pNext = NULL,
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_IMAGE_AVAILABLE,
+		.pWaitSemaphores = &vk->vk_barrier->semaphore,
 		.pWaitDstStageMask = vk_wait_stages,
 		.commandBufferCount = 1,
 		.pCommandBuffers = &vk->vk_barrier->command_buffer,
 		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_RENDER_FINISHED
+		.pSignalSemaphores = &vk_frame->semaphore
 	};
 
-	vk_result = vk->vk_table.vkQueueSubmit(vk->vk_queue, 1,
-		&vk_submit_info, vk->vk_barrier->fences[VK_BARRIER_FENCE_IN_FLIGHT]);
+	vk_result = vk->vk_table.vkQueueSubmit(vk->vk_queue, 1, &vk_submit_info, vk->vk_barrier->fence);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
 	VkPresentInfoKHR vk_present_info =
@@ -5175,7 +5169,7 @@ vk_draw(
 		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 		.pNext = NULL,
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = vk->vk_barrier->semaphores + VK_BARRIER_SEMAPHORE_RENDER_FINISHED,
+		.pWaitSemaphores = &vk_frame->semaphore,
 		.swapchainCount = 1,
 		.pSwapchains = &vk->vk_swapchain,
 		.pImageIndices = &image_idx,
@@ -5196,7 +5190,7 @@ vk_draw(
 		hard_assert_eq(vk_result, VK_SUCCESS);
 	}
 
-	if(++vk->vk_barrier >= vk->vk_barriers + vk->vk_image_count)
+	if(++vk->vk_barrier >= vk->vk_barriers + MACRO_ARRAY_LEN(vk->vk_barriers))
 	{
 		vk->vk_barrier = vk->vk_barriers;
 	}

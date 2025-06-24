@@ -37,9 +37,11 @@ else:
 
 env.Append(CPPFLAGS=flags)
 
-libs = Split("m SDL3 openxr_loader")
+libs = Split("m")
 
-libs_libs_flags = subprocess.check_output(["pkg-config", "--libs", "vips", "assimp"], text=True)
+libs_libs_flags = subprocess.check_output([
+	"pkg-config", "--libs", "sdl3", "vulkan", "openxr", "assimp", "vips"
+	], text=True)
 libs.extend(Split(libs_libs_flags))
 
 if os.name == "nt":

@@ -14,15 +14,8 @@
  *  limitations under the License.
  */
 
-#pragma once
+#include <thesis/vulkan.h>
 
-#include <thesis/simulation.h>
-
-
-typedef struct xr* xr_t;
-
-
-extern xr_t
-xr_init(
-	simulation_t simulation
-	);
+#define XR_USE_PLATFORM_WAYLAND
+#define XR_USE_GRAPHICS_API_VULKAN
+#include <openxr/openxr_platform.h>

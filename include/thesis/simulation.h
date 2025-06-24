@@ -85,7 +85,7 @@ typedef struct simulation_transform
 	mat4 projection;
 	mat4 view;
 	mat4 light_transform;
-	vec4 light_position;
+	vec4 light_direction;
 }
 simulation_transform_t;
 
@@ -147,6 +147,12 @@ extern void
 simulation_free_entity_data(
 	simulation_entity_data_t* data,
 	uint32_t data_count
+	);
+
+
+extern simulation_camera_t
+simulation_get_camera(
+	simulation_t simulation
 	);
 
 

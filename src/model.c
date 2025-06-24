@@ -84,11 +84,35 @@ model_init(
 
 		enum aiReturn status = aiGetMaterialColor(sceneMaterial, AI_MATKEY_COLOR_DIFFUSE, &color);
 		assert_eq(status, AI_SUCCESS);
-		glm_vec4_copy((void*) &color, material->diffuse);
+		glm_vec3_copy((void*) &color, material->diffuse);
 
 		status = aiGetMaterialColor(sceneMaterial, AI_MATKEY_COLOR_AMBIENT, &color);
 		assert_eq(status, AI_SUCCESS);
-		glm_vec4_copy((void*) &color, material->ambient);
+		glm_vec3_copy((void*) &color, material->ambient);
+
+		status = aiGetMaterialColor(sceneMaterial, AI_MATKEY_COLOR_SPECULAR, &color);
+		if(status != AI_SUCCESS)
+		{
+			glm_vec3_fill((void*) &color, 1.0f);
+		}
+		glm_vec3_copy((void*) &color, material->specular);
+
+		float shininess;
+		status = aiGetMaterialFloatArray(sceneMaterial, AI_MATKEY_SHININESS, &shininess, NULL);
+		if(status != AI_SUCCESS)
+		{
+			shininess = 32.0f;
+		}
+		material->shininess = shininess;
+
+		float shininess_strength;
+		status = aiGetMaterialFloatArray(sceneMaterial,
+			AI_MATKEY_SHININESS_STRENGTH, &shininess_strength, NULL);
+		if(status != AI_SUCCESS)
+		{
+			shininess_strength = 1.0f;
+		}
+		material->shininess_strength = shininess_strength;
 
 		material->texture = str_init();
 

@@ -254,6 +254,17 @@ simulation_free_entity_data(
 }
 
 
+simulation_camera_t
+simulation_get_camera(
+	simulation_t simulation
+	)
+{
+	assert_not_null(simulation);
+
+	return simulation->camera;
+}
+
+
 simulation_transform_t
 simulation_get_transform(
 	simulation_t simulation,
@@ -286,7 +297,8 @@ simulation_get_transform(
 
 	glm_mat4_mul(light_proj, light_view, transform.light_transform);
 
-	glm_vec3_copy(simulation->light.pos, transform.light_position);
+	glm_vec3_sub(simulation->light.target, simulation->light.pos, transform.light_direction);
+	transform.light_direction[3] = 0.0f;
 
 	return transform;
 }

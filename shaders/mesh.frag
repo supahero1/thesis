@@ -22,6 +22,9 @@ layout(push_constant) uniform Constants
 {
 	vec4 diffuse;
 	vec4 ambient;
+	vec4 specular;
+	float shininess;
+	float shininess_strength;
 }
 consts;
 
@@ -48,6 +51,8 @@ const vec2 poissonDisk[8] = vec2[](
 	vec2( 0.185, -0.893)
 	);
 
+#define SHADOW 0.3
+
 float
 getShadow(
 	vec4 shadowCoord
@@ -64,9 +69,9 @@ getShadow(
 	for(int i = 0; i < 8; ++i)
 	{
 		vec2 offset = poissonDisk[i] * texelSize;
-		shadow += texture(inDepthMap, vec3(projCoord.xy + offset, projCoord.z - 0.001));
+		shadow += texture(inDepthMap, vec3(projCoord.xy + offset, projCoord.z));
 	}
-	return max(shadow / 8.0, 0.5);
+	return max(shadow / 8.0, SHADOW);
 }
 
 void
@@ -75,16 +80,26 @@ main()
 	vec4 texel = texture(inTexture, inCoords);
 	float shadow = getShadow(inShadowCoords);
 
+	vec3 diffuse = consts.diffuse.rgb;
+	vec3 ambient = consts.ambient.rgb;
+	vec3 specular = consts.specular.rgb;
+	float shininess = consts.shininess;
+	float shininessStrength = consts.shininess_strength;
+
 	vec3 N = normalize(inNormal);
 	vec3 L = normalize(inLight);
+	vec3 V = normalize(inView);
+	vec3 R = reflect(-L, N);
 	float NL = dot(N, L);
 
-	float wrap = 0.5;
-	float diffuseFactor = clamp((NL + wrap) / (1.0 + wrap), 0.2, 1.0);
-	vec3 diffuse = diffuseFactor * consts.diffuse.rgb;
+	float diffuseFactor = min(NL <= 0.0 ? SHADOW : 1.0, shadow);
+	float specularFactor = pow(max(dot(R, V), 0.0), shininess) * shininessStrength * 2.0;
 
-	vec3 ambient = consts.ambient.rgb;
+	vec3 lighting = ambient + diffuse * diffuseFactor;
+	if(diffuseFactor != SHADOW)
+	{
+		lighting += specular * specularFactor * (diffuseFactor - SHADOW) / (1.0 - SHADOW);
+	}
 
-	vec3 lighting = (ambient + diffuse * shadow) * texel.rgb;
-	outColor = vec4(lighting, texel.a);
+	outColor = vec4(lighting * texel.rgb, texel.a);
 }

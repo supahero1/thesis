@@ -15,6 +15,7 @@
  */
 
 #include <thesis/vk.h>
+#include <thesis/xr.h>
 #include <thesis/app.h>
 #include <thesis/file.h>
 #include <thesis/debug.h>
@@ -22,7 +23,6 @@
 #include <thesis/alloc_ext.h>
 #include <thesis/simulation.h>
 
-#include <stdio.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <libgen.h>
@@ -34,6 +34,7 @@ struct app
 {
 	simulation_t simulation;
 	vk_t vk;
+	xr_t xr;
 };
 
 
@@ -107,6 +108,7 @@ app_init(
 		);
 
 	app->vk = vk_init(app->simulation);
+	// app->xr = xr_init(app->simulation);
 
 	return app;
 }

@@ -21,7 +21,8 @@ layout(binding = 0) uniform UBO
 	mat4 projection;
 	mat4 view;
 	mat4 light_transform;
-	vec4 light_position;
+	vec4 light_direction;
+	vec4 camera_position;
 }
 consts;
 
@@ -56,7 +57,7 @@ main()
 	outNormal = mat3(inTransform) * inNormal;
 	outCoords = inCoords;
 
-	outLight = normalize(consts.light_position.xyz - worldPos.xyz);
-	outView = -worldPos.xyz;
+	outLight = normalize(-consts.light_direction.xyz);
+	outView = normalize(consts.camera_position.xyz - worldPos.xyz);
 	outShadowCoords = (toClip * consts.light_transform) * worldPos;
 }
