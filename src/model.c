@@ -69,13 +69,20 @@ model_init(
 	assert_gt(scene->mNumMaterials, 0);
 	assert_gt(scene->mNumMeshes, 0);
 
+	printf("Model '%s':\n", path);
+
 	model->material_count = scene->mNumMaterials;
 	model->materials = alloc_malloc(sizeof(*model->materials) * model->material_count);
 	assert_not_null(model->materials);
 
+	printf("- material_count: %u\n", model->material_count);
+	printf("- materials:\n");
+
 	for(uint32_t i = 0; i < model->material_count; i++)
 	{
 		material_t* material = &model->materials[i];
+
+		printf("    - material[%u]:\n", i);
 
 		const struct aiMaterial* sceneMaterial = scene->mMaterials[i];
 		assert_not_null(sceneMaterial);
@@ -86,9 +93,15 @@ model_init(
 		assert_eq(status, AI_SUCCESS);
 		glm_vec3_copy((void*) &color, material->diffuse);
 
+		printf("        - diffuse: (%.3f, %.3f, %.3f)\n",
+			material->diffuse[0], material->diffuse[1], material->diffuse[2]);
+
 		status = aiGetMaterialColor(sceneMaterial, AI_MATKEY_COLOR_AMBIENT, &color);
 		assert_eq(status, AI_SUCCESS);
 		glm_vec3_copy((void*) &color, material->ambient);
+
+		printf("        - ambient: (%.3f, %.3f, %.3f)\n",
+			material->ambient[0], material->ambient[1], material->ambient[2]);
 
 		status = aiGetMaterialColor(sceneMaterial, AI_MATKEY_COLOR_SPECULAR, &color);
 		if(status != AI_SUCCESS)
@@ -96,6 +109,9 @@ model_init(
 			glm_vec3_fill((void*) &color, 1.0f);
 		}
 		glm_vec3_copy((void*) &color, material->specular);
+
+		printf("        - specular: (%.3f, %.3f, %.3f)\n",
+			material->specular[0], material->specular[1], material->specular[2]);
 
 		float shininess;
 		status = aiGetMaterialFloatArray(sceneMaterial, AI_MATKEY_SHININESS, &shininess, NULL);
@@ -105,6 +121,8 @@ model_init(
 		}
 		material->shininess = shininess;
 
+		printf("        - shininess: %.3f\n", material->shininess);
+
 		float shininess_strength;
 		status = aiGetMaterialFloatArray(sceneMaterial,
 			AI_MATKEY_SHININESS_STRENGTH, &shininess_strength, NULL);
@@ -113,6 +131,8 @@ model_init(
 			shininess_strength = 1.0f;
 		}
 		material->shininess_strength = shininess_strength;
+
+		printf("        - shininess_strength: %.3f\n", material->shininess_strength);
 
 		material->texture = str_init();
 
@@ -139,15 +159,22 @@ model_init(
 
 			str_set_move_len(material->texture, combined_path, ptr - combined_path);
 		}
+
+		printf("        - texture: '%s'\n", (char*) material->texture->str);
 	}
 
 	model->mesh_count = scene->mNumMeshes;
 	model->meshes = alloc_malloc(sizeof(*model->meshes) * model->mesh_count);
 	assert_not_null(model->meshes);
 
+	printf("- mesh_count: %u\n", model->mesh_count);
+	printf("- meshes:\n");
+
 	for(uint32_t i = 0; i < model->mesh_count; i++)
 	{
 		mesh_t* mesh = &model->meshes[i];
+
+		printf("    - mesh[%u]:\n", i);
 
 		const struct aiMesh* sceneMesh = scene->mMeshes[i];
 		assert_not_null(sceneMesh);
@@ -158,6 +185,11 @@ model_init(
 		mesh->material_idx = sceneMesh->mMaterialIndex;
 		mesh->vertex_count = sceneMesh->mNumVertices;
 		assert_gt(mesh->vertex_count, 0);
+
+		printf("        - material_idx: %u\n", mesh->material_idx);
+		printf("        - material->texture: '%s'\n",
+			(char*) model->materials[mesh->material_idx].texture->str);
+		printf("        - vertex_count: %u\n", mesh->vertex_count);
 
 		mesh->vertices = alloc_malloc(sizeof(*mesh->vertices) * mesh->vertex_count);
 		assert_not_null(mesh->vertices);
@@ -179,6 +211,8 @@ model_init(
 		mesh->indexes = alloc_malloc(sizeof(*mesh->indexes) * mesh->index_count);
 		assert_not_null(mesh->indexes);
 
+		printf("        - index_count: %u\n", mesh->index_count);
+
 		for(uint32_t j = 0; j < sceneMesh->mNumFaces; j++)
 		{
 			const struct aiFace* face = &sceneMesh->mFaces[j];
@@ -191,6 +225,8 @@ model_init(
 	}
 
 	aiReleaseImport(scene);
+
+	puts("");
 
 	return model;
 }

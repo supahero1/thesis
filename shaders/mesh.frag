@@ -40,24 +40,58 @@ layout(location = 5) in vec4 inShadowCoords;
 
 layout(location = 0) out vec4 outColor;
 
-const vec2 poissonDisk[8] = vec2[](
-	vec2(-0.326, -0.406),
-	vec2(-0.840, -0.074),
-	vec2(-0.696,  0.457),
-	vec2(-0.203,  0.621),
-	vec2( 0.962, -0.194),
-	vec2( 0.473, -0.480),
-	vec2( 0.519,  0.767),
-	vec2( 0.185, -0.893)
-	);
+layout(constant_id = 0) const bool enable_depth_shadows = true;
+layout(constant_id = 1) const bool enable_backface_shadows = true;
+layout(constant_id = 2) const bool enable_specular = true;
+layout(constant_id = 3) const float shadow_value = 0.2;
+layout(constant_id = 4) const float lambert_start_angle = 80.0;
 
-#define SHADOW 0.3
+#define POISSON_DISK_SAMPLES 64
+const vec2 poissonDisk[POISSON_DISK_SAMPLES] = vec2[](
+	vec2(-0.898863, -0.279893), vec2(-0.730302,  0.592534),
+	vec2(-0.505085, -0.835948), vec2(-0.252065,  0.033621),
+	vec2(-0.169128,  0.787611), vec2(-0.015243, -0.428581),
+	vec2( 0.052820,  0.941328), vec2( 0.176461, -0.065545),
+	vec2( 0.239324, -0.840798), vec2( 0.316089,  0.640520),
+	vec2( 0.402636, -0.493976), vec2( 0.508104,  0.222384),
+	vec2( 0.589139, -0.734491), vec2( 0.672803,  0.865427),
+	vec2( 0.742353, -0.219504), vec2( 0.810574,  0.472782),
+	vec2( 0.871167, -0.608355), vec2( 0.916843,  0.076045),
+	vec2( 0.940866,  0.710779), vec2( 0.963471, -0.166668),
+	vec2( 0.985921,  0.395780), vec2( 0.999650, -0.449770),
+	vec2(-0.994503,  0.082728), vec2(-0.957585, -0.370339),
+	vec2(-0.845778,  0.424368), vec2(-0.704944, -0.638706),
+	vec2(-0.552109,  0.133246), vec2(-0.435728, -0.871587),
+	vec2(-0.301504,  0.686566), vec2(-0.117189, -0.329705),
+	vec2(-0.061765,  0.932759), vec2( 0.053677, -0.093417),
+	vec2( 0.125603, -0.730303), vec2( 0.198305,  0.424368),
+	vec2( 0.282860, -0.490822), vec2( 0.380482,  0.817551),
+	vec2( 0.443794,  0.187383), vec2( 0.499691, -0.999557),
+	vec2( 0.584347, -0.224169), vec2( 0.655295,  0.640106),
+	vec2( 0.725916, -0.582847), vec2( 0.771618,  0.038161),
+	vec2( 0.819230,  0.370339), vec2( 0.869408, -0.347570),
+	vec2( 0.903823,  0.170566), vec2( 0.947230, -0.751610),
+	vec2( 0.970597,  0.485121), vec2( 0.996160, -0.081249),
+	vec2(-0.999650, -0.081249), vec2(-0.970597,  0.485121),
+	vec2(-0.947230, -0.751610), vec2(-0.903823,  0.170566),
+	vec2(-0.869408, -0.347570), vec2(-0.819230,  0.370339),
+	vec2(-0.771618,  0.038161), vec2(-0.725916, -0.582847),
+	vec2(-0.655295,  0.640106), vec2(-0.584347, -0.224169),
+	vec2(-0.499691, -0.999557), vec2(-0.443794,  0.187383),
+	vec2(-0.380482,  0.817551), vec2(-0.282860, -0.490822),
+	vec2(-0.198305,  0.424368), vec2(-0.125603, -0.730303)
+	);
 
 float
 getShadow(
 	vec4 shadowCoord
 	)
 {
+	if(!enable_depth_shadows)
+	{
+		return 1.0;
+	}
+
 	vec3 projCoord = shadowCoord.xyz / shadowCoord.w;
 	if(projCoord.z > 1.0 || projCoord.z < 0.0)
 	{
@@ -66,20 +100,17 @@ getShadow(
 
 	vec2 texelSize = 1.0 / textureSize(inDepthMap, 0);
 	float shadow = 0.0;
-	for(int i = 0; i < 8; ++i)
+	for(int i = 0; i < POISSON_DISK_SAMPLES; ++i)
 	{
 		vec2 offset = poissonDisk[i] * texelSize;
 		shadow += texture(inDepthMap, vec3(projCoord.xy + offset, projCoord.z));
 	}
-	return max(shadow / 8.0, SHADOW);
+	return max(shadow / float(POISSON_DISK_SAMPLES), shadow_value);
 }
 
 void
 main()
 {
-	vec4 texel = texture(inTexture, inCoords);
-	float shadow = getShadow(inShadowCoords);
-
 	vec3 diffuse = consts.diffuse.rgb;
 	vec3 ambient = consts.ambient.rgb;
 	vec3 specular = consts.specular.rgb;
@@ -92,13 +123,28 @@ main()
 	vec3 R = reflect(-L, N);
 	float NL = dot(N, L);
 
-	float diffuseFactor = min(NL <= 0.0 ? SHADOW : 1.0, shadow);
+	vec4 texel = texture(inTexture, inCoords);
+	float shadow = getShadow(inShadowCoords);
+
+	float angle = degrees(acos(NL));
+	float lambertFactor = 1.0;
+	if(NL <= 0.0)
+	{
+		lambertFactor = shadow_value;
+	}
+	else if(angle > lambert_start_angle)
+	{
+		lambertFactor = mix(1.0, shadow_value, (angle - lambert_start_angle) / (90.0 - lambert_start_angle));
+	}
+
+	float diffuseFactor = enable_backface_shadows ?
+		min(NL <= 0.0 ? shadow_value : lambertFactor, shadow) : 1.0;
 	float specularFactor = pow(max(dot(R, V), 0.0), shininess) * shininessStrength * 2.0;
 
 	vec3 lighting = ambient + diffuse * diffuseFactor;
-	if(diffuseFactor != SHADOW)
+	if(enable_specular && diffuseFactor != shadow_value)
 	{
-		lighting += specular * specularFactor * (diffuseFactor - SHADOW) / (1.0 - SHADOW);
+		lighting += specular * specularFactor * (diffuseFactor - shadow_value) / (1.0 - shadow_value);
 	}
 
 	outColor = vec4(lighting * texel.rgb, texel.a);

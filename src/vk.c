@@ -237,6 +237,12 @@ struct vk
 	uint32_t vk_depth_map_size;
 	bool vk_preview_depth_map;
 
+	bool vk_enable_depth_shadows;
+	bool vk_enable_backface_shadows;
+	bool vk_enable_specular;
+	float vk_shadow_value;
+	float vk_lambert_start_angle;
+
 	thread_t vk_thread;
 	_Atomic bool vk_running;
 
@@ -411,93 +417,42 @@ vk_init_options(
 
 	puts("\nVK options:");
 
-	str_t window_width = options_get(global_options, "window_width");
-	if(window_width && !str_is_empty(window_width))
-	{
-		float window_width_value = strtof(window_width->str, NULL);
-		if(window_width_value <= 0.0f)
-		{
-			window_width_value = VK_WINDOW_WIDTH;
-		}
-
-		vk->window_default_width = window_width_value;
-	}
-	else
-	{
-		vk->window_default_width = VK_WINDOW_WIDTH;
-	}
+	vk->window_default_width = options_get_i64(global_options, "window_width", 1, 16384, VK_WINDOW_WIDTH);
 	printf("- window_width: %.0f\n", vk->window_default_width);
 
-	str_t window_height = options_get(global_options, "window_height");
-	if(window_height && !str_is_empty(window_height))
-	{
-		float window_height_value = strtof(window_height->str, NULL);
-		if(window_height_value <= 0.0f)
-		{
-			window_height_value = VK_WINDOW_HEIGHT;
-		}
-
-		vk->window_default_height = window_height_value;
-	}
-	else
-	{
-		vk->window_default_height = VK_WINDOW_HEIGHT;
-	}
+	vk->window_default_height = options_get_i64(global_options, "window_height", 1, 16384, VK_WINDOW_HEIGHT);
 	printf("- window_height: %.0f\n", vk->window_default_height);
 
-	str_t sample_shading = options_get(global_options, "vk_sample_shading");
-	vk->vk_sample_shading = sample_shading && str_case_cmp_len(sample_shading, "true", 4);
+	vk->vk_sample_shading = options_get_boolean(global_options, "vk_sample_shading", false);
 	printf("- vk_sample_shading: %d\n", vk->vk_sample_shading);
 
-	str_t mipmap_levels = options_get(global_options, "vk_mipmap_levels");
-	vk->vk_mipmap_levels = mipmap_levels && !str_is_empty(mipmap_levels) ?
-		strtoul(mipmap_levels->str, NULL, 10) : 3;
+	vk->vk_mipmap_levels = options_get_i64(global_options, "vk_mipmap_levels", 1, 16, 3);
 	printf("- vk_mipmap_levels: %u\n", vk->vk_mipmap_levels);
 
-	str_t anisotropy = options_get(global_options, "vk_anisotropy");
-	if(anisotropy && !str_is_empty(anisotropy))
-	{
-		float anisotropy_value = strtof(anisotropy->str, NULL);
-		if(anisotropy_value <= 0.0f)
-		{
-			anisotropy_value = 0.0f;
-		}
-
-		vk->vk_anisotropy = anisotropy_value;
-	}
-	else
-	{
-		vk->vk_anisotropy = 100.0f;
-	}
+	vk->vk_anisotropy = options_get_f32(global_options, "vk_anisotropy", 0.0f, 100.0f, 100.0f);
 	printf("- vk_anisotropy: %.1f\n", vk->vk_anisotropy);
 
-	str_t depth_map_size = options_get(global_options, "vk_depth_map_size");
-	if(depth_map_size && !str_is_empty(depth_map_size))
-	{
-		uint32_t depth_map_size_value = strtoul(depth_map_size->str, NULL, 10);
-		if(depth_map_size_value <= 0)
-		{
-			depth_map_size_value = 4096;
-		}
-
-		vk->vk_depth_map_size = depth_map_size_value;
-	}
-	else
-	{
-		vk->vk_depth_map_size = 4096;
-	}
+	vk->vk_depth_map_size = options_get_i64(global_options, "vk_depth_map_size", 1, 16384, 4096);
 	printf("- vk_depth_map_size: %u\n", vk->vk_depth_map_size);
 
-	str_t preview_depth_map = options_get(global_options, "vk_preview_depth_map");
-	if(preview_depth_map && !str_is_empty(preview_depth_map))
-	{
-		vk->vk_preview_depth_map = str_case_cmp_len(preview_depth_map, "true", 4);
-	}
-	else
-	{
-		vk->vk_preview_depth_map = false;
-	}
+	vk->vk_preview_depth_map = options_get_boolean(global_options, "vk_preview_depth_map", false);
 	printf("- vk_preview_depth_map: %d\n", vk->vk_preview_depth_map);
+
+	vk->vk_enable_depth_shadows = options_get_boolean(global_options, "vk_enable_depth_shadows", true);
+	printf("- vk_enable_depth_shadows: %d\n", vk->vk_enable_depth_shadows);
+
+	vk->vk_enable_backface_shadows = options_get_boolean(global_options, "vk_enable_backface_shadows", true);
+	printf("- vk_enable_backface_shadows: %d\n", vk->vk_enable_backface_shadows);
+
+	vk->vk_enable_specular = options_get_boolean(global_options, "vk_enable_specular", true);
+	printf("- vk_enable_specular: %d\n", vk->vk_enable_specular);
+
+	vk->vk_shadow_value = options_get_f32(global_options, "vk_shadow_value", 0.0f, 1.0f, 0.2f);
+	printf("- vk_shadow_value: %.2f\n", vk->vk_shadow_value);
+
+	vk->vk_lambert_start_angle =
+		options_get_f32(global_options, "vk_lambert_start_angle", 0.0f, 90.0f, 80.0f);
+	printf("- vk_lambert_start_angle: %.1f\n", vk->vk_lambert_start_angle);
 }
 
 
@@ -2729,9 +2684,9 @@ vk_init_shadow_pipeline(
 		.cullMode = VK_CULL_MODE_FRONT_BIT,
 		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
 		.depthBiasEnable = VK_TRUE,
-		.depthBiasConstantFactor = 1.25f,
+		.depthBiasConstantFactor = 0.0f,
 		.depthBiasClamp = 0.0f,
-		.depthBiasSlopeFactor = 1.75f,
+		.depthBiasSlopeFactor = 0.0f,
 		.lineWidth = 1.0f
 	};
 
@@ -3417,6 +3372,62 @@ vk_init_mesh_pipeline(
 {
 	assert_not_null(vk);
 
+	typedef struct vk_frag_specialization_data
+	{
+		int32_t enable_depth_shadows;
+		int32_t enable_backface_shadows;
+		int32_t enable_specular;
+		float shadow_value;
+		float lambert_start_angle;
+	}
+	vk_frag_specialization_data_t;
+
+	vk_frag_specialization_data_t vk_frag_specialization_data =
+	{
+		.enable_depth_shadows = vk->vk_enable_depth_shadows,
+		.enable_backface_shadows = vk->vk_enable_backface_shadows,
+		.enable_specular = vk->vk_enable_specular,
+		.shadow_value = vk->vk_shadow_value,
+		.lambert_start_angle = vk->vk_lambert_start_angle
+	};
+
+	VkSpecializationMapEntry vk_frag_map_entries[] =
+	{
+		{
+			.constantID = 0,
+			.offset = offsetof(vk_frag_specialization_data_t, enable_depth_shadows),
+			.size = sizeof(vk_frag_specialization_data.enable_depth_shadows)
+		},
+		{
+			.constantID = 1,
+			.offset = offsetof(vk_frag_specialization_data_t, enable_backface_shadows),
+			.size = sizeof(vk_frag_specialization_data.enable_backface_shadows)
+		},
+		{
+			.constantID = 2,
+			.offset = offsetof(vk_frag_specialization_data_t, enable_specular),
+			.size = sizeof(vk_frag_specialization_data.enable_specular)
+		},
+		{
+			.constantID = 3,
+			.offset = offsetof(vk_frag_specialization_data_t, shadow_value),
+			.size = sizeof(vk_frag_specialization_data.shadow_value)
+		},
+		{
+			.constantID = 4,
+			.offset = offsetof(vk_frag_specialization_data_t, lambert_start_angle),
+			.size = sizeof(vk_frag_specialization_data.lambert_start_angle)
+		}
+	};
+
+	VkSpecializationInfo vk_frag_specialization_info =
+	{
+		.mapEntryCount = MACRO_ARRAY_LEN(vk_frag_map_entries),
+		.pMapEntries = vk_frag_map_entries,
+		.dataSize = sizeof(vk_frag_specialization_data),
+		.pData = &vk_frag_specialization_data
+	};
+
 	VkPipelineShaderStageCreateInfo vk_shader_stages[] =
 	{
 		{
@@ -3435,7 +3446,7 @@ vk_init_mesh_pipeline(
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
 			.module = vk_create_shader(vk, "shaders/mesh.frag.spv"),
 			.pName = "main",
-			.pSpecializationInfo = NULL
+			.pSpecializationInfo = &vk_frag_specialization_info
 		}
 	};
 

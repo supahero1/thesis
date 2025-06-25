@@ -20,6 +20,7 @@
 #include <thesis/alloc_ext.h>
 
 #include <string.h>
+#include <stdlib.h>
 
 
 options_t global_options = NULL;
@@ -144,6 +145,112 @@ options_get(
 	assert_not_null(key);
 
 	return hash_table_get(options->table, key);
+}
+
+
+int64_t
+options_get_i64(
+	options_t options,
+	const char* key,
+	int64_t min_value,
+	int64_t max_value,
+	int64_t default_value
+	)
+{
+	assert_not_null(options);
+	assert_not_null(key);
+
+	const str_t value = options_get(options, key);
+	if(value == NULL || str_is_empty(value))
+	{
+		return default_value;
+	}
+
+	int64_t result = strtoll(value->str, NULL, 10);
+	if(result < min_value || result > max_value)
+	{
+		result = default_value;
+	}
+
+	return result;
+}
+
+
+float
+options_get_f32(
+	options_t options,
+	const char* key,
+	float min_value,
+	float max_value,
+	float default_value
+	)
+{
+	assert_not_null(options);
+	assert_not_null(key);
+
+	const str_t value = options_get(options, key);
+	if(value == NULL || str_is_empty(value))
+	{
+		return default_value;
+	}
+
+	float result = strtof(value->str, NULL);
+	if(result < min_value || result > max_value)
+	{
+		result = default_value;
+	}
+
+	return result;
+}
+
+
+bool
+options_get_boolean(
+	options_t options,
+	const char* key,
+	bool default_value
+	)
+{
+	assert_not_null(options);
+	assert_not_null(key);
+
+	const str_t value = options_get(options, key);
+	if(value == NULL || str_is_empty(value))
+	{
+		return default_value;
+	}
+
+	if(
+		str_case_cmp_len(value, "true", 4) ||
+		str_case_cmp_len(value, "yes", 3) ||
+		str_case_cmp_len(value, "1", 1)
+		)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+
+const str_t
+options_get_str(
+	options_t options,
+	const char* key,
+	const char* default_value
+	)
+{
+	assert_not_null(options);
+	assert_not_null(key);
+	assert_not_null(default_value);
+
+	const str_t value = options_get(options, key);
+	if(value == NULL || str_is_empty(value))
+	{
+		return str_init_copy_cstr(default_value);
+	}
+
+	return value;
 }
 
 
