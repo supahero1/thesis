@@ -1,5 +1,5 @@
 /*
- *   Copyright 2024-2025 Franciszek Balcerak
+ *   Copyright 2025 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,15 +16,11 @@
 
 #version 450
 
-layout(binding = 0) uniform sampler2D inDepthMap;
-
-layout(location = 0) in vec2 inCoords;
-
-layout(location = 0) out vec4 outColor;
+layout(location = 0) out vec2 outCoords;
 
 void
 main()
 {
-	float depth = texture(inDepthMap, inCoords).r;
-	outColor = vec4(vec3(depth), 1.0);
+	outCoords = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+	gl_Position = vec4(outCoords * 2.0 - 1.0, 0.0, 1.0);
 }

@@ -90,7 +90,7 @@ app: shaders
 		--vk_mipmap_levels=$(VK_MIPMAP_LEVELS) \
 		--vk_anisotropy=$(VK_ANISOTROPY) \
 		--vk_depth_map_size=$(VK_DEPTH_MAP_SIZE) \
-		--vk_preview_depth_map=$(VK_PREVIEW_DEPTH_MAP) \
+		--vk_preview=$(VK_PREVIEW) \
 		--vk_enable_depth_shadows=$(VK_ENABLE_DEPTH_SHADOWS) \
 		--vk_enable_backface_shadows=$(VK_ENABLE_BACKFACE_SHADOWS) \
 		--vk_enable_specular=$(VK_ENABLE_SPECULAR) \
