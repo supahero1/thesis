@@ -95,6 +95,13 @@ typedef struct vk_depth_vertex_data
 }
 vk_depth_vertex_data_t;
 
+typedef struct vk_gbuffer_vert_ubo_data
+{
+	mat4 projection;
+	mat4 view;
+}
+vk_gbuffer_vert_ubo_data_t;
+
 typedef struct vk_skybox_constant_data
 {
 	mat4 transform;
@@ -242,7 +249,7 @@ typedef enum vk_preview
 {
 	VK_PREVIEW_NONE,
 	VK_PREVIEW_SHADOW_DEPTH_MAP,
-	VK_PREVIEW_SSAO_GBUFFER,
+	VK_PREVIEW_SSAO_NORMAL_MAP,
 	VK_PREVIEW_SSAO_DEPTH_MAP,
 	MACRO_ENUM_BITS(VK_PREVIEW)
 }
@@ -370,6 +377,9 @@ struct vk
 		{
 			VkPipelineLayout pipeline_layout;
 			VkPipeline pipeline;
+
+			vk_buffer_t ubo_buffer;
+			VkDescriptorSet ubo_set;
 		}
 		gbuffer;
 	}
@@ -3616,6 +3626,9 @@ vk_init_gbuffer_consts(
 	)
 {
 	assert_not_null(vk);
+
+	vk_init_ubo_buffer(vk, sizeof(vk_gbuffer_vert_ubo_data_t), &vk->vk_ssao_stage_1.gbuffer.ubo_buffer,
+		vk->vk_vert_ubo_set_layout, &vk->vk_ssao_stage_1.gbuffer.ubo_set);
 }
 
 
@@ -3625,6 +3638,8 @@ vk_free_gbuffer_consts(
 	)
 {
 	assert_not_null(vk);
+
+	vk_free_buffer(vk, &vk->vk_ssao_stage_1.gbuffer.ubo_buffer);
 }
 
 
@@ -5792,6 +5807,31 @@ vk_recreate_swapchain(
 }
 
 
+#define VK_FOR_EACH_MODEL(vk_entities_per_model, ...)								\
+do																					\
+{																					\
+	vk_entities_per_model_t* vk_entities_per_model = vk_entity_data;				\
+	vk_entities_per_model_t* vk_entities_per_model##_end =							\
+		vk_entities_per_model + vk->vk_model_count;									\
+																					\
+	__VA_OPT__(vk_model_t* __VA_ARGS__ = vk->vk_models;)							\
+																					\
+	while(vk_entities_per_model < vk_entities_per_model##_end)						\
+	{																				\
+		if(vk_entities_per_model->entities_used != 0)								\
+		{																			\
+			hard_assert_le(vk_entities_per_model->entities_used, VK_MAX_INSTANCES);
+
+#define VK_FOR_EACH_MODEL_END(vk_entities_per_model, ...)	\
+		}													\
+															\
+		++vk_entities_per_model;							\
+		__VA_OPT__(++__VA_ARGS__;)							\
+	}														\
+}															\
+while(0)
+
+
 private void
 vk_draw_shadow(
 	vk_t vk,
@@ -5839,42 +5879,29 @@ vk_draw_shadow(
 		vk->vk_shadow.depth.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
 		0, sizeof(vk_depth_vert_constant_data), &vk_depth_vert_constant_data);
 
-	vk_entities_per_model_t* vk_entities_per_model = vk_entity_data;
-	vk_entities_per_model_t* vk_entities_per_model_end =
-		vk_entities_per_model + vk->vk_model_count;
-
-	vk_model_t* vk_model = vk->vk_models;
-
-	while(vk_entities_per_model < vk_entities_per_model_end)
+	VK_FOR_EACH_MODEL(vk_entities_per_model, vk_model)
 	{
-		if(vk_entities_per_model->entities_used != 0)
+		vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
+			1, 1, &vk_model->instance_buffer.buffer, (VkDeviceSize[]){0});
+
+		vk_mesh_t* vk_mesh = vk_model->meshes;
+		vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
+
+		while(vk_mesh < vk_mesh_end)
 		{
-			hard_assert_le(vk_entities_per_model->entities_used, VK_MAX_INSTANCES);
-
 			vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
-				1, 1, &vk_model->instance_buffer.buffer, (VkDeviceSize[]){0});
+				0, 1, &vk_mesh->depth_vertex_buffer.buffer, (VkDeviceSize[]){0});
 
-			vk_mesh_t* vk_mesh = vk_model->meshes;
-			vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
+			vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
+				vk_mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-			while(vk_mesh < vk_mesh_end)
-			{
-				vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
-					0, 1, &vk_mesh->depth_vertex_buffer.buffer, (VkDeviceSize[]){0});
+			vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,
+				vk_mesh->index_count, vk_entities_per_model->entities_used, 0, 0, 0);
 
-				vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
-					vk_mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-				vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,
-					vk_mesh->index_count, vk_entities_per_model->entities_used, 0, 0, 0);
-
-				++vk_mesh;
-			}
+			++vk_mesh;
 		}
-
-		++vk_entities_per_model;
-		++vk_model;
 	}
+	VK_FOR_EACH_MODEL_END(vk_entities_per_model, vk_model);
 
 	vk->vk_table.vkCmdEndRenderPass(vk->vk_barrier->command_buffer);
 }
@@ -5922,6 +5949,44 @@ vk_draw_ssao(
 
 	vk->vk_table.vkCmdSetViewport(vk->vk_barrier->command_buffer, 0, 1, &vk->vk_viewport);
 	vk->vk_table.vkCmdSetScissor(vk->vk_barrier->command_buffer, 0, 1, &vk->vk_scissor);
+
+	vk_gbuffer_vert_ubo_data_t vk_gbuffer_vert_ubo_data;
+	glm_mat4_copy(transform->projection, vk_gbuffer_vert_ubo_data.projection);
+	glm_mat4_copy(transform->view, vk_gbuffer_vert_ubo_data.view);
+
+	vk_copy_to_buffer(vk, &vk->vk_ssao_stage_1.gbuffer.ubo_buffer,
+		&vk_gbuffer_vert_ubo_data, sizeof(vk_gbuffer_vert_ubo_data));
+
+	vk->vk_table.vkCmdBindPipeline(vk->vk_barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_ssao_stage_1.gbuffer.pipeline);
+
+	vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_ssao_stage_1.gbuffer.pipeline_layout,
+		0, 1, &vk->vk_ssao_stage_1.gbuffer.ubo_set, 0, NULL);
+
+	VK_FOR_EACH_MODEL(vk_entities_per_model, vk_model)
+	{
+		vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
+			1, 1, &vk_model->instance_buffer.buffer, (VkDeviceSize[]){0});
+
+		vk_mesh_t* vk_mesh = vk_model->meshes;
+		vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
+
+		while(vk_mesh < vk_mesh_end)
+		{
+			vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
+				0, 1, &vk_mesh->mesh_vertex_buffer.buffer, (VkDeviceSize[]){0});
+
+			vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
+				vk_mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+			vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,
+				vk_mesh->index_count, vk_entities_per_model->entities_used, 0, 0, 0);
+
+			++vk_mesh;
+		}
+	}
+	VK_FOR_EACH_MODEL_END(vk_entities_per_model, vk_model);
 
 	vk->vk_table.vkCmdEndRenderPass(vk->vk_barrier->command_buffer);
 }
@@ -6029,55 +6094,39 @@ vk_draw_mesh(
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.mesh.pipeline_layout,
 			2, 1, &vk_frame->shadow.depth.set, 0, NULL);
 
-		vk_entities_per_model_t* vk_entities_per_model = vk_entity_data;
-		vk_entities_per_model_t* vk_entities_per_model_end =
-			vk_entities_per_model + vk->vk_model_count;
-
-		vk_model_t* vk_model = vk->vk_models;
-
-		while(vk_entities_per_model < vk_entities_per_model_end)
+		VK_FOR_EACH_MODEL(vk_entities_per_model, vk_model)
 		{
-			if(vk_entities_per_model->entities_used != 0)
+			vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
+				1, 1, &vk_model->instance_buffer.buffer, (VkDeviceSize[]){0});
+
+			vk_mesh_t* vk_mesh = vk_model->meshes;
+			vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
+
+			while(vk_mesh < vk_mesh_end)
 			{
-				hard_assert_le(vk_entities_per_model->entities_used, VK_MAX_INSTANCES);
+				vk_material_t* vk_material = vk->vk_materials + vk_mesh->material_idx;
+
+				vk->vk_table.vkCmdPushConstants(vk->vk_barrier->command_buffer,
+					vk->vk_scene.mesh.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
+					0, sizeof(vk_material->constant_data), &vk_material->constant_data);
 
 				vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
-					1, 1, &vk_model->instance_buffer.buffer, (VkDeviceSize[]){0});
+					0, 1, &vk_mesh->mesh_vertex_buffer.buffer, (VkDeviceSize[]){0});
 
-				vk_mesh_t* vk_mesh = vk_model->meshes;
-				vk_mesh_t* vk_mesh_end = vk_mesh + vk_model->mesh_count;
+				vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
+					vk_mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-				while(vk_mesh < vk_mesh_end)
-				{
-					vk_material_t* vk_material = vk->vk_materials + vk_mesh->material_idx;
+				vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+					VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.mesh.pipeline_layout,
+					1, 1, &vk_material->set, 0, NULL);
 
-					vk->vk_table.vkCmdPushConstants(vk->vk_barrier->command_buffer,
-						vk->vk_scene.mesh.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
-						0, sizeof(vk_material->constant_data), &vk_material->constant_data);
+				vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,
+					vk_mesh->index_count, vk_entities_per_model->entities_used, 0, 0, 0);
 
-					vk->vk_table.vkCmdBindVertexBuffers(vk->vk_barrier->command_buffer,
-						0, 1, &vk_mesh->mesh_vertex_buffer.buffer, (VkDeviceSize[]){0});
-
-					vk->vk_table.vkCmdBindIndexBuffer(vk->vk_barrier->command_buffer,
-						vk_mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-					vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
-						VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.mesh.pipeline_layout,
-						1, 1, &vk_material->set, 0, NULL);
-
-					vk->vk_table.vkCmdDrawIndexed(vk->vk_barrier->command_buffer,
-						vk_mesh->index_count, vk_entities_per_model->entities_used, 0, 0, 0);
-
-					++vk_mesh;
-				}
+				++vk_mesh;
 			}
-
-			alloc_free(vk_entities_per_model->entities,
-				sizeof(*vk_entities_per_model->entities) * vk_entities_per_model->entities_size);
-
-			++vk_entities_per_model;
-			++vk_model;
 		}
+		VK_FOR_EACH_MODEL_END(vk_entities_per_model, vk_model);
 
 		break;
 	}
@@ -6096,8 +6145,33 @@ vk_draw_mesh(
 		break;
 	}
 
-	case VK_PREVIEW_SSAO_GBUFFER:
-	case VK_PREVIEW_SSAO_DEPTH_MAP: break;
+	case VK_PREVIEW_SSAO_NORMAL_MAP:
+	{
+		vk->vk_table.vkCmdBindPipeline(vk->vk_barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.preview.image.pipeline);
+
+		vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.preview.image.pipeline_layout,
+			0, 1, &vk_frame->gbuffer.normal.set, 0, NULL);
+
+		vk->vk_table.vkCmdDraw(vk->vk_barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SSAO_DEPTH_MAP:
+	{
+		vk->vk_table.vkCmdBindPipeline(vk->vk_barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.preview.depth.pipeline);
+
+		vk->vk_table.vkCmdBindDescriptorSets(vk->vk_barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->vk_scene.preview.depth.pipeline_layout,
+			0, 1, &vk_frame->gbuffer.depth.set, 0, NULL);
+
+		vk->vk_table.vkCmdDraw(vk->vk_barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
 
 	default: assert_unreachable();
 
@@ -6200,47 +6274,41 @@ vk_draw(
 		++entity;
 	}
 
-	vk_entities_per_model_t* vk_entities_per_model = vk_entity_data;
-	vk_entities_per_model_t* vk_entities_per_model_end =
-		vk_entities_per_model + vk->vk_model_count;
-
-	vk_model_t* vk_model = vk->vk_models;
-
-	while(vk_entities_per_model < vk_entities_per_model_end)
+	VK_FOR_EACH_MODEL(vk_entities_per_model, vk_model)
 	{
-		if(vk_entities_per_model->entities_used != 0)
+		simulation_entity_data_t** vk_entity = vk_entities_per_model->entities;
+		simulation_entity_data_t** vk_entity_end = vk_entity + vk_entities_per_model->entities_used;
+
+		uint64_t vk_instance_data_size =
+			sizeof(vk_model_instance_data_t) * vk_entities_per_model->entities_used;
+		vk_model_instance_data_t* vk_instance_data = alloc_malloc(vk_instance_data_size);
+		assert_ptr(vk_instance_data, vk_instance_data_size);
+
+		vk_model_instance_data_t* vk_instance = vk_instance_data;
+
+		while(vk_entity < vk_entity_end)
 		{
-			hard_assert_le(vk_entities_per_model->entities_used, VK_MAX_INSTANCES);
+			glm_mat4_copy((*vk_entity)->transform, vk_instance->transform);
 
-			simulation_entity_data_t** vk_entity = vk_entities_per_model->entities;
-			simulation_entity_data_t** vk_entity_end = vk_entity + vk_entities_per_model->entities_used;
-
-			uint64_t vk_instance_data_size =
-				sizeof(vk_model_instance_data_t) * vk_entities_per_model->entities_used;
-			vk_model_instance_data_t* vk_instance_data = alloc_malloc(vk_instance_data_size);
-			assert_ptr(vk_instance_data, vk_instance_data_size);
-
-			vk_model_instance_data_t* vk_instance = vk_instance_data;
-
-			while(vk_entity < vk_entity_end)
-			{
-				glm_mat4_copy((*vk_entity)->transform, vk_instance->transform);
-
-				++vk_entity;
-				++vk_instance;
-			}
-
-			vk_copy_to_buffer(vk, &vk_model->instance_buffer, vk_instance_data, vk_instance_data_size);
-			alloc_free(vk_instance_data, vk_instance_data_size);
+			++vk_entity;
+			++vk_instance;
 		}
 
-		++vk_entities_per_model;
-		++vk_model;
+		vk_copy_to_buffer(vk, &vk_model->instance_buffer, vk_instance_data, vk_instance_data_size);
+		alloc_free(vk_instance_data, vk_instance_data_size);
 	}
+	VK_FOR_EACH_MODEL_END(vk_entities_per_model, vk_model);
 
 	vk_draw_shadow(vk, vk_frame, &camera, &transform, vk_entity_data);
 	vk_draw_ssao(vk, vk_frame, &camera, &transform, vk_entity_data);
 	vk_draw_mesh(vk, vk_frame, &camera, &transform, vk_entity_data);
+
+	VK_FOR_EACH_MODEL(vk_entities_per_model)
+	{
+		alloc_free(vk_entities_per_model->entities,
+			sizeof(*vk_entities_per_model->entities) * vk_entities_per_model->entities_size);
+	}
+	VK_FOR_EACH_MODEL_END(vk_entities_per_model);
 
 	alloc_free(vk_entity_data, sizeof(*vk_entity_data) * vk->vk_model_count);
 

@@ -20,9 +20,6 @@ layout(binding = 0) uniform UBO
 {
 	mat4 projection;
 	mat4 view;
-	mat4 light_transform;
-	vec4 light_direction;
-	vec4 camera_position;
 }
 consts;
 
