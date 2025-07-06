@@ -32,6 +32,7 @@ if release <= 0:
 else:
 	if release >= 1:
 		flags.extend(Split("-O3 -DNDEBUG -flto"))
+		# flags.extend(Split("-O3 -g3"))
 	if release >= 2:
 		flags.extend(Split("-march=native"))
 

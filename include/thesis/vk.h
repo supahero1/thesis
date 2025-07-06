@@ -26,4 +26,3 @@ extern vk_t
 vk_init(
 	simulation_t simulation
 	);
-

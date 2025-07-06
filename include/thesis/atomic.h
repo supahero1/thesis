@@ -14,6 +14,25 @@
  *  limitations under the License.
  */
 
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-#include <volk.h>
+#pragma once
+
+#include <stdatomic.h>
+
+#define atomic_load_acq(value)							\
+({														\
+	atomic_load_explicit(value, memory_order_acquire);	\
+})
+
+#define atomic_store_rel(value, new_value)							\
+({																	\
+	atomic_store_explicit(value, new_value, memory_order_release);	\
+})
+
+#define atomic_exchange_acq_rel(value, old_value, new_value)	\
+({																\
+	typeof(old_value) old_val = old_value;						\
+	atomic_compare_exchange_strong_explicit(					\
+		value, &old_val, new_value,								\
+		memory_order_acq_rel, memory_order_acquire);			\
+	old_val;													\
+})

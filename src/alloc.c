@@ -21,8 +21,6 @@
 #if !defined(NDEBUG) && (defined(VALGRIND) || __has_include(<valgrind/valgrind.h>))
 	#define ALLOC_VALGRIND
 
-	#include <stdlib.h>
-
 	#include <valgrind/valgrind.h>
 #endif
 
@@ -1631,10 +1629,9 @@ alloc_free_h(
 	assert_not_null(handle, fprintf(stderr,
 		"Size 0 specified for non-empty pointer (you passed invalid parameters to alloc_free())\n"));
 
-	alloc_handle_impl_t* handle_impl = (void*) handle;
-
 	assert_eq((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(size), 0,
 		{
+			alloc_handle_impl_t* handle_impl = (void*) handle;
 			if(alloc_handle_is_virtual(handle_impl)) break;
 			char format[256];
 			snprintf(format, sizeof(format),
@@ -1777,4 +1774,3 @@ allow_realloc_uh(
 
 
 #undef ALLOC_REALLOC
-#undef ALLOC_REALLOC_CHECK_VALGRIND

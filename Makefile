@@ -20,7 +20,7 @@ SHELL := bash
 
 ifeq ($(VALGRIND),1)
 VALGRIND_CALL := valgrind --leak-check=full --show-leak-kinds=all \
-	--suppressions=../val_sup.txt --log-file="val_log.txt" --
+	--suppressions=../val_sup.txt --log-file="val_log.txt" --track-origins=yes --
 endif
 
 ifeq ($(KCACHEGRIND),1)
@@ -86,10 +86,12 @@ app: shaders
 	fi; \
 	cd thesis; $(VALGRIND_CALL) ./thesis_app \
 		--xr_runtime=$$xr_runtime \
+		--window_width=$(WINDOW_WIDTH) \
+		--window_height=$(WINDOW_HEIGHT) \
 		--vk_sample_shading=$(VK_SAMPLE_SHADING) \
 		--vk_mipmap_levels=$(VK_MIPMAP_LEVELS) \
 		--vk_anisotropy=$(VK_ANISOTROPY) \
-		--vk_depth_map_size=$(VK_DEPTH_MAP_SIZE) \
+		--vk_shadow_map_size=$(VK_SHADOW_MAP_SIZE) \
 		--vk_preview=$(VK_PREVIEW) \
 		--vk_enable_depth_shadows=$(VK_ENABLE_DEPTH_SHADOWS) \
 		--vk_enable_backface_shadows=$(VK_ENABLE_BACKFACE_SHADOWS) \
