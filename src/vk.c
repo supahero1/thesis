@@ -34,6 +34,7 @@
 #define VK_MAX_FRAMES 2
 #define VK_MAX_INSTANCES 128
 #define VK_POOL_SIZE 32
+#define VK_COMMANDS 8
 
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
@@ -270,6 +271,15 @@ typedef enum vk_preview
 }
 vk_preview_t;
 
+typedef struct vk_command
+{
+	VkCommandBuffer buffer;
+	VkFence fence;
+
+	vk_buffer_t staging_buffer;
+}
+vk_command_t;
+
 typedef struct vk_descriptor_pool
 {
 	VkDescriptorPool pool;
@@ -369,16 +379,14 @@ struct vk
 	VkPresentModeKHR present_mode;
 
 	VkCommandPool command_pool;
-	VkCommandBuffer command_buffer;
-	VkFence fence;
+	vk_command_t commands[VK_COMMANDS];
+	vk_command_t* command;
 
 	vk_descriptor_set_pool_t sampler_pool;
 	vk_descriptor_set_pool_t ubo_pool;
 
 	VkDescriptorSetLayout sampler_set_layout;
 	VkDescriptorSetLayout vert_ubo_set_layout;
-
-	vk_buffer_t staging_buffer;
 
 	VkSampler depth_sampler;
 	VkSampler image_sampler;
@@ -885,8 +893,8 @@ vk_init_instance(
 	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT =
 		vk_load_func(vk, "vkCreateDebugUtilsMessengerEXT");
 
-	result = vkCreateDebugUtilsMessengerEXT(vk->instance,
-		&debug_info, NULL, &vk->debug_messenger);
+	result = vkCreateDebugUtilsMessengerEXT(
+		vk->instance, &debug_info, NULL, &vk->debug_messenger);
 	hard_assert_eq(result, VK_SUCCESS);
 #endif
 
@@ -902,8 +910,7 @@ vk_free_instance(
 	assert_not_null(vk);
 
 #ifndef NDEBUG
-	vkDestroyDebugUtilsMessengerEXT(
-		vk->instance, vk->debug_messenger, NULL);
+	vkDestroyDebugUtilsMessengerEXT(vk->instance, vk->debug_messenger, NULL);
 #endif
 
 	vkDestroyInstance(vk->instance, NULL);
@@ -1522,40 +1529,6 @@ vk_init_device(
 	vkGetPhysicalDeviceMemoryProperties(vk->physical_device, &vk->memory_properties);
 
 
-	VkCommandPoolCreateInfo command_pool_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-		.pNext = NULL,
-		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-		.queueFamilyIndex = vk->queue_id
-	};
-
-	result = vk->table.vkCreateCommandPool(vk->device, &command_pool_info, NULL, &vk->command_pool);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	VkCommandBufferAllocateInfo command_buffer_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-		.pNext = NULL,
-		.commandPool = vk->command_pool,
-		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = 1
-	};
-
-	result = vk->table.vkAllocateCommandBuffers(vk->device, &command_buffer_info, &vk->command_buffer);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	VkFenceCreateInfo fence_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-		.pNext = NULL,
-		.flags = VK_FENCE_CREATE_SIGNALED_BIT
-	};
-
-	result = vk->table.vkCreateFence(vk->device, &fence_info, NULL, &vk->fence);
-	hard_assert_eq(result, VK_SUCCESS);
-
-
 	vk_get_extent(vk);
 	if(!vk->surface_capabilities.maxImageCount)
 	{
@@ -1608,11 +1581,165 @@ vk_free_device(
 {
 	assert_not_null(vk);
 
-	vk->table.vkDestroyFence(vk->device, vk->fence, NULL);
-	vk->table.vkFreeCommandBuffers(vk->device, vk->command_pool, 1, &vk->command_buffer);
-	vk->table.vkDestroyCommandPool(vk->device, vk->command_pool, NULL);
-
 	vk->table.vkDestroyDevice(vk->device, NULL);
+}
+
+
+private void
+vk_init_commands(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkCommandPoolCreateInfo command_pool_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.pNext = NULL,
+		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+		.queueFamilyIndex = vk->queue_id
+	};
+
+	VkResult result = vk->table.vkCreateCommandPool(vk->device, &command_pool_info, NULL, &vk->command_pool);
+	hard_assert_eq(result, VK_SUCCESS);
+
+
+	VkCommandBuffer command_buffers[MACRO_ARRAY_LEN(vk->commands)];
+	VkCommandBuffer* command_buffer = command_buffers;
+
+	VkCommandBufferAllocateInfo command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vk->command_pool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = MACRO_ARRAY_LEN(command_buffers)
+	};
+
+	result = vk->table.vkAllocateCommandBuffers(vk->device, &command_buffer_info, command_buffers);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	VkFenceCreateInfo fence_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = VK_FENCE_CREATE_SIGNALED_BIT
+	};
+
+	vk_command_t* command = vk->commands;
+	vk_command_t* command_end = command + MACRO_ARRAY_LEN(vk->commands);
+
+	while(command != command_end)
+	{
+		command->buffer = *command_buffer;
+
+		result = vk->table.vkCreateFence(vk->device, &fence_info, NULL, &command->fence);
+		hard_assert_eq(result, VK_SUCCESS);
+
+		++command_buffer;
+		++command;
+	}
+
+	vk->command = vk->commands;
+}
+
+
+private void
+vk_free_commands(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	VkCommandBuffer command_buffers[MACRO_ARRAY_LEN(vk->commands)];
+	VkCommandBuffer* command_buffer = command_buffers;
+
+	vk_command_t* command = vk->commands;
+	vk_command_t* command_end = command + MACRO_ARRAY_LEN(vk->commands);
+
+	while(command != command_end)
+	{
+		vk->table.vkDestroyFence(vk->device, command->fence, NULL);
+
+		*command_buffer = command->buffer;
+
+		++command_buffer;
+		++command;
+	}
+
+	vk->table.vkFreeCommandBuffers(vk->device,
+		vk->command_pool, MACRO_ARRAY_LEN(vk->commands), command_buffers);
+
+	vk->table.vkDestroyCommandPool(vk->device, vk->command_pool, NULL);
+}
+
+
+private vk_command_t*
+vk_get_command(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	if(vk->command >= vk->commands + MACRO_ARRAY_LEN(vk->commands))
+	{
+		vk->command = vk->commands;
+	}
+
+	vk_command_t* command = vk->command;
+	++vk->command;
+
+	VkResult result = vk->table.vkWaitForFences(vk->device, 1, &command->fence, VK_TRUE, UINT64_MAX);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	result = vk->table.vkResetFences(vk->device, 1, &command->fence);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	result = vk->table.vkResetCommandBuffer(command->buffer, 0);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	VkCommandBufferBeginInfo command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		.pInheritanceInfo = NULL
+	};
+
+	result = vk->table.vkBeginCommandBuffer(command->buffer, &command_buffer_info);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	return command;
+}
+
+
+private void
+vk_run_command(
+	vk_t vk,
+	vk_command_t* command
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(command);
+
+	VkResult result = vk->table.vkEndCommandBuffer(command->buffer);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	VkSubmitInfo submit_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = NULL,
+		.waitSemaphoreCount = 0,
+		.pWaitSemaphores = NULL,
+		.pWaitDstStageMask = NULL,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &command->buffer,
+		.signalSemaphoreCount = 0,
+		.pSignalSemaphores = NULL
+	};
+
+	result = vk->table.vkQueueSubmit(vk->queue, 1, &submit_info, command->fence);
+	hard_assert_eq(result, VK_SUCCESS);
 }
 
 
@@ -1866,59 +1993,6 @@ vk_get_memory(
 
 
 private void
-vk_begin_command_buffer(
-	vk_t vk
-	)
-{
-	VkResult result = vk->table.vkWaitForFences(vk->device, 1, &vk->fence, VK_TRUE, UINT64_MAX);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	result = vk->table.vkResetFences(vk->device, 1, &vk->fence);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	result = vk->table.vkResetCommandBuffer(vk->command_buffer, 0);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	VkCommandBufferBeginInfo command_buffer_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-		.pNext = NULL,
-		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-		.pInheritanceInfo = NULL
-	};
-
-	result = vk->table.vkBeginCommandBuffer(vk->command_buffer, &command_buffer_info);
-	hard_assert_eq(result, VK_SUCCESS);
-}
-
-
-private void
-vk_end_command_buffer(
-	vk_t vk
-	)
-{
-	VkResult result = vk->table.vkEndCommandBuffer(vk->command_buffer);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	VkSubmitInfo submit_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-		.pNext = NULL,
-		.waitSemaphoreCount = 0,
-		.pWaitSemaphores = NULL,
-		.pWaitDstStageMask = NULL,
-		.commandBufferCount = 1,
-		.pCommandBuffers = &vk->command_buffer,
-		.signalSemaphoreCount = 0,
-		.pSignalSemaphores = NULL
-	};
-
-	result = vk->table.vkQueueSubmit(vk->queue, 1, &submit_info, vk->fence);
-	hard_assert_eq(result, VK_SUCCESS);
-}
-
-
-private void
 vk_init_buffer(
 	vk_t vk,
 	VkDeviceSize size,
@@ -1982,24 +2056,48 @@ vk_free_buffer(
 private void
 vk_init_staging_buffer(
 	vk_t vk,
+	vk_command_t* command,
 	VkDeviceSize size
 	)
 {
 	assert_not_null(vk);
+	assert_not_null(command);
 
-	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &vk->staging_buffer);
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	vk_init_buffer(vk, size, usage, flags, &command->staging_buffer);
 }
 
 
 private void
 vk_free_staging_buffer(
+	vk_t vk,
+	vk_command_t* command
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(command);
+
+	vk_free_buffer(vk, &command->staging_buffer);
+}
+
+
+private void
+vk_free_all_staging_buffers(
 	vk_t vk
 	)
 {
 	assert_not_null(vk);
 
-	vk_free_buffer(vk, &vk->staging_buffer);
+	vk_command_t* command = vk->commands;
+	vk_command_t* command_end = command + MACRO_ARRAY_LEN(vk->commands);
+
+	while(command != command_end)
+	{
+		vk_free_staging_buffer(vk, command);
+
+		++command;
+	}
 }
 
 
@@ -2013,8 +2111,9 @@ vk_init_vertex_buffer(
 	assert_not_null(vk);
 	assert_not_null(buffer);
 
-	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buffer);
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	vk_init_buffer(vk, size, usage, flags, buffer);
 }
 
 
@@ -2028,8 +2127,9 @@ vk_init_index_buffer(
 	assert_not_null(vk);
 	assert_not_null(buffer);
 
-	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-		VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buffer);
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	vk_init_buffer(vk, size, usage, flags, buffer);
 }
 
 
@@ -2047,8 +2147,9 @@ vk_init_ubo_buffer(
 	assert_not_null(set_layout);
 	assert_not_null(set);
 
-	vk_init_buffer(vk, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buffer);
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	vk_init_buffer(vk, size, usage, flags, buffer);
 
 	vk_get_descriptor_sets(vk, &vk->ubo_pool, set_layout, set, 1);
 
@@ -2094,19 +2195,19 @@ vk_copy_to_buffer(
 		return;
 	}
 
-	vk_begin_command_buffer(vk);
+	vk_command_t* command = vk_get_command(vk);
 
-	vk_free_staging_buffer(vk);
-	vk_init_staging_buffer(vk, size);
+	vk_free_staging_buffer(vk, command);
+	vk_init_staging_buffer(vk, command, size);
 
 	void* mapped_data;
-	VkResult result = vk->table.vkMapMemory(
-		vk->device, vk->staging_buffer.memory, 0, size, 0, &mapped_data);
+	VkResult result = vk->table.vkMapMemory(vk->device,
+		command->staging_buffer.memory, 0, size, 0, &mapped_data);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	memcpy(mapped_data, data, size);
 
-	vk->table.vkUnmapMemory(vk->device, vk->staging_buffer.memory);
+	vk->table.vkUnmapMemory(vk->device, command->staging_buffer.memory);
 
 	VkBufferCopy buffer_copy =
 	{
@@ -2115,10 +2216,10 @@ vk_copy_to_buffer(
 		.size = size
 	};
 
-	vk->table.vkCmdCopyBuffer(vk->command_buffer,
-		vk->staging_buffer.buffer, buffer->buffer, 1, &buffer_copy);
+	vk->table.vkCmdCopyBuffer(command->buffer,
+		command->staging_buffer.buffer, buffer->buffer, 1, &buffer_copy);
 
-	vk_end_command_buffer(vk);
+	vk_run_command(vk, command);
 }
 
 
@@ -2131,19 +2232,19 @@ vk_copy_texture_to_image(
 	assert_not_null(vk);
 	assert_not_null(image);
 
-	vk_begin_command_buffer(vk);
+	vk_command_t* command = vk_get_command(vk);
 
-	vk_free_staging_buffer(vk);
-	vk_init_staging_buffer(vk, image->size);
+	vk_free_staging_buffer(vk, command);
+	vk_init_staging_buffer(vk, command, image->size);
 
 	void* mapped_data;
 	VkResult result = vk->table.vkMapMemory(vk->device,
-		vk->staging_buffer.memory, 0, image->size, 0, &mapped_data);
+		command->staging_buffer.memory, 0, image->size, 0, &mapped_data);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	memcpy(mapped_data, image->data, image->size);
 
-	vk->table.vkUnmapMemory(vk->device, vk->staging_buffer.memory);
+	vk->table.vkUnmapMemory(vk->device, command->staging_buffer.memory);
 
 	uint32_t count = image->levels * image->layers;
 	VkBufferImageCopy buffer_image_copies[count];
@@ -2188,10 +2289,10 @@ vk_copy_texture_to_image(
 		height = MACRO_MAX(height >> 1, 1);
 	}
 
-	vk->table.vkCmdCopyBufferToImage(vk->command_buffer, vk->staging_buffer.buffer,
+	vk->table.vkCmdCopyBufferToImage(command->buffer, command->staging_buffer.buffer,
 		image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, count, buffer_image_copies);
 
-	vk_end_command_buffer(vk);
+	vk_run_command(vk, command);
 }
 
 
@@ -2206,7 +2307,7 @@ vk_transition_image_layout(
 	assert_not_null(vk);
 	assert_not_null(image);
 
-	vk_begin_command_buffer(vk);
+	vk_command_t* command = vk_get_command(vk);
 
 	VkPipelineStageFlags src_stage;
 	VkPipelineStageFlags dst_stage;
@@ -2263,10 +2364,9 @@ vk_transition_image_layout(
 		hard_assert_unreachable();
 	}
 
-	vk->table.vkCmdPipelineBarrier(vk->command_buffer,
-		src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &barrier);
+	vk->table.vkCmdPipelineBarrier(command->buffer, src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &barrier);
 
-	vk_end_command_buffer(vk);
+	vk_run_command(vk, command);
 }
 
 
@@ -6275,6 +6375,8 @@ vk_draw(
 	{
 		vk->barrier = vk->barriers;
 	}
+
+	window_close(vk->window.handle);
 }
 
 
@@ -6334,6 +6436,7 @@ vk_init_vk(
 	vk_init_instance(vk);
 	vk_init_surface(vk);
 	vk_init_device(vk);
+	vk_init_commands(vk);
 	vk_init_sets(vk);
 	vk_init_pipelines(vk);
 	vk_init_models(vk);
@@ -6356,7 +6459,7 @@ vk_free_vk(
 
 	vk_device_wait_idle(vk);
 
-	vk_free_staging_buffer(vk);
+	vk_free_all_staging_buffers(vk);
 
 	vk_free_framebuffers(vk);
 	vk_free_frames(vk);
@@ -6364,6 +6467,7 @@ vk_free_vk(
 	vk_free_models(vk);
 	vk_free_pipelines(vk);
 	vk_free_sets(vk);
+	vk_free_commands(vk);
 	vk_free_device(vk);
 	vk_free_surface(vk);
 	vk_free_instance(vk);
