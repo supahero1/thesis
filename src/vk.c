@@ -51,7 +51,8 @@ typedef enum vk_image_type
 	VK_IMAGE_TYPE_TRANSIENT,
 	VK_IMAGE_TYPE_TEXTURE,
 	VK_IMAGE_TYPE_CUBE,
-	VK_IMAGE_TYPE_SHADOW_SIZE,
+	VK_IMAGE_TYPE_CUSTOM_FORMAT,
+	VK_IMAGE_TYPE_CUSTOM_SIZE,
 	MACRO_ENUM_BITS_EXP(VK_IMAGE_TYPE),
 
 	VK_IMAGE_TYPE_DEPTH_BIT			= MACRO_POWER_OF_2(VK_IMAGE_TYPE_DEPTH),
@@ -61,7 +62,8 @@ typedef enum vk_image_type
 	VK_IMAGE_TYPE_TRANSIENT_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_TRANSIENT),
 	VK_IMAGE_TYPE_TEXTURE_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_TEXTURE),
 	VK_IMAGE_TYPE_CUBE_BIT			= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUBE),
-	VK_IMAGE_TYPE_SHADOW_SIZE_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_SHADOW_SIZE),
+	VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUSTOM_FORMAT),
+	VK_IMAGE_TYPE_CUSTOM_SIZE_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUSTOM_SIZE),
 
 	VK_IMAGE_TYPE_TEXTURE_2D_BITS = VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_TEXTURE_BIT,
 	VK_IMAGE_TYPE_TEXTURE_CUBE_BITS = VK_IMAGE_TYPE_TEXTURE_2D_BITS | VK_IMAGE_TYPE_CUBE_BIT
@@ -117,6 +119,18 @@ typedef struct vk_gbuffer_vert_ubo_data
 	mat4 view;
 }
 vk_gbuffer_vert_ubo_data_t;
+
+typedef struct vk_ssao_frag_ubo_data
+{
+	mat4 inverse_projection;
+}
+vk_ssao_frag_ubo_data_t;
+
+typedef struct vk_ssao_frag_kernel_ubo_data
+{
+	vec4 samples[];
+}
+vk_ssao_frag_kernel_ubo_data_t;
 
 typedef struct vk_skybox_constant_data
 {
@@ -267,6 +281,8 @@ typedef enum vk_preview
 	VK_PREVIEW_SHADOW_DEPTH_MAP,
 	VK_PREVIEW_SSAO_NORMAL_MAP,
 	VK_PREVIEW_SSAO_DEPTH_MAP,
+	VK_PREVIEW_SSAO_MAP,
+	VK_PREVIEW_SSAO_BLUR_MAP,
 	MACRO_ENUM_BITS(VK_PREVIEW)
 }
 vk_preview_t;
@@ -333,14 +349,19 @@ struct vk
 		bool sample_shading;
 		uint32_t mipmap_levels;
 		float anisotropy;
-		uint32_t shadow_map_size;
 		vk_preview_t preview;
 
+		uint32_t shadow_map_size;
 		bool enable_depth_shadows;
 		bool enable_backface_shadows;
 		bool enable_specular;
 		float shadow_value;
 		float lambert_start_angle;
+
+		bool enable_ssao;
+		uint32_t ssao_kernel_size;
+		float ssao_radius;
+		uint32_t ssao_noise_size;
 	}
 	options;
 
@@ -387,6 +408,7 @@ struct vk
 
 	VkDescriptorSetLayout sampler_set_layout;
 	VkDescriptorSetLayout vert_ubo_set_layout;
+	VkDescriptorSetLayout frag_ubo_set_layout;
 
 	VkSampler depth_sampler;
 	VkSampler image_sampler;
@@ -428,6 +450,15 @@ struct vk
 		{
 			VkPipelineLayout pipeline_layout;
 			VkPipeline pipeline;
+
+			vk_image_t noise_image;
+			VkDescriptorSet noise_set;
+
+			vk_buffer_t ubo_buffer;
+			VkDescriptorSet ubo_set;
+
+			vk_buffer_t kernel_ubo_buffer;
+			VkDescriptorSet kernel_ubo_set;
 		}
 		ssao;
 	}
@@ -587,13 +618,13 @@ vk_init_options(
 		options_get_f32(global_options, "vk_anisotropy", 0.0f, 100.0f, 100.0f);
 	printf("- anisotropy: %.1f\n", vk->options.anisotropy);
 
-	vk->options.shadow_map_size =
-		options_get_i64(global_options, "vk_shadow_map_size", 1, 16384, 4096);
-	printf("- shadow_map_size: %u\n", vk->options.shadow_map_size);
-
 	vk->options.preview =
 		options_get_i64(global_options, "vk_preview", 0, VK_PREVIEW__COUNT - 1, VK_PREVIEW_NONE);
 	printf("- preview: %d\n", vk->options.preview);
+
+	vk->options.shadow_map_size =
+		options_get_i64(global_options, "vk_shadow_map_size", 1, 16384, 4096);
+	printf("- shadow_map_size: %u\n", vk->options.shadow_map_size);
 
 	vk->options.enable_depth_shadows =
 		options_get_boolean(global_options, "vk_enable_depth_shadows", true);
@@ -614,6 +645,22 @@ vk_init_options(
 	vk->options.lambert_start_angle =
 		options_get_f32(global_options, "vk_lambert_start_angle", 0.0f, 90.0f, 80.0f);
 	printf("- lambert_start_angle: %.1f\n", vk->options.lambert_start_angle);
+
+	vk->options.enable_ssao =
+		options_get_boolean(global_options, "vk_enable_ssao", true);
+	printf("- enable_ssao: %d\n", vk->options.enable_ssao);
+
+	vk->options.ssao_kernel_size =
+		options_get_i64(global_options, "vk_ssao_kernel_size", 1, 256, 64);
+	printf("- ssao_kernel_size: %u\n", vk->options.ssao_kernel_size);
+
+	vk->options.ssao_radius =
+		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 64.0f, 0.5f);
+	printf("- ssao_radius: %.2f\n", vk->options.ssao_radius);
+
+	vk->options.ssao_noise_size =
+		options_get_i64(global_options, "vk_ssao_noise_size", 1, 64, 8);
+	printf("- ssao_noise_size: %u\n", vk->options.ssao_noise_size);
 }
 
 
@@ -1929,6 +1976,12 @@ vk_init_set_layouts(
 	result = vk->table.vkCreateDescriptorSetLayout(vk->device,
 		&set_layout_binding_info, NULL, &vk->vert_ubo_set_layout);
 	hard_assert_eq(result, VK_SUCCESS);
+
+	set_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	result = vk->table.vkCreateDescriptorSetLayout(vk->device,
+		&set_layout_binding_info, NULL, &vk->frag_ubo_set_layout);
+	hard_assert_eq(result, VK_SUCCESS);
 }
 
 
@@ -1939,6 +1992,7 @@ vk_free_set_layouts(
 {
 	assert_not_null(vk);
 
+	vk->table.vkDestroyDescriptorSetLayout(vk->device, vk->frag_ubo_set_layout, NULL);
 	vk->table.vkDestroyDescriptorSetLayout(vk->device, vk->vert_ubo_set_layout, NULL);
 	vk->table.vkDestroyDescriptorSetLayout(vk->device, vk->sampler_set_layout, NULL);
 }
@@ -2371,6 +2425,27 @@ vk_transition_image_layout(
 
 
 private void
+vk_copy_data_to_image(
+	vk_t vk,
+	vk_image_t* image
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(image);
+
+	vk_transition_image_layout(vk, image,
+		VK_IMAGE_LAYOUT_UNDEFINED,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	vk_copy_texture_to_image(vk, image);
+
+	vk_transition_image_layout(vk, image,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+
+private void
 vk_init_image(
 	vk_t vk,
 	vk_image_t* image
@@ -2403,15 +2478,22 @@ vk_init_image(
 			image->usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 		}
 
-		if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
+		if(!(image->type & VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT))
 		{
-			image->format = VK_FORMAT_R8G8B8A8_SRGB;
-			image->usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+			if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
+			{
+				image->format = VK_FORMAT_R8G8B8A8_SRGB;
+			}
+			else
+			{
+				image->format = vk->format;
+			}
 		}
-		else
-		{
-			image->format = vk->format;
-		}
+	}
+
+	if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
+	{
+		image->usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	}
 
 	if(image->type & VK_IMAGE_TYPE_SAMPLED_BIT)
@@ -2433,24 +2515,43 @@ vk_init_image(
 		image->samples = VK_SAMPLE_COUNT_1_BIT;
 	}
 
+	if(!(image->type & VK_IMAGE_TYPE_CUSTOM_SIZE_BIT))
+	{
+		image->width = vk->extent.width;
+		image->height = vk->extent.height;
+	}
+
+	bool image_backed_texture =
+		(image->type & VK_IMAGE_TYPE_TEXTURE_BIT) && image->path && !str_is_empty(image->path);
+
 	if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
 	{
-		bool cube = image->type & VK_IMAGE_TYPE_CUBE_BIT;
-		simulation_texture_t* texture = simulation_get_texture(vk->simulation, image->path, cube);
-		image->data = texture->data;
-		image->size = texture->size;
-		image->width = texture->width;
-		image->height = texture->height;
-		image->levels = 1 + MACRO_MIN(
-			MACRO_LOG2(MACRO_MAX(image->width, image->height)),
-			vk->options.mipmap_levels
-			);
-		image->layers = texture->layers;
-
-		if(cube)
+		if(image_backed_texture)
 		{
-			create_flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-			view_type = VK_IMAGE_VIEW_TYPE_CUBE;
+			assert_eq(image->type & VK_IMAGE_TYPE_CUSTOM_SIZE_BIT, 0);
+
+			bool cube = image->type & VK_IMAGE_TYPE_CUBE_BIT;
+			simulation_texture_t* texture = simulation_get_texture(vk->simulation, image->path, cube);
+			image->data = texture->data;
+			image->size = texture->size;
+			image->width = texture->width;
+			image->height = texture->height;
+			image->levels = 1 + MACRO_MIN(
+				MACRO_LOG2(MACRO_MAX(image->width, image->height)),
+				vk->options.mipmap_levels
+				);
+			image->layers = texture->layers;
+
+			if(cube)
+			{
+				create_flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+				view_type = VK_IMAGE_VIEW_TYPE_CUBE;
+			}
+		}
+		else
+		{
+			image->levels = 1;
+			image->layers = 1;
 		}
 	}
 	else
@@ -2459,17 +2560,6 @@ vk_init_image(
 		image->size = 0;
 		image->levels = 1;
 		image->layers = 1;
-
-		if(image->type & VK_IMAGE_TYPE_SHADOW_SIZE_BIT)
-		{
-			image->width = vk->options.shadow_map_size;
-			image->height = vk->options.shadow_map_size;
-		}
-		else
-		{
-			image->width = vk->extent.width;
-			image->height = vk->extent.height;
-		}
 	}
 
 
@@ -2545,17 +2635,9 @@ vk_init_image(
 	result = vk->table.vkCreateImageView(vk->device, &image_view_info, NULL, &image->view);
 	hard_assert_eq(result, VK_SUCCESS);
 
-	if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
+	if(image_backed_texture)
 	{
-		vk_transition_image_layout(vk, image,
-			VK_IMAGE_LAYOUT_UNDEFINED,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-		vk_copy_texture_to_image(vk, image);
-
-		vk_transition_image_layout(vk, image,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		vk_copy_data_to_image(vk, image);
 	}
 }
 
@@ -3244,7 +3326,7 @@ vk_init_gbuffer_render_pass(
 	{
 		{
 			.flags = 0,
-			.format = vk->format,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -3647,8 +3729,9 @@ vk_init_gbuffer_consts(
 {
 	assert_not_null(vk);
 
-	vk_init_ubo_buffer(vk, sizeof(vk_gbuffer_vert_ubo_data_t), &vk->ssao_stage_1.gbuffer.ubo_buffer,
-		vk->vert_ubo_set_layout, &vk->ssao_stage_1.gbuffer.ubo_set);
+	vk_init_ubo_buffer(vk, sizeof(vk_gbuffer_vert_ubo_data_t),
+		&vk->ssao_stage_1.gbuffer.ubo_buffer, vk->vert_ubo_set_layout,
+		&vk->ssao_stage_1.gbuffer.ubo_set);
 }
 
 
@@ -3669,6 +3752,82 @@ vk_init_ssao_render_pass(
 	)
 {
 	assert_not_null(vk);
+
+	VkAttachmentDescription attachments[] =
+	{
+		{
+			.flags = 0,
+			.format = vk->format,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		}
+	};
+
+	VkAttachmentReference color_attachment =
+	{
+		.attachment = 0,
+		.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+	};
+
+	VkSubpassDescription subpasses[] =
+	{
+		{
+			.flags = 0,
+			.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+			.inputAttachmentCount = 0,
+			.pInputAttachments = NULL,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &color_attachment,
+			.pResolveAttachments = NULL,
+			.pDepthStencilAttachment = NULL,
+			.preserveAttachmentCount = 0,
+			.pPreserveAttachments = NULL
+		}
+	};
+
+	VkSubpassDependency subpass_dependencies[] =
+	{
+		{
+			.srcSubpass = VK_SUBPASS_EXTERNAL,
+			.dstSubpass = 0,
+			.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+			.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+		},
+		{
+			.srcSubpass = 0,
+			.dstSubpass = VK_SUBPASS_EXTERNAL,
+			.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+		}
+	};
+
+	VkRenderPassCreateInfo render_pass_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.attachmentCount = MACRO_ARRAY_LEN(attachments),
+		.pAttachments = attachments,
+		.subpassCount = MACRO_ARRAY_LEN(subpasses),
+		.pSubpasses = subpasses,
+		.dependencyCount = MACRO_ARRAY_LEN(subpass_dependencies),
+		.pDependencies = subpass_dependencies
+	};
+
+	VkResult result = vk->table.vkCreateRenderPass(vk->device,
+		&render_pass_info, NULL, &vk->ssao_stage_2.render_pass);
+	hard_assert_eq(result, VK_SUCCESS);
 }
 
 
@@ -3678,6 +3837,8 @@ vk_free_ssao_render_pass(
 	)
 {
 	assert_not_null(vk);
+
+	vk->table.vkDestroyRenderPass(vk->device, vk->ssao_stage_2.render_pass, NULL);
 }
 
 
@@ -3722,11 +3883,107 @@ vk_free_ssao_pipeline(
 
 
 private void
+vk_init_ssao_noise_const(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk_image_t* image = &vk->ssao_stage_2.ssao.noise_image;
+	*image =
+	(vk_image_t)
+	{
+		.path = NULL,
+		.type = VK_IMAGE_TYPE_TEXTURE_2D_BITS |
+			VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT,
+		.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+		.width = vk->options.ssao_noise_size,
+		.height = vk->options.ssao_noise_size
+	};
+	vk_init_image(vk, image);
+
+	uint32_t size = vk->options.ssao_noise_size * vk->options.ssao_noise_size;
+	vec4 data[size];
+	vec4* noise = data;
+	vec4* noise_end = noise + size;
+
+	while(noise != noise_end)
+	{
+		(*noise)[0] = drand48() * 2.0f - 1.0f;
+		(*noise)[1] = drand48() * 2.0f - 1.0f;
+		(*noise)[2] = 0.0f;
+		(*noise)[3] = 0.0f;
+
+		++noise;
+	}
+
+	image->data = data;
+	image->size = sizeof(*data) * size;
+	vk_copy_data_to_image(vk, image);
+}
+
+
+private void
+vk_init_ssao_kernel_const(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk_init_ubo_buffer(vk, sizeof(vec4) * vk->options.ssao_kernel_size,
+		&vk->ssao_stage_2.ssao.kernel_ubo_buffer, vk->frag_ubo_set_layout,
+		&vk->ssao_stage_2.ssao.kernel_ubo_set);
+
+	uint32_t size = vk->options.ssao_kernel_size;
+	vec4 data[size];
+	vec4* kernel = data;
+	vec4* kernel_end = kernel + size;
+
+	while(kernel != kernel_end)
+	{
+		vec3 sample;
+		sample[0] = drand48() * 2.0f - 1.0f;
+		sample[1] = drand48() * 2.0f - 1.0f;
+		sample[2] = drand48();
+		glm_vec3_normalize(sample);
+
+		float rand = drand48();
+		sample[0] *= rand;
+		sample[1] *= rand;
+		sample[2] *= rand;
+
+		float scale = (float)(kernel - data) / size;
+		scale = glm_lerp(0.1f, 1.0f, scale * scale);
+		sample[0] *= scale;
+		sample[1] *= scale;
+		sample[2] *= scale;
+
+		(*kernel)[0] = sample[0];
+		(*kernel)[1] = sample[1];
+		(*kernel)[2] = sample[2];
+		(*kernel)[3] = 0.0f;
+
+		++kernel;
+	}
+
+	vk_copy_to_buffer(vk, &vk->ssao_stage_2.ssao.kernel_ubo_buffer, data, size);
+}
+
+
+private void
 vk_init_ssao_consts(
 	vk_t vk
 	)
 {
 	assert_not_null(vk);
+
+	vk_init_ssao_noise_const(vk);
+
+	vk_init_ubo_buffer(vk, sizeof(vk_ssao_frag_ubo_data_t),
+		&vk->ssao_stage_2.ssao.ubo_buffer, vk->frag_ubo_set_layout,
+		&vk->ssao_stage_2.ssao.ubo_set);
+
+	vk_init_ssao_kernel_const(vk);
 }
 
 
@@ -3736,6 +3993,10 @@ vk_free_ssao_consts(
 	)
 {
 	assert_not_null(vk);
+
+	vk_free_buffer(vk, &vk->ssao_stage_2.ssao.kernel_ubo_buffer);
+	vk_free_buffer(vk, &vk->ssao_stage_2.ssao.ubo_buffer);
+	vk_free_image(vk, &vk->ssao_stage_2.ssao.noise_image);
 }
 
 
@@ -4677,7 +4938,8 @@ vk_init_mesh_consts(
 	assert_not_null(vk);
 
 	vk_init_ubo_buffer(vk, sizeof(vk_mesh_vert_ubo_data_t),
-		&vk->scene.mesh.ubo_buffer, vk->vert_ubo_set_layout, &vk->scene.mesh.ubo_set);
+		&vk->scene.mesh.ubo_buffer, vk->vert_ubo_set_layout,
+		&vk->scene.mesh.ubo_set);
 }
 
 
@@ -4714,7 +4976,7 @@ vk_init_preview_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/preview.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/fullscreen.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -5397,7 +5659,9 @@ vk_init_shadow_framebuffer(
 	assert_not_null(frame);
 
 	frame->shadow.depth.image.type =
-		VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_SHADOW_SIZE_BIT;
+		VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT;
+	frame->shadow.depth.image.width = vk->options.shadow_map_size;
+	frame->shadow.depth.image.height = vk->options.shadow_map_size;
 	vk_init_image(vk, &frame->shadow.depth.image);
 
 	if(!frame->shadow.depth.set)
@@ -5471,7 +5735,9 @@ vk_init_gbuffer_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
-	frame->gbuffer.normal.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT;
+	frame->gbuffer.normal.image.type =
+		VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+	frame->gbuffer.normal.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_image(vk, &frame->gbuffer.normal.image);
 
 	frame->gbuffer.depth.image.type = VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_SAMPLED_BIT;
@@ -6179,6 +6445,34 @@ vk_draw_mesh(
 		break;
 	}
 
+	case VK_PREVIEW_SSAO_MAP:
+	{
+		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.image.pipeline);
+
+		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.image.pipeline_layout,
+			0, 1, &frame->ssao.map.set, 0, NULL);
+
+		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SSAO_BLUR_MAP:
+	{
+		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.image.pipeline);
+
+		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.image.pipeline_layout,
+			0, 1, &frame->ssao_blur.map.set, 0, NULL);
+
+		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
 	default: assert_unreachable();
 
 	}
@@ -6375,8 +6669,6 @@ vk_draw(
 	{
 		vk->barrier = vk->barriers;
 	}
-
-	window_close(vk->window.handle);
 }
 
 
@@ -6432,6 +6724,8 @@ vk_init_vk(
 	)
 {
 	assert_not_null(vk);
+
+	srand48(time(NULL));
 
 	vk_init_instance(vk);
 	vk_init_surface(vk);

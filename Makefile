@@ -91,11 +91,14 @@ app: shaders
 		--vk_sample_shading=$(VK_SAMPLE_SHADING) \
 		--vk_mipmap_levels=$(VK_MIPMAP_LEVELS) \
 		--vk_anisotropy=$(VK_ANISOTROPY) \
-		--vk_shadow_map_size=$(VK_SHADOW_MAP_SIZE) \
 		--vk_preview=$(VK_PREVIEW) \
+		--vk_shadow_map_size=$(VK_SHADOW_MAP_SIZE) \
 		--vk_enable_depth_shadows=$(VK_ENABLE_DEPTH_SHADOWS) \
 		--vk_enable_backface_shadows=$(VK_ENABLE_BACKFACE_SHADOWS) \
 		--vk_enable_specular=$(VK_ENABLE_SPECULAR) \
 		--vk_shadow_value=$(VK_SHADOW_VALUE) \
-		--vk_lambert_start_angle=$(VK_LAMBERT_START_ANGLE)
+		--vk_lambert_start_angle=$(VK_LAMBERT_START_ANGLE) \
+		--vk_enable_ssao=$(VK_ENABLE_SSAO) \
+		--vk_ssao_kernel_size=$(VK_SSAO_KERNEL_SIZE) \
+		--vk_ssao_radius=$(VK_SSAO_RADIUS)
 
