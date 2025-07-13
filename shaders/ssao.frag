@@ -16,7 +16,34 @@
 
 #version 450
 
+layout(constant_id = 0) const int SSAO_KERNEL_SIZE = 64;
+layout(constant_id = 1) const float SSAO_RADIUS = 0.5;
+layout(constant_id = 2) const float SSAO_BIAS = 0.025;
+layout(constant_id = 3) const int SSAO_NOISE_SIZE = 8;
+
+layout(set = 0, binding = 0) uniform sampler2D inNormalMap;
+layout(set = 1, binding = 0) uniform sampler2D inDepthMap;
+layout(set = 2, binding = 0) uniform sampler2D inNoiseMap;
+
+layout(set = 3, binding = 0) uniform Constants
+{
+	mat4 projection;
+	mat4 inverseProjection;
+}
+consts;
+
+layout(set = 4, binding = 0) uniform Data
+{
+	vec4 samples[SSAO_KERNEL_SIZE];
+}
+data;
+
+layout(location = 0) in vec2 inCoords;
+
+layout(location = 0) out float outColor;
+
 void
 main()
 {
+	outColor = 0.3;
 }

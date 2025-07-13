@@ -122,6 +122,7 @@ vk_gbuffer_vert_ubo_data_t;
 
 typedef struct vk_ssao_frag_ubo_data
 {
+	mat4 projection;
 	mat4 inverse_projection;
 }
 vk_ssao_frag_ubo_data_t;
@@ -361,6 +362,7 @@ struct vk
 		bool enable_ssao;
 		uint32_t ssao_kernel_size;
 		float ssao_radius;
+		float ssao_bias;
 		uint32_t ssao_noise_size;
 	}
 	options;
@@ -657,6 +659,10 @@ vk_init_options(
 	vk->options.ssao_radius =
 		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 64.0f, 0.5f);
 	printf("- ssao_radius: %.2f\n", vk->options.ssao_radius);
+
+	vk->options.ssao_bias =
+		options_get_f32(global_options, "vk_ssao_bias", 0.0f, 1.0f, 0.025f);
+	printf("- ssao_bias: %.3f\n", vk->options.ssao_bias);
 
 	vk->options.ssao_noise_size =
 		options_get_i64(global_options, "vk_ssao_noise_size", 1, 64, 8);
@@ -3757,7 +3763,7 @@ vk_init_ssao_render_pass(
 	{
 		{
 			.flags = 0,
-			.format = vk->format,
+			.format = VK_FORMAT_R8_UNORM,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -3870,6 +3876,256 @@ vk_init_ssao_pipeline(
 	)
 {
 	assert_not_null(vk);
+
+	typedef struct ssao_frag_specialization
+	{
+		int32_t ssao_kernel_size;
+		float ssao_radius;
+		float ssao_bias;
+		int32_t ssao_noise_size;
+	}
+	ssao_frag_specialization_t;
+
+	ssao_frag_specialization_t frag_specialization_data =
+	{
+		.ssao_kernel_size = vk->options.ssao_kernel_size,
+		.ssao_radius = vk->options.ssao_radius,
+		.ssao_bias = vk->options.ssao_bias,
+		.ssao_noise_size = vk->options.ssao_noise_size
+	};
+
+	VkSpecializationMapEntry frag_map_entries[] =
+	{
+		{
+			.constantID = 0,
+			.offset = offsetof(ssao_frag_specialization_t, ssao_kernel_size),
+			.size = sizeof(frag_specialization_data.ssao_kernel_size)
+		},
+		{
+			.constantID = 1,
+			.offset = offsetof(ssao_frag_specialization_t, ssao_radius),
+			.size = sizeof(frag_specialization_data.ssao_radius)
+		},
+		{
+			.constantID = 2,
+			.offset = offsetof(ssao_frag_specialization_t, ssao_bias),
+			.size = sizeof(frag_specialization_data.ssao_bias)
+		},
+		{
+			.constantID = 3,
+			.offset = offsetof(ssao_frag_specialization_t, ssao_noise_size),
+			.size = sizeof(frag_specialization_data.ssao_noise_size)
+		}
+	};
+
+	VkSpecializationInfo frag_specialization_info =
+	{
+		.mapEntryCount = MACRO_ARRAY_LEN(frag_map_entries),
+		.pMapEntries = frag_map_entries,
+		.dataSize = sizeof(frag_specialization_data),
+		.pData = &frag_specialization_data
+	};
+
+	VkPipelineShaderStageCreateInfo shader_stages[] =
+	{
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_VERTEX_BIT,
+			.module = vk_create_shader(vk, "shaders/fullscreen.vert.spv"),
+			.pName = "main",
+			.pSpecializationInfo = NULL
+		},
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+			.module = vk_create_shader(vk, "shaders/ssao.frag.spv"),
+			.pName = "main",
+			.pSpecializationInfo = &frag_specialization_info
+		}
+	};
+
+	VkDynamicState dynamic_states[] =
+	{
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamic_state_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.dynamicStateCount = MACRO_ARRAY_LEN(dynamic_states),
+		.pDynamicStates = dynamic_states
+	};
+
+	VkPipelineVertexInputStateCreateInfo vertex_input_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.vertexBindingDescriptionCount = 0,
+		.pVertexBindingDescriptions = NULL,
+		.vertexAttributeDescriptionCount = 0,
+		.pVertexAttributeDescriptions = NULL
+	};
+
+	VkPipelineInputAssemblyStateCreateInfo input_assembly_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+		.primitiveRestartEnable = VK_FALSE
+	};
+
+	VkPipelineViewportStateCreateInfo viewport_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.viewportCount = 1,
+		.pViewports = NULL,
+		.scissorCount = 1,
+		.pScissors = NULL
+	};
+
+	VkPipelineRasterizationStateCreateInfo rasterization_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.depthClampEnable = VK_FALSE,
+		.rasterizerDiscardEnable = VK_FALSE,
+		.polygonMode = VK_POLYGON_MODE_FILL,
+		.cullMode = VK_CULL_MODE_NONE,
+		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+		.depthBiasEnable = VK_FALSE,
+		.depthBiasConstantFactor = 0.0f,
+		.depthBiasClamp = 0.0f,
+		.depthBiasSlopeFactor = 0.0f,
+		.lineWidth = 1.0f
+	};
+
+	VkPipelineMultisampleStateCreateInfo multisample_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+		.sampleShadingEnable = VK_FALSE,
+		.minSampleShading = 0.0f,
+		.pSampleMask = NULL,
+		.alphaToCoverageEnable = VK_FALSE,
+		.alphaToOneEnable = VK_FALSE
+	};
+
+	VkPipelineDepthStencilStateCreateInfo depth_stencil_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.depthTestEnable = VK_FALSE,
+		.depthWriteEnable = VK_FALSE,
+		.depthCompareOp = VK_COMPARE_OP_NEVER,
+		.depthBoundsTestEnable = VK_FALSE,
+		.stencilTestEnable = VK_FALSE,
+		.front = {0},
+		.back = {0},
+		.minDepthBounds = 0.0f,
+		.maxDepthBounds = 0.0f
+	};
+
+	VkPipelineColorBlendAttachmentState color_blend_attachment =
+	{
+		.blendEnable = VK_FALSE,
+		.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+		.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+		.colorBlendOp = VK_BLEND_OP_ADD,
+		.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+		.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+		.alphaBlendOp = VK_BLEND_OP_ADD,
+		.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+	};
+
+	VkPipelineColorBlendStateCreateInfo color_blend_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.logicOpEnable = VK_FALSE,
+		.logicOp = VK_LOGIC_OP_COPY,
+		.attachmentCount = 1,
+		.pAttachments = &color_blend_attachment,
+		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
+	};
+
+	VkDescriptorSetLayout set_layouts[] =
+	{
+		vk->sampler_set_layout,
+		vk->sampler_set_layout,
+		vk->sampler_set_layout,
+		vk->frag_ubo_set_layout,
+		vk->frag_ubo_set_layout
+	};
+
+	VkPipelineLayoutCreateInfo pipeline_layout_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.setLayoutCount = MACRO_ARRAY_LEN(set_layouts),
+		.pSetLayouts = set_layouts,
+		.pushConstantRangeCount = 0,
+		.pPushConstantRanges = NULL
+	};
+
+	VkResult result = vk->table.vkCreatePipelineLayout(vk->device,
+		&pipeline_layout_info, NULL, &vk->ssao_stage_2.ssao.pipeline_layout);
+	hard_assert_eq(result, VK_SUCCESS);
+
+
+	VkGraphicsPipelineCreateInfo pipeline_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.stageCount = MACRO_ARRAY_LEN(shader_stages),
+		.pStages = shader_stages,
+		.pVertexInputState = &vertex_input_info,
+		.pInputAssemblyState = &input_assembly_info,
+		.pTessellationState = NULL,
+		.pViewportState = &viewport_info,
+		.pRasterizationState = &rasterization_info,
+		.pMultisampleState = &multisample_info,
+		.pDepthStencilState = &depth_stencil_info,
+		.pColorBlendState = &color_blend_info,
+		.pDynamicState = &dynamic_state_info,
+		.layout = vk->ssao_stage_2.ssao.pipeline_layout,
+		.renderPass = vk->ssao_stage_2.render_pass,
+		.subpass = 0,
+		.basePipelineHandle = VK_NULL_HANDLE,
+		.basePipelineIndex = -1
+	};
+
+	static const char* pipeline_cache_path = "cache/vk_ssao_pipeline.bin";
+	VkPipelineCache pipeline_cache = vk_init_pipeline_cache(vk, pipeline_cache_path);
+
+	result = vk->table.vkCreateGraphicsPipelines(vk->device,
+		pipeline_cache, 1, &pipeline_info, NULL, &vk->ssao_stage_2.ssao.pipeline);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	vk_free_pipeline_cache(vk, pipeline_cache_path, pipeline_cache);
+
+	for(uint32_t i = 0; i < MACRO_ARRAY_LEN(shader_stages); ++i)
+	{
+		vk_destroy_shader(vk, shader_stages[i].module);
+	}
 }
 
 
@@ -3879,6 +4135,9 @@ vk_free_ssao_pipeline(
 	)
 {
 	assert_not_null(vk);
+
+	vk->table.vkDestroyPipeline(vk->device, vk->ssao_stage_2.ssao.pipeline, NULL);
+	vk->table.vkDestroyPipelineLayout(vk->device, vk->ssao_stage_2.ssao.pipeline_layout, NULL);
 }
 
 
@@ -4592,7 +4851,7 @@ vk_init_mesh_pipeline(
 {
 	assert_not_null(vk);
 
-	typedef struct vk_frag_specialization_data
+	typedef struct mesh_frag_specialization
 	{
 		int32_t enable_depth_shadows;
 		int32_t enable_backface_shadows;
@@ -4600,9 +4859,9 @@ vk_init_mesh_pipeline(
 		float shadow_value;
 		float lambert_start_angle;
 	}
-	vk_frag_specialization_data_t;
+	mesh_frag_specialization_t;
 
-	vk_frag_specialization_data_t frag_specialization_data =
+	mesh_frag_specialization_t frag_specialization_data =
 	{
 		.enable_depth_shadows = vk->options.enable_depth_shadows,
 		.enable_backface_shadows = vk->options.enable_backface_shadows,
@@ -4615,27 +4874,27 @@ vk_init_mesh_pipeline(
 	{
 		{
 			.constantID = 0,
-			.offset = offsetof(vk_frag_specialization_data_t, enable_depth_shadows),
+			.offset = offsetof(mesh_frag_specialization_t, enable_depth_shadows),
 			.size = sizeof(frag_specialization_data.enable_depth_shadows)
 		},
 		{
 			.constantID = 1,
-			.offset = offsetof(vk_frag_specialization_data_t, enable_backface_shadows),
+			.offset = offsetof(mesh_frag_specialization_t, enable_backface_shadows),
 			.size = sizeof(frag_specialization_data.enable_backface_shadows)
 		},
 		{
 			.constantID = 2,
-			.offset = offsetof(vk_frag_specialization_data_t, enable_specular),
+			.offset = offsetof(mesh_frag_specialization_t, enable_specular),
 			.size = sizeof(frag_specialization_data.enable_specular)
 		},
 		{
 			.constantID = 3,
-			.offset = offsetof(vk_frag_specialization_data_t, shadow_value),
+			.offset = offsetof(mesh_frag_specialization_t, shadow_value),
 			.size = sizeof(frag_specialization_data.shadow_value)
 		},
 		{
 			.constantID = 4,
-			.offset = offsetof(vk_frag_specialization_data_t, lambert_start_angle),
+			.offset = offsetof(mesh_frag_specialization_t, lambert_start_angle),
 			.size = sizeof(frag_specialization_data.lambert_start_angle)
 		}
 	};
@@ -5658,8 +5917,8 @@ vk_init_shadow_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
-	frame->shadow.depth.image.type =
-		VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT;
+	frame->shadow.depth.image.type = VK_IMAGE_TYPE_DEPTH_BIT |
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT;
 	frame->shadow.depth.image.width = vk->options.shadow_map_size;
 	frame->shadow.depth.image.height = vk->options.shadow_map_size;
 	vk_init_image(vk, &frame->shadow.depth.image);
@@ -5735,8 +5994,8 @@ vk_init_gbuffer_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
-	frame->gbuffer.normal.image.type =
-		VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+	frame->gbuffer.normal.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.normal.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_image(vk, &frame->gbuffer.normal.image);
 
@@ -5845,6 +6104,80 @@ vk_init_ssao_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
+	frame->ssao.map.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+	frame->ssao.map.image.format = VK_FORMAT_R8_UNORM;
+	vk_init_image(vk, &frame->ssao.map.image);
+
+	if(!frame->ssao.map.set)
+	{
+		VkDescriptorSet sets[2];
+		vk_get_descriptor_sets(vk, &vk->sampler_pool, vk->sampler_set_layout, sets, 2);
+
+		frame->ssao.map.set = sets[0];
+		vk->ssao_stage_2.ssao.noise_set = sets[1];
+	}
+
+	VkDescriptorImageInfo image_infos[] =
+	{
+		{
+			.sampler = vk->image_sampler,
+			.imageView = frame->ssao.map.image.view,
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		},
+		{
+			.sampler = vk->image_sampler,
+			.imageView = vk->ssao_stage_2.ssao.noise_image.view,
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		}
+	};
+
+	VkWriteDescriptorSet write_sets[] =
+	{
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = NULL,
+			.dstSet = frame->ssao.map.set,
+			.dstBinding = 0,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &image_infos[0],
+			.pBufferInfo = NULL,
+			.pTexelBufferView = NULL
+		},
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = NULL,
+			.dstSet = vk->ssao_stage_2.ssao.noise_set,
+			.dstBinding = 0,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &image_infos[1],
+			.pBufferInfo = NULL,
+			.pTexelBufferView = NULL
+		}
+	};
+
+	vk->table.vkUpdateDescriptorSets(vk->device, MACRO_ARRAY_LEN(write_sets), write_sets, 0, NULL);
+
+	VkFramebufferCreateInfo framebuffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.renderPass = vk->ssao_stage_2.render_pass,
+		.attachmentCount = 1,
+		.pAttachments = &frame->ssao.map.image.view,
+		.width = vk->extent.width,
+		.height = vk->extent.height,
+		.layers = 1
+	};
+
+	VkResult result = vk->table.vkCreateFramebuffer(vk->device,
+		&framebuffer_info, NULL, &frame->ssao.framebuffer);
+	hard_assert_eq(result, VK_SUCCESS);
 }
 
 
@@ -5857,6 +6190,8 @@ vk_free_ssao_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
+	vk->table.vkDestroyFramebuffer(vk->device, frame->ssao.framebuffer, NULL);
+	vk_free_image(vk, &frame->ssao.map.image);
 }
 
 
@@ -6181,7 +6516,7 @@ vk_draw_shadow(
 
 
 private void
-vk_draw_ssao(
+vk_draw_gbuffer(
 	vk_t vk,
 	vk_frame_t* frame,
 	simulation_camera_t* camera,
@@ -6260,6 +6595,82 @@ vk_draw_ssao(
 		}
 	}
 	VK_FOR_EACH_MODEL_END(entities_per_model, model);
+
+	vk->table.vkCmdEndRenderPass(vk->barrier->command_buffer);
+}
+
+
+private void
+vk_draw_ssao(
+	vk_t vk,
+	vk_frame_t* frame,
+	simulation_camera_t* camera,
+	simulation_transform_t* transform,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(frame);
+
+	VkClearValue clear_values[] =
+	{
+		{
+			.color = {{ 0.0f, 0.0f, 0.0f, 1.0f }}
+		}
+	};
+
+	VkRenderPassBeginInfo render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = vk->ssao_stage_2.render_pass,
+		.framebuffer = frame->ssao.framebuffer,
+		.renderArea =
+		{
+			.offset = { 0, 0 },
+			.extent = vk->extent
+		},
+		.clearValueCount = MACRO_ARRAY_LEN(clear_values),
+		.pClearValues = clear_values
+	};
+
+	vk->table.vkCmdBeginRenderPass(vk->barrier->command_buffer,
+		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	vk->table.vkCmdSetViewport(vk->barrier->command_buffer, 0, 1, &vk->viewport);
+	vk->table.vkCmdSetScissor(vk->barrier->command_buffer, 0, 1, &vk->scissor);
+
+	vk_ssao_frag_ubo_data_t ssao_frag_ubo_data;
+	glm_mat4_copy(transform->projection, ssao_frag_ubo_data.projection);
+	glm_mat4_inv(transform->projection, ssao_frag_ubo_data.inverse_projection);
+
+	vk_copy_to_buffer(vk, &vk->ssao_stage_2.ssao.ubo_buffer,
+		&ssao_frag_ubo_data, sizeof(ssao_frag_ubo_data));
+
+	vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_stage_2.ssao.pipeline);
+
+	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_stage_2.ssao.pipeline_layout,
+		0, 1, &frame->gbuffer.normal.set, 0, NULL);
+
+	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_stage_2.ssao.pipeline_layout,
+		1, 1, &frame->gbuffer.depth.set, 0, NULL);
+
+	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_stage_2.ssao.pipeline_layout,
+		2, 1, &vk->ssao_stage_2.ssao.noise_set, 0, NULL);
+
+	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_stage_2.ssao.pipeline_layout,
+		3, 1, &vk->ssao_stage_2.ssao.ubo_set, 0, NULL);
+
+	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_stage_2.ssao.pipeline_layout,
+		4, 1, &vk->ssao_stage_2.ssao.kernel_ubo_set, 0, NULL);
+
+	vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
 
 	vk->table.vkCmdEndRenderPass(vk->barrier->command_buffer);
 }
@@ -6600,6 +7011,7 @@ vk_draw(
 	VK_FOR_EACH_MODEL_END(entities_per_model, model);
 
 	vk_draw_shadow(vk, frame, &camera, &transform, entity_data);
+	vk_draw_gbuffer(vk, frame, &camera, &transform, entity_data);
 	vk_draw_ssao(vk, frame, &camera, &transform, entity_data);
 	vk_draw_mesh(vk, frame, &camera, &transform, entity_data);
 

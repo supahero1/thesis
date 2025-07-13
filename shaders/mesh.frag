@@ -18,6 +18,12 @@
 
 layout(early_fragment_tests) in;
 
+layout(constant_id = 0) const bool enable_depth_shadows = true;
+layout(constant_id = 1) const bool enable_backface_shadows = true;
+layout(constant_id = 2) const bool enable_specular = true;
+layout(constant_id = 3) const float shadow_value = 0.2;
+layout(constant_id = 4) const float lambert_start_angle = 80.0;
+
 layout(push_constant) uniform Constants
 {
 	vec4 diffuse;
@@ -39,12 +45,6 @@ layout(location = 4) in vec3 inLight;
 layout(location = 5) in vec4 inShadowCoords;
 
 layout(location = 0) out vec4 outColor;
-
-layout(constant_id = 0) const bool enable_depth_shadows = true;
-layout(constant_id = 1) const bool enable_backface_shadows = true;
-layout(constant_id = 2) const bool enable_specular = true;
-layout(constant_id = 3) const float shadow_value = 0.2;
-layout(constant_id = 4) const float lambert_start_angle = 80.0;
 
 #define POISSON_DISK_SAMPLES 64
 const vec2 poissonDisk[POISSON_DISK_SAMPLES] = vec2[](
