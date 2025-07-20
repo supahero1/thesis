@@ -16,7 +16,7 @@
 
 #version 450
 
-layout(binding = 0) uniform UBO
+layout(set = 0, binding = 0) uniform UBO
 {
 	mat4 projection;
 	mat4 view;
@@ -25,10 +25,12 @@ consts;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inCoords;
 
-layout(location = 2) in mat4 inTransform;
+layout(location = 3) in mat4 inTransform;
 
-layout(location = 0) out vec3 outNormal;
+layout(location = 0) out vec2 outCoords;
+layout(location = 1) out vec3 outNormal;
 
 void
 main()
@@ -37,5 +39,6 @@ main()
 	vec4 worldPos = inTransform * inPos;
 	gl_Position = consts.projection * consts.view * worldPos;
 
+	outCoords = inCoords;
 	outNormal = mat3(inTransform) * inNormal;
 }

@@ -100,5 +100,8 @@ app: shaders
 		--vk_lambert_start_angle=$(VK_LAMBERT_START_ANGLE) \
 		--vk_enable_ssao=$(VK_ENABLE_SSAO) \
 		--vk_ssao_kernel_size=$(VK_SSAO_KERNEL_SIZE) \
-		--vk_ssao_radius=$(VK_SSAO_RADIUS)
+		--vk_ssao_noise_size=$(VK_SSAO_NOISE_SIZE) \
+		--vk_ssao_radius=$(VK_SSAO_RADIUS) \
+		--vk_ssao_bias=$(VK_SSAO_BIAS) \
+		--vk_ssao_power=$(VK_SSAO_POWER)
 

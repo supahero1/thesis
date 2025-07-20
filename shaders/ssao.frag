@@ -16,34 +16,69 @@
 
 #version 450
 
-layout(constant_id = 0) const int SSAO_KERNEL_SIZE = 64;
-layout(constant_id = 1) const float SSAO_RADIUS = 0.5;
-layout(constant_id = 2) const float SSAO_BIAS = 0.025;
-layout(constant_id = 3) const int SSAO_NOISE_SIZE = 8;
+layout(constant_id = 0) const int ssao_kernel_size = 64;
+layout(constant_id = 1) const int ssao_noise_size = 8;
+layout(constant_id = 2) const float ssao_radius = 0.5;
+layout(constant_id = 3) const float ssao_bias = 0.025;
+layout(constant_id = 4) const float ssao_power = 2.2;
 
-layout(set = 0, binding = 0) uniform sampler2D inNormalMap;
-layout(set = 1, binding = 0) uniform sampler2D inDepthMap;
-layout(set = 2, binding = 0) uniform sampler2D inNoiseMap;
+layout(set = 0, binding = 0) uniform sampler2D inNormal;
+layout(set = 0, binding = 2) uniform sampler2D inLinearDepth;
+layout(set = 1, binding = 0) uniform sampler2D inNoise;
 
-layout(set = 3, binding = 0) uniform Constants
+layout(set = 2, binding = 0) uniform UBO
 {
 	mat4 projection;
-	mat4 inverseProjection;
+	mat4 inverse_projection;
 }
 consts;
 
-layout(set = 4, binding = 0) uniform Data
+layout(set = 3, binding = 0) uniform KernelUBO
 {
-	vec4 samples[SSAO_KERNEL_SIZE];
+	vec4 samples[ssao_kernel_size];
 }
 data;
 
 layout(location = 0) in vec2 inCoords;
 
-layout(location = 0) out float outColor;
+layout(location = 0) out float outOcclusion;
 
 void
 main()
 {
-	outColor = 0.3;
+	float fragLinearDepth = texture(inLinearDepth, inCoords).r;
+	vec3 normal = normalize(texture(inNormal, inCoords).rgb);
+
+	vec2 ndc = inCoords * 2.0 - 1.0;
+	vec4 clip = vec4(ndc, fragLinearDepth, 1.0);
+	vec4 viewPos = consts.inverse_projection * clip;
+	vec3 fragPos = viewPos.xyz / viewPos.w;
+
+	ivec2 screenSize = textureSize(inLinearDepth, 0);
+	vec2 noiseCoords = vec2(screenSize) / vec2(ssao_noise_size) * inCoords;
+	vec3 randomVec = normalize(texture(inNoise, noiseCoords).rgb);
+
+	vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
+	vec3 bitangent = cross(normal, tangent);
+	mat3 tbn = mat3(tangent, bitangent, normal);
+
+	float occlusion = 0.0;
+	for(int i = 0; i < ssao_kernel_size; ++i)
+	{
+		vec3 samplePos = tbn * data.samples[i].xyz;
+		samplePos = fragPos + samplePos * ssao_radius;
+
+		vec4 offsetClip = consts.projection * vec4(samplePos, 1.0);
+		offsetClip /= offsetClip.w;
+		vec2 offsetNDC = offsetClip.xy * 0.5 + 0.5;
+
+		float sampleSceneDepth = texture(inLinearDepth, offsetNDC).r;
+		float samplePointLinearDepth = -samplePos.z;
+		float rangeCheck = smoothstep(0.0, 1.0, ssao_bias / abs(fragLinearDepth - sampleSceneDepth));
+
+		occlusion += (sampleSceneDepth < samplePointLinearDepth - ssao_bias ? 1.0 : 0.0) * rangeCheck;
+	}
+
+	occlusion = 1.0 - occlusion / float(ssao_kernel_size);
+	outOcclusion = pow(occlusion, ssao_power);
 }

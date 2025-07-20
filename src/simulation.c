@@ -280,10 +280,14 @@ simulation_get_transform(
 	glm_perspective(simulation->camera.fov, width / height,
 		simulation->camera.far, simulation->camera.near, transform.projection);
 
+	glm_mat4_inv(transform.projection, transform.inverse_projection);
+
 	glm_mat4_identity(transform.view);
 	glm_euler_xyz(simulation->camera.angle, transform.view);
 	glm_translate(transform.view, (vec3){ -simulation->camera.pos[0],
 		-simulation->camera.pos[1], -simulation->camera.pos[2] });
+
+	glm_mat4_inv(transform.view, transform.inverse_view);
 
 	glm_mat4_identity(transform.light_transform);
 
@@ -297,7 +301,8 @@ simulation_get_transform(
 
 	glm_mat4_mul(light_proj, light_view, transform.light_transform);
 
-	glm_vec3_sub(simulation->light.target, simulation->light.pos, transform.light_direction);
+	glm_vec3_sub(simulation->light.pos, simulation->light.target, transform.light_direction);
+	glm_vec3_normalize(transform.light_direction);
 	transform.light_direction[3] = 0.0f;
 
 	return transform;

@@ -103,16 +103,6 @@ model_init(
 		printf("        - ambient: (%.3f, %.3f, %.3f)\n",
 			material->ambient[0], material->ambient[1], material->ambient[2]);
 
-		status = aiGetMaterialColor(sceneMaterial, AI_MATKEY_COLOR_SPECULAR, &color);
-		if(status != AI_SUCCESS)
-		{
-			glm_vec3_fill((void*) &color, 1.0f);
-		}
-		glm_vec3_copy((void*) &color, material->specular);
-
-		printf("        - specular: (%.3f, %.3f, %.3f)\n",
-			material->specular[0], material->specular[1], material->specular[2]);
-
 		float shininess;
 		status = aiGetMaterialFloatArray(sceneMaterial, AI_MATKEY_SHININESS, &shininess, NULL);
 		if(status != AI_SUCCESS)

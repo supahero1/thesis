@@ -31,7 +31,6 @@ typedef struct material
 	str_t texture;
 	vec3 diffuse;
 	vec3 ambient;
-	vec3 specular;
 	float shininess;
 	float shininess_strength;
 }

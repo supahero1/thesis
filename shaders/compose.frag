@@ -16,33 +16,35 @@
 
 #version 450
 
-layout(early_fragment_tests) in;
-
 layout(constant_id = 0) const bool enable_depth_shadows = true;
 layout(constant_id = 1) const bool enable_backface_shadows = true;
 layout(constant_id = 2) const bool enable_specular = true;
 layout(constant_id = 3) const float shadow_value = 0.2;
 layout(constant_id = 4) const float lambert_start_angle = 80.0;
+layout(constant_id = 5) const bool enable_ssao = true;
 
-layout(push_constant) uniform Constants
+layout(set = 0, binding = 0) uniform UBO
 {
-	vec4 diffuse;
-	vec4 ambient;
-	vec4 specular;
-	float shininess;
-	float shininess_strength;
+	mat4 projection;
+	mat4 inverse_projection;
+	mat4 view;
+	mat4 inverse_view;
+	mat4 light_transform;
+	vec4 light_direction;
+	vec4 camera_position;
 }
 consts;
 
-layout(set = 1, binding = 0) uniform sampler2D inTexture;
-layout(set = 2, binding = 0) uniform sampler2DShadow inDepthMap;
+layout(set = 1, binding = 0) uniform sampler2DShadow inShadow;
+layout(set = 2, binding = 0) uniform sampler2D inNormal;
+layout(set = 2, binding = 1) uniform sampler2D inAlbedo;
+layout(set = 2, binding = 2) uniform sampler2D inLinearDepth;
+layout(set = 2, binding = 3) uniform sampler2D inDiffuse;
+layout(set = 2, binding = 4) uniform sampler2D inAmbient;
+layout(set = 2, binding = 5) uniform sampler2D inShininess;
+layout(set = 3, binding = 0) uniform sampler2D inSSAO;
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec2 inCoords;
-layout(location = 3) in vec3 inView;
-layout(location = 4) in vec3 inLight;
-layout(location = 5) in vec4 inShadowCoords;
+layout(location = 0) in vec2 inCoords;
 
 layout(location = 0) out vec4 outColor;
 
@@ -98,33 +100,51 @@ getShadow(
 		return 1.0;
 	}
 
-	vec2 texelSize = 1.0 / textureSize(inDepthMap, 0);
+	vec2 texelSize = 1.0 / textureSize(inShadow, 0);
 	float shadow = 0.0;
 	for(int i = 0; i < POISSON_DISK_SAMPLES; ++i)
 	{
 		vec2 offset = poissonDisk[i] * texelSize;
-		shadow += texture(inDepthMap, vec3(projCoord.xy + offset, projCoord.z));
+		shadow += texture(inShadow, vec3(projCoord.xy + offset, projCoord.z));
 	}
 	return max(shadow / float(POISSON_DISK_SAMPLES), shadow_value);
+}
+
+vec3
+reconstructPosition(
+	float depth
+	)
+{
+	vec2 ndc = inCoords * 2.0 - 1.0;
+	vec4 clip = vec4(ndc, depth, 1.0);
+	vec4 viewPos = consts.inverse_projection * clip;
+	return viewPos.xyz / viewPos.w;
 }
 
 void
 main()
 {
-	vec3 diffuse = consts.diffuse.rgb;
-	vec3 ambient = consts.ambient.rgb;
-	vec3 specular = consts.specular.rgb;
-	float shininess = consts.shininess;
-	float shininessStrength = consts.shininess_strength;
+	vec3 normal = texture(inNormal, inCoords).xyz * 2.0 - 1.0;
+	vec3 albedo = texture(inAlbedo, inCoords).rgb;
+	vec3 diffuse = texture(inDiffuse, inCoords).rgb;
+	vec3 ambient = texture(inAmbient, inCoords).rgb;
+	vec2 shininessData = texture(inShininess, inCoords).xy;
+	float shininess = shininessData.x;
+	float shininessStrength = shininessData.y;
+	float ssao = texture(inSSAO, inCoords).r;
 
-	vec3 N = normalize(inNormal);
-	vec3 L = normalize(inLight);
-	vec3 V = normalize(inView);
+	float depth = texture(inLinearDepth, inCoords).r;
+	vec3 fragPos = reconstructPosition(depth);
+
+	vec3 N = normalize(normal);
+	vec3 L = normalize((consts.view * consts.light_direction).xyz);
+	vec3 V = normalize(-fragPos);
 	vec3 R = reflect(-L, N);
 	float NL = dot(N, L);
 
-	vec4 texel = texture(inTexture, inCoords);
-	float shadow = getShadow(inShadowCoords);
+	vec4 worldPos = consts.inverse_view * vec4(fragPos, 1.0);
+	vec4 shadowCoord = consts.light_transform * worldPos;
+	float shadow = getShadow(shadowCoord);
 
 	float angle = degrees(acos(NL));
 	float lambertFactor = 1.0;
@@ -144,8 +164,13 @@ main()
 	vec3 lighting = ambient + diffuse * diffuseFactor;
 	if(enable_specular && diffuseFactor != shadow_value)
 	{
-		lighting += specular * specularFactor * (diffuseFactor - shadow_value) / (1.0 - shadow_value);
+		lighting += specularFactor * (diffuseFactor - shadow_value) / (1.0 - shadow_value);
 	}
 
-	outColor = vec4(lighting * texel.rgb, texel.a);
+	if(enable_ssao)
+	{
+		lighting *= ssao;
+	}
+
+	outColor = vec4(lighting * albedo, 1.0);
 }

@@ -83,7 +83,9 @@ simulation_entity_data_t;
 typedef struct simulation_transform
 {
 	mat4 projection;
+	mat4 inverse_projection;
 	mat4 view;
+	mat4 inverse_view;
 	mat4 light_transform;
 	vec4 light_direction;
 }
