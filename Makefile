@@ -89,6 +89,7 @@ app: shaders
 		--window_width=$(WINDOW_WIDTH) \
 		--window_height=$(WINDOW_HEIGHT) \
 		--vk_sample_shading=$(VK_SAMPLE_SHADING) \
+		--vk_min_sample_shading=$(VK_MIN_SAMPLE_SHADING) \
 		--vk_mipmap_levels=$(VK_MIPMAP_LEVELS) \
 		--vk_anisotropy=$(VK_ANISOTROPY) \
 		--vk_preview=$(VK_PREVIEW) \

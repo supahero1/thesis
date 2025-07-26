@@ -36,6 +36,10 @@ else:
 	if release >= 2:
 		flags.extend(Split("-march=native"))
 
+alloc_debug = int("1" if "ALLOC_DEBUG" in ARGUMENTS else os.environ.get("ALLOC_DEBUG", "0"))
+if alloc_debug:
+    flags.extend(Split("-DALLOC_DEBUG"))
+
 env.Append(CPPFLAGS=flags)
 
 libs = Split("m")

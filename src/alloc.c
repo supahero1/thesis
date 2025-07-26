@@ -24,6 +24,10 @@
 	#include <valgrind/valgrind.h>
 #endif
 
+#if ALLOC_DEBUG
+	#include <stdlib.h>
+#endif
+
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
@@ -1606,9 +1610,13 @@ alloc_alloc_uh(
 		return NULL;
 	}
 
+#ifndef ALLOC_DEBUG
 	alloc_handle_impl_t* handle_impl = (void*) handle;
 
 	return handle_impl->alloc_fn(handle_impl, size, zero);
+#else
+	return zero ? calloc(1, size) : malloc(size);
+#endif
 }
 
 
@@ -1625,22 +1633,6 @@ alloc_free_h(
 	{
 		return;
 	}
-
-	assert_not_null(handle, fprintf(stderr,
-		"Size 0 specified for non-empty pointer (you passed invalid parameters to alloc_free())\n"));
-
-	assert_eq((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(size), 0,
-		{
-			alloc_handle_impl_t* handle_impl = (void*) handle;
-			if(alloc_handle_is_virtual(handle_impl)) break;
-			char format[256];
-			snprintf(format, sizeof(format),
-				"Invalid pointer alignment, got ptr = %s and size = %s "
-				"(you passed invalid parameters to alloc_free())\n",
-				MACRO_FORMAT_TYPE(ptr), MACRO_FORMAT_TYPE(size));
-			fprintf(stderr, format, ptr, size);
-		}
-		);
 
 	alloc_handle_lock_h(handle);
 		alloc_free_uh(handle, ptr, size);
@@ -1662,6 +1654,7 @@ alloc_free_uh(
 		return;
 	}
 
+#ifndef ALLOC_DEBUG
 	assert_not_null(handle, fprintf(stderr,
 		"Size 0 specified for non-empty pointer (you passed invalid parameters to alloc_free())\n"));
 
@@ -1696,6 +1689,9 @@ alloc_free_uh(
 
 #ifdef ALLOC_VALGRIND
 	VALGRIND_FREELIKE_BLOCK(ptr, 0);
+#endif
+#else
+	free((void*) ptr);
 #endif
 }
 

@@ -163,6 +163,8 @@ window_free_once_fn(
 	window_free_event_data_t* event_data
 	)
 {
+	sync_mtx_free(&window->mtx);
+
 	event_target_free(&window->event_table.mouse_scroll_target);
 	event_target_free(&window->event_table.mouse_move_target);
 	event_target_free(&window->event_table.mouse_up_target);
@@ -215,6 +217,8 @@ window_init(
 		.data = window
 	};
 	(void) event_target_once(&window->event_table.free_target, free_data);
+
+	sync_mtx_init(&window->mtx);
 
 	return window;
 }

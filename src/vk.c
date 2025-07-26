@@ -255,6 +255,14 @@ typedef struct frame
 	struct
 	{
 		vk_frame_buffer_t vert_ubo;
+
+		vk_image_t normal_ms;
+		vk_image_t albedo_ms;
+		vk_image_t linear_depth_ms;
+		vk_image_t diffuse_ms;
+		vk_image_t ambient_ms;
+		vk_image_t shininess_ms;
+
 		vk_frame_image_t normal;
 		vk_frame_image_t albedo;
 		vk_frame_image_t linear_depth;
@@ -293,7 +301,6 @@ typedef struct frame
 		}
 		compose;
 
-		vk_image_t multisample;
 		VkImage image;
 		VkImageView image_view;
 		VkFramebuffer framebuffer;
@@ -2534,16 +2541,14 @@ vk_init_ubo_buffer(
 	assert_not_null(set_layout.layout);
 	assert_not_null(frame_buffer);
 
-	if(frame_buffer->set)
-	{
-		return;
-	}
-
 	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 	vk_init_buffer(vk, size, usage, flags, &frame_buffer->buffer);
 
-	vk_get_descriptor_sets(vk, set_layout, &frame_buffer->set, 1);
+	if(!frame_buffer->set)
+	{
+		vk_get_descriptor_sets(vk, set_layout, &frame_buffer->set, 1);
+	}
 
 	VkDescriptorBufferInfo descriptor_buffer_info =
 	{
@@ -3062,12 +3067,25 @@ vk_write_images_to_set(
 
 	while(image_info < image_info_end)
 	{
+		VkImageLayout layout;
+		VkSampler sampler;
+		if(images->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)
+		{
+			layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+			sampler = vk->depth_sampler;
+		}
+		else
+		{
+			layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			sampler = vk->image_sampler;
+		}
+
 		*image_info =
 		(VkDescriptorImageInfo)
 		{
-			.sampler = vk->image_sampler,
+			.sampler = sampler,
 			.imageView = images->view,
-			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+			.imageLayout = layout
 		};
 
 		*(write_set++) =
@@ -3104,12 +3122,10 @@ vk_init_frame_image(
 
 	vk_init_image(vk, &frame_image->image);
 
-	if(frame_image->set)
+	if(!frame_image->set)
 	{
-		return;
+		vk_get_descriptor_sets(vk, vk->sampler_set_layout, &frame_image->set, 1);
 	}
-
-	vk_get_descriptor_sets(vk, vk->sampler_set_layout, &frame_image->set, 1);
 
 	vk_write_images_to_set(vk, frame_image->set, &frame_image->image, 1);
 }
@@ -3786,7 +3802,7 @@ vk_init_gbuffer_render_pass(
 			.format = VK_FORMAT_D32_SFLOAT,
 			.samples = vk->samples,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -3797,6 +3813,72 @@ vk_init_gbuffer_render_pass(
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = vk->samples,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
+			.samples = vk->samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R32_SFLOAT,
+			.samples = vk->samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
+			.samples = vk->samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
+			.samples = vk->samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R8G8_UNORM,
+			.samples = vk->samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3806,7 +3888,7 @@ vk_init_gbuffer_render_pass(
 		{
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
-			.samples = vk->samples,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -3817,7 +3899,7 @@ vk_init_gbuffer_render_pass(
 		{
 			.flags = 0,
 			.format = VK_FORMAT_R32_SFLOAT,
-			.samples = vk->samples,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -3828,7 +3910,7 @@ vk_init_gbuffer_render_pass(
 		{
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
-			.samples = vk->samples,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -3839,7 +3921,7 @@ vk_init_gbuffer_render_pass(
 		{
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
-			.samples = vk->samples,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -3850,7 +3932,7 @@ vk_init_gbuffer_render_pass(
 		{
 			.flags = 0,
 			.format = VK_FORMAT_R8G8_UNORM,
-			.samples = vk->samples,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
@@ -3894,6 +3976,34 @@ vk_init_gbuffer_render_pass(
 		.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 	};
 
+	VkAttachmentReference resolve_attachments[] =
+	{
+		{
+			.attachment = 7,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.attachment = 8,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.attachment = 9,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.attachment = 10,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.attachment = 11,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.attachment = 12,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		}
+	};
+
 	VkSubpassDescription subpasses[] =
 	{
 		{
@@ -3903,7 +4013,7 @@ vk_init_gbuffer_render_pass(
 			.pInputAttachments = NULL,
 			.colorAttachmentCount = MACRO_ARRAY_LEN(color_attachments),
 			.pColorAttachments = color_attachments,
-			.pResolveAttachments = NULL,
+			.pResolveAttachments = resolve_attachments,
 			.pDepthStencilAttachment = &depth_attachment,
 			.preserveAttachmentCount = 0,
 			.pPreserveAttachments = NULL
@@ -4946,32 +5056,15 @@ vk_init_scene_render_pass(
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 			.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-		},
-		{
-			.flags = 0,
-			.format = vk->format,
-			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 		}
 	};
 
 	VkAttachmentReference color_attachments[] =
 	{
 		{
-			.attachment = 1,
+			.attachment = 0,
 			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 		}
-	};
-
-	VkAttachmentReference multisampled_attachment =
-	{
-		.attachment = 0,
-		.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 	};
 
 	VkSubpassDescription subpasses[] =
@@ -4983,7 +5076,7 @@ vk_init_scene_render_pass(
 			.pInputAttachments = NULL,
 			.colorAttachmentCount = MACRO_ARRAY_LEN(color_attachments),
 			.pColorAttachments = color_attachments,
-			.pResolveAttachments = &multisampled_attachment,
+			.pResolveAttachments = NULL,
 			.pDepthStencilAttachment = NULL,
 			.preserveAttachmentCount = 0,
 			.pPreserveAttachments = NULL
@@ -4995,11 +5088,20 @@ vk_init_scene_render_pass(
 		{
 			.srcSubpass = VK_SUBPASS_EXTERNAL,
 			.dstSubpass = 0,
-			.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 			.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			.srcAccessMask = 0,
 			.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			.dependencyFlags = 0
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+		},
+		{
+			.srcSubpass = 0,
+			.dstSubpass = VK_SUBPASS_EXTERNAL,
+			.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
 		}
 	};
 
@@ -5171,9 +5273,9 @@ vk_init_skybox_pipeline(
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.rasterizationSamples = vk->samples,
-		.sampleShadingEnable = vk->options.sample_shading,
-		.minSampleShading = vk->options.min_sample_shading,
+		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+		.sampleShadingEnable = VK_FALSE,
+		.minSampleShading = 0.0f,
 		.pSampleMask = NULL,
 		.alphaToCoverageEnable = VK_FALSE,
 		.alphaToOneEnable = VK_FALSE
@@ -5489,9 +5591,9 @@ vk_init_compose_pipeline(
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.rasterizationSamples = vk->samples,
-		.sampleShadingEnable = vk->options.sample_shading,
-		.minSampleShading = vk->options.min_sample_shading,
+		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+		.sampleShadingEnable = VK_FALSE,
+		.minSampleShading = 0.0f,
 		.pSampleMask = NULL,
 		.alphaToCoverageEnable = VK_FALSE,
 		.alphaToOneEnable = VK_FALSE
@@ -5723,9 +5825,9 @@ vk_init_preview_pipeline(
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.rasterizationSamples = vk->samples,
-		.sampleShadingEnable = vk->options.sample_shading,
-		.minSampleShading = vk->options.min_sample_shading,
+		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+		.sampleShadingEnable = VK_FALSE,
+		.minSampleShading = 0.0f,
 		.pSampleMask = NULL,
 		.alphaToCoverageEnable = VK_FALSE,
 		.alphaToOneEnable = VK_FALSE
@@ -6354,33 +6456,63 @@ vk_init_gbuffer_framebuffer(
 	vk_init_ubo_buffer(vk, sizeof(vk_gbuffer_vert_ubo_data_t),
 		vk->vert_ubo_set_layout, &frame->gbuffer.vert_ubo);
 
+	frame->gbuffer.normal_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->gbuffer.normal_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
+	vk_init_image(vk, &frame->gbuffer.normal_ms);
+
+	frame->gbuffer.albedo_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->gbuffer.albedo_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
+	vk_init_image(vk, &frame->gbuffer.albedo_ms);
+
+	frame->gbuffer.linear_depth_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->gbuffer.linear_depth_ms.format = VK_FORMAT_R32_SFLOAT;
+	vk_init_image(vk, &frame->gbuffer.linear_depth_ms);
+
+	frame->gbuffer.diffuse_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->gbuffer.diffuse_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
+	vk_init_image(vk, &frame->gbuffer.diffuse_ms);
+
+	frame->gbuffer.ambient_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->gbuffer.ambient_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
+	vk_init_image(vk, &frame->gbuffer.ambient_ms);
+
+	frame->gbuffer.shininess_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->gbuffer.shininess_ms.format = VK_FORMAT_R8G8_UNORM;
+	vk_init_image(vk, &frame->gbuffer.shininess_ms);
+
 	frame->gbuffer.normal.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.normal.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_frame_image(vk, &frame->gbuffer.normal);
 
 	frame->gbuffer.albedo.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.albedo.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_frame_image(vk, &frame->gbuffer.albedo);
 
 	frame->gbuffer.linear_depth.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.linear_depth.image.format = VK_FORMAT_R32_SFLOAT;
 	vk_init_frame_image(vk, &frame->gbuffer.linear_depth);
 
 	frame->gbuffer.diffuse.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.diffuse.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_frame_image(vk, &frame->gbuffer.diffuse);
 
 	frame->gbuffer.ambient.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.ambient.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_frame_image(vk, &frame->gbuffer.ambient);
 
 	frame->gbuffer.shininess.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.shininess.image.format = VK_FORMAT_R8G8_UNORM;
 	vk_init_frame_image(vk, &frame->gbuffer.shininess);
 
@@ -6405,6 +6537,12 @@ vk_init_gbuffer_framebuffer(
 	VkImageView attachments[] =
 	{
 		frame->gbuffer.depth.view,
+		frame->gbuffer.normal_ms.view,
+		frame->gbuffer.albedo_ms.view,
+		frame->gbuffer.linear_depth_ms.view,
+		frame->gbuffer.diffuse_ms.view,
+		frame->gbuffer.ambient_ms.view,
+		frame->gbuffer.shininess_ms.view,
 		frame->gbuffer.normal.image.view,
 		frame->gbuffer.albedo.image.view,
 		frame->gbuffer.linear_depth.image.view,
@@ -6450,6 +6588,12 @@ vk_free_gbuffer_framebuffer(
 	vk_free_frame_image(vk, &frame->gbuffer.linear_depth);
 	vk_free_frame_image(vk, &frame->gbuffer.albedo);
 	vk_free_frame_image(vk, &frame->gbuffer.normal);
+	vk_free_image(vk, &frame->gbuffer.shininess_ms);
+	vk_free_image(vk, &frame->gbuffer.ambient_ms);
+	vk_free_image(vk, &frame->gbuffer.diffuse_ms);
+	vk_free_image(vk, &frame->gbuffer.linear_depth_ms);
+	vk_free_image(vk, &frame->gbuffer.albedo_ms);
+	vk_free_image(vk, &frame->gbuffer.normal_ms);
 	vk_free_ubo_buffer(vk, &frame->gbuffer.vert_ubo);
 }
 
@@ -6551,10 +6695,6 @@ vk_init_scene_framebuffer(
 	vk_init_ubo_buffer(vk, sizeof(vk_compose_frag_ubo_data_t),
 		vk->frag_ubo_set_layout, &frame->scene.compose.frag_ubo);
 
-	frame->scene.multisample.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
-	vk_init_image(vk, &frame->scene.multisample);
-
 	VkImageViewCreateInfo image_view_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -6586,8 +6726,7 @@ vk_init_scene_framebuffer(
 
 	VkImageView attachments[] =
 	{
-		frame->scene.image_view,
-		frame->scene.multisample.view
+		frame->scene.image_view
 	};
 
 	VkFramebufferCreateInfo framebuffer_info =
@@ -6621,7 +6760,6 @@ vk_free_scene_framebuffer(
 	vk->table.vkDestroyFramebuffer(vk->device, frame->scene.framebuffer, NULL);
 	vk->table.vkDestroyImageView(vk->device, frame->scene.image_view, NULL);
 
-	vk_free_image(vk, &frame->scene.multisample);
 	vk_free_ubo_buffer(vk, &frame->scene.compose.frag_ubo);
 }
 
