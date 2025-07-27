@@ -30,8 +30,8 @@ layout(location = 2) in vec2 inCoords;
 layout(location = 3) in mat4 inTransform;
 
 layout(location = 0) out vec2 outCoords;
-layout(location = 1) out vec3 outNormal;
-layout(location = 2) out vec3 outViewPos;
+layout(location = 1) out vec3 outPosition;
+layout(location = 2) out vec3 outNormal;
 
 void
 main()
@@ -41,6 +41,6 @@ main()
 	gl_Position = consts.projection * viewPos;
 
 	outCoords = inCoords;
+	outPosition = worldPos.xyz;
 	outNormal = mat3(inTransform) * inNormal;
-	outViewPos = viewPos.xyz;
 }

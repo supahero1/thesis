@@ -24,18 +24,20 @@ layout(push_constant) uniform Constants
 	vec4 ambient;
 	float shininess;
 	float shininess_strength;
+
+	float near;
 }
 consts;
 
 layout(set = 1, binding = 0) uniform sampler2D inTexture;
 
 layout(location = 0) in vec2 inCoords;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec3 inViewPos;
+layout(location = 1) in vec3 inPosition;
+layout(location = 2) in vec3 inNormal;
 
-layout(location = 0) out vec3 outNormal;
-layout(location = 1) out vec4 outAlbedo;
-layout(location = 2) out float outLinearDepth;
+layout(location = 0) out vec4 outPosition;
+layout(location = 1) out vec3 outNormal;
+layout(location = 2) out vec4 outAlbedo;
 layout(location = 3) out vec3 outDiffuse;
 layout(location = 4) out vec3 outAmbient;
 layout(location = 5) out vec2 outShininess;
@@ -43,9 +45,9 @@ layout(location = 5) out vec2 outShininess;
 void
 main()
 {
+	outPosition = vec4(inPosition, -consts.near / gl_FragCoord.z);
 	outNormal = normalize(inNormal) * 0.5 + 0.5;
 	outAlbedo = vec4(texture(inTexture, inCoords).rgb, 1.0);
-	outLinearDepth = abs(inViewPos.z);
 	outDiffuse = consts.diffuse.rgb;
 	outAmbient = consts.ambient.rgb;
 	outShininess = vec2(consts.shininess, consts.shininess_strength);

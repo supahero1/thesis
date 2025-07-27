@@ -36,9 +36,9 @@ layout(set = 0, binding = 0) uniform UBO
 consts;
 
 layout(set = 1, binding = 0) uniform sampler2DShadow inShadow;
-layout(set = 2, binding = 0) uniform sampler2D inNormal;
-layout(set = 2, binding = 1) uniform sampler2D inAlbedo;
-layout(set = 2, binding = 2) uniform sampler2D inLinearDepth;
+layout(set = 2, binding = 0) uniform sampler2D inPosition;
+layout(set = 2, binding = 1) uniform sampler2D inNormal;
+layout(set = 2, binding = 2) uniform sampler2D inAlbedo;
 layout(set = 2, binding = 3) uniform sampler2D inDiffuse;
 layout(set = 2, binding = 4) uniform sampler2D inAmbient;
 layout(set = 2, binding = 5) uniform sampler2D inShininess;
@@ -84,6 +84,13 @@ const vec2 poissonDisk[POISSON_DISK_SAMPLES] = vec2[](
 	vec2(-0.198305,  0.424368), vec2(-0.125603, -0.730303)
 	);
 
+const mat4 toClip = mat4(
+	0.5, 0.0, 0.0, 0.0,
+	0.0, 0.5, 0.0, 0.0,
+	0.0, 0.0, 1.0, 0.0,
+	0.5, 0.5, 0.0, 1.0
+	);
+
 float
 getShadow(
 	vec4 shadowCoord
@@ -110,20 +117,10 @@ getShadow(
 	return max(shadow / float(POISSON_DISK_SAMPLES), shadow_value);
 }
 
-vec3
-reconstructPosition(
-	float depth
-	)
-{
-	vec4 clip = vec4(inCoords, 1.0, 1.0);
-	vec4 viewRay = consts.inverse_projection * clip;
-	viewRay /= viewRay.w;
-	return normalize(viewRay.xyz) * depth;
-}
-
 void
 main()
 {
+	vec4 position = texture(inPosition, inCoords);
 	vec3 normal = texture(inNormal, inCoords).xyz * 2.0 - 1.0;
 	vec4 color = texture(inAlbedo, inCoords);
 	vec3 diffuse = texture(inDiffuse, inCoords).rgb;
@@ -133,17 +130,13 @@ main()
 	float shininessStrength = shininessData.y;
 	float ssao = texture(inSSAO, inCoords).r;
 
-	float depth = texture(inLinearDepth, inCoords).r;
-	vec3 fragPos = reconstructPosition(depth);
-
-	vec3 N = normal;
+	vec3 N = normalize(normal);
 	vec3 L = consts.light_direction.xyz;
-	vec3 V = normalize(-fragPos);
+	vec3 V = normalize(consts.camera_position.xyz - position.xyz);
 	vec3 R = reflect(-L, N);
 	float NL = dot(N, L);
 
-	vec4 worldPos = consts.inverse_view * vec4(fragPos, 1.0);
-	vec4 shadowCoord = consts.light_transform * worldPos;
+	vec4 shadowCoord = (toClip * consts.light_transform) * vec4(position.xyz, 1.0);
 	float shadow = getShadow(shadowCoord);
 
 	float angle = degrees(acos(NL));

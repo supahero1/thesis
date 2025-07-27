@@ -137,12 +137,20 @@ typedef struct vk_material_constant_data
 }
 vk_material_constant_data_t;
 
-typedef vk_material_constant_data_t vk_gbuffer_frag_constant_data_t;
+typedef struct vk_gbuffer_frag_constant_data
+{
+	vec4 diffuse;
+	vec4 ambient;
+	float shininess;
+	float shininess_strength;
+
+	float near;
+}
+vk_gbuffer_frag_constant_data_t;
 
 typedef struct vk_ssao_frag_ubo_data
 {
 	mat4 projection;
-	mat4 inverse_projection;
 }
 vk_ssao_frag_ubo_data_t;
 
@@ -249,16 +257,16 @@ typedef struct frame
 	{
 		vk_frame_buffer_t vert_ubo;
 
+		vk_image_t position_ms;
 		vk_image_t normal_ms;
 		vk_image_t albedo_ms;
-		vk_image_t linear_depth_ms;
 		vk_image_t diffuse_ms;
 		vk_image_t ambient_ms;
 		vk_image_t shininess_ms;
 
+		vk_frame_image_t position;
 		vk_frame_image_t normal;
 		vk_frame_image_t albedo;
-		vk_frame_image_t linear_depth;
 		vk_frame_image_t diffuse;
 		vk_frame_image_t ambient;
 		vk_frame_image_t shininess;
@@ -316,9 +324,9 @@ typedef enum vk_preview
 {
 	VK_PREVIEW_NONE,
 	VK_PREVIEW_SHADOW_DEPTH_MAP,
+	VK_PREVIEW_GBUFFER_POSITION_MAP,
 	VK_PREVIEW_GBUFFER_NORMAL_MAP,
 	VK_PREVIEW_GBUFFER_ALBEDO_MAP,
-	VK_PREVIEW_GBUFFER_LINEAR_DEPTH_MAP,
 	VK_PREVIEW_GBUFFER_DIFFUSE_MAP,
 	VK_PREVIEW_GBUFFER_AMBIENT_MAP,
 	VK_PREVIEW_GBUFFER_SHININESS_MAP,
@@ -3817,29 +3825,7 @@ vk_init_gbuffer_render_pass(
 		},
 		{
 			.flags = 0,
-			.format = VK_FORMAT_R8G8B8A8_UNORM,
-			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-		},
-		{
-			.flags = 0,
-			.format = VK_FORMAT_R8G8B8A8_UNORM,
-			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-		},
-		{
-			.flags = 0,
-			.format = VK_FORMAT_R32_SFLOAT,
+			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
 			.samples = vk->samples,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3872,7 +3858,7 @@ vk_init_gbuffer_render_pass(
 		},
 		{
 			.flags = 0,
-			.format = VK_FORMAT_R8G8_UNORM,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = vk->samples,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3884,28 +3870,28 @@ vk_init_gbuffer_render_pass(
 		{
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
-			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.samples = vk->samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 		},
 		{
 			.flags = 0,
-			.format = VK_FORMAT_R8G8B8A8_UNORM,
-			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.format = VK_FORMAT_R32G32_SFLOAT,
+			.samples = vk->samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 		},
 		{
 			.flags = 0,
-			.format = VK_FORMAT_R32_SFLOAT,
+			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -3938,7 +3924,29 @@ vk_init_gbuffer_render_pass(
 		},
 		{
 			.flags = 0,
-			.format = VK_FORMAT_R8G8_UNORM,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R8G8B8A8_UNORM,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = VK_FORMAT_R32G32_SFLOAT,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -6461,6 +6469,11 @@ vk_init_gbuffer_framebuffer(
 
 	vk_init_vert_ubo_buffer(vk, sizeof(vk_gbuffer_vert_ubo_data_t), &frame->gbuffer.vert_ubo);
 
+	frame->gbuffer.position_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->gbuffer.position_ms.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+	vk_init_image(vk, &frame->gbuffer.position_ms);
+
 	frame->gbuffer.normal_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
 	frame->gbuffer.normal_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -6470,11 +6483,6 @@ vk_init_gbuffer_framebuffer(
 		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
 	frame->gbuffer.albedo_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_image(vk, &frame->gbuffer.albedo_ms);
-
-	frame->gbuffer.linear_depth_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
-	frame->gbuffer.linear_depth_ms.format = VK_FORMAT_R32_SFLOAT;
-	vk_init_image(vk, &frame->gbuffer.linear_depth_ms);
 
 	frame->gbuffer.diffuse_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
@@ -6488,8 +6496,13 @@ vk_init_gbuffer_framebuffer(
 
 	frame->gbuffer.shininess_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
-	frame->gbuffer.shininess_ms.format = VK_FORMAT_R8G8_UNORM;
+	frame->gbuffer.shininess_ms.format = VK_FORMAT_R32G32_SFLOAT;
 	vk_init_image(vk, &frame->gbuffer.shininess_ms);
+
+	frame->gbuffer.position.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
+	frame->gbuffer.position.image.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+	vk_init_frame_image(vk, &frame->gbuffer.position);
 
 	frame->gbuffer.normal.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
@@ -6500,11 +6513,6 @@ vk_init_gbuffer_framebuffer(
 		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
 	frame->gbuffer.albedo.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vk_init_frame_image(vk, &frame->gbuffer.albedo);
-
-	frame->gbuffer.linear_depth.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
-	frame->gbuffer.linear_depth.image.format = VK_FORMAT_R32_SFLOAT;
-	vk_init_frame_image(vk, &frame->gbuffer.linear_depth);
 
 	frame->gbuffer.diffuse.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
@@ -6518,14 +6526,14 @@ vk_init_gbuffer_framebuffer(
 
 	frame->gbuffer.shininess.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
-	frame->gbuffer.shininess.image.format = VK_FORMAT_R8G8_UNORM;
+	frame->gbuffer.shininess.image.format = VK_FORMAT_R32G32_SFLOAT;
 	vk_init_frame_image(vk, &frame->gbuffer.shininess);
 
 	vk_image_t images[] =
 	{
+		frame->gbuffer.position.image,
 		frame->gbuffer.normal.image,
 		frame->gbuffer.albedo.image,
-		frame->gbuffer.linear_depth.image,
 		frame->gbuffer.diffuse.image,
 		frame->gbuffer.ambient.image,
 		frame->gbuffer.shininess.image
@@ -6542,15 +6550,15 @@ vk_init_gbuffer_framebuffer(
 	VkImageView attachments[] =
 	{
 		frame->gbuffer.depth.view,
+		frame->gbuffer.position_ms.view,
 		frame->gbuffer.normal_ms.view,
 		frame->gbuffer.albedo_ms.view,
-		frame->gbuffer.linear_depth_ms.view,
 		frame->gbuffer.diffuse_ms.view,
 		frame->gbuffer.ambient_ms.view,
 		frame->gbuffer.shininess_ms.view,
+		frame->gbuffer.position.image.view,
 		frame->gbuffer.normal.image.view,
 		frame->gbuffer.albedo.image.view,
-		frame->gbuffer.linear_depth.image.view,
 		frame->gbuffer.diffuse.image.view,
 		frame->gbuffer.ambient.image.view,
 		frame->gbuffer.shininess.image.view
@@ -6590,15 +6598,15 @@ vk_free_gbuffer_framebuffer(
 	vk_free_frame_image(vk, &frame->gbuffer.shininess);
 	vk_free_frame_image(vk, &frame->gbuffer.ambient);
 	vk_free_frame_image(vk, &frame->gbuffer.diffuse);
-	vk_free_frame_image(vk, &frame->gbuffer.linear_depth);
 	vk_free_frame_image(vk, &frame->gbuffer.albedo);
 	vk_free_frame_image(vk, &frame->gbuffer.normal);
+	vk_free_frame_image(vk, &frame->gbuffer.position);
 	vk_free_image(vk, &frame->gbuffer.shininess_ms);
 	vk_free_image(vk, &frame->gbuffer.ambient_ms);
 	vk_free_image(vk, &frame->gbuffer.diffuse_ms);
-	vk_free_image(vk, &frame->gbuffer.linear_depth_ms);
 	vk_free_image(vk, &frame->gbuffer.albedo_ms);
 	vk_free_image(vk, &frame->gbuffer.normal_ms);
+	vk_free_image(vk, &frame->gbuffer.position_ms);
 	vk_free_ubo_buffer(vk, &frame->gbuffer.vert_ubo);
 }
 
@@ -7044,6 +7052,11 @@ vk_draw_gbuffer(
 	vk_copy_to_buffer(vk, &frame->gbuffer.vert_ubo.buffer,
 		&gbuffer_vert_ubo_data, sizeof(gbuffer_vert_ubo_data));
 
+	vk_gbuffer_frag_constant_data_t gbuffer_frag_constant_data =
+	{
+		.near = camera->near
+	};
+
 	vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->gbuffer.pipeline);
 
@@ -7063,7 +7076,10 @@ vk_draw_gbuffer(
 		{
 			vk_material_t* material = vk->materials + mesh->material_idx;
 
-			vk_gbuffer_frag_constant_data_t gbuffer_frag_constant_data = material->constant_data;
+			glm_vec4_copy(material->constant_data.diffuse, gbuffer_frag_constant_data.diffuse);
+			glm_vec4_copy(material->constant_data.ambient, gbuffer_frag_constant_data.ambient);
+			gbuffer_frag_constant_data.shininess = material->constant_data.shininess;
+			gbuffer_frag_constant_data.shininess_strength = material->constant_data.shininess_strength;
 
 			vk->table.vkCmdPushConstants(vk->barrier->command_buffer,
 				vk->gbuffer.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -7126,7 +7142,6 @@ vk_draw_ssao(
 
 	vk_ssao_frag_ubo_data_t ssao_frag_ubo_data;
 	glm_mat4_copy(transform->projection, ssao_frag_ubo_data.projection);
-	glm_mat4_copy(transform->inverse_projection, ssao_frag_ubo_data.inverse_projection);
 
 	vk_copy_to_buffer(vk, &frame->ssao.frag_ubo.buffer,
 		&ssao_frag_ubo_data, sizeof(ssao_frag_ubo_data));
@@ -7269,6 +7284,20 @@ vk_draw_compose(
 		break;
 	}
 
+	case VK_PREVIEW_GBUFFER_POSITION_MAP:
+	{
+		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.image.pipeline);
+
+		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.image.pipeline_layout,
+			0, 1, &frame->gbuffer.position.set, 0, NULL);
+
+		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
 	case VK_PREVIEW_GBUFFER_NORMAL_MAP:
 	{
 		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
@@ -7291,20 +7320,6 @@ vk_draw_compose(
 		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.image.pipeline_layout,
 			0, 1, &frame->gbuffer.albedo.set, 0, NULL);
-
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
-
-		break;
-	}
-
-	case VK_PREVIEW_GBUFFER_LINEAR_DEPTH_MAP:
-	{
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
-			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.depth.pipeline);
-
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
-			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.preview.depth.pipeline_layout,
-			0, 1, &frame->gbuffer.linear_depth.set, 0, NULL);
 
 		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
 

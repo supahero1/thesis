@@ -22,14 +22,13 @@ layout(constant_id = 2) const float ssao_radius = 0.5;
 layout(constant_id = 3) const float ssao_bias = 0.025;
 layout(constant_id = 4) const float ssao_power = 2.2;
 
-layout(set = 0, binding = 0) uniform sampler2D inNormal;
-layout(set = 0, binding = 2) uniform sampler2D inLinearDepth;
+layout(set = 0, binding = 0) uniform sampler2D inPosition;
+layout(set = 0, binding = 1) uniform sampler2D inNormal;
 layout(set = 1, binding = 0) uniform sampler2D inNoise;
 
 layout(set = 2, binding = 0) uniform UBO
 {
 	mat4 projection;
-	mat4 inverse_projection;
 }
 consts;
 
@@ -46,15 +45,10 @@ layout(location = 0) out float outOcclusion;
 void
 main()
 {
-	float fragLinearDepth = texture(inLinearDepth, inCoords).r;
+	/*vec3 position = texture(inPosition, inCoords).xyz;
 	vec3 normal = normalize(texture(inNormal, inCoords).rgb);
 
-	vec2 ndc = inCoords * 2.0 - 1.0;
-	vec4 clip = vec4(ndc, fragLinearDepth, 1.0);
-	vec4 viewPos = consts.inverse_projection * clip;
-	vec3 fragPos = viewPos.xyz / viewPos.w;
-
-	ivec2 screenSize = textureSize(inLinearDepth, 0);
+	ivec2 screenSize = textureSize(inPosition, 0);
 	vec2 noiseCoords = vec2(screenSize) / vec2(ssao_noise_size) * inCoords;
 	vec3 randomVec = normalize(texture(inNoise, noiseCoords).rgb);
 
@@ -72,7 +66,7 @@ main()
 		offsetClip /= offsetClip.w;
 		vec2 offsetNDC = offsetClip.xy * 0.5 + 0.5;
 
-		float sampleSceneDepth = texture(inLinearDepth, offsetNDC).r;
+		float sampleSceneDepth = 0.0;//texture(inLinearDepth, offsetNDC).r;
 		float samplePointLinearDepth = -samplePos.z;
 		float rangeCheck = smoothstep(0.0, 1.0, ssao_bias / abs(fragLinearDepth - sampleSceneDepth));
 
@@ -80,5 +74,5 @@ main()
 	}
 
 	occlusion = 1.0 - occlusion / float(ssao_kernel_size);
-	outOcclusion = pow(occlusion, ssao_power);
+	outOcclusion = pow(occlusion, ssao_power);*/
 }
