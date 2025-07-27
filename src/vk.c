@@ -137,14 +137,7 @@ typedef struct vk_material_constant_data
 }
 vk_material_constant_data_t;
 
-typedef struct vk_gbuffer_frag_constant_data
-{
-	vk_material_constant_data_t material;
-
-	float near;
-	float far;
-}
-vk_gbuffer_frag_constant_data_t;
+typedef vk_material_constant_data_t vk_gbuffer_frag_constant_data_t;
 
 typedef struct vk_ssao_frag_ubo_data
 {
@@ -643,6 +636,20 @@ private VkPipelineColorBlendAttachmentState vk_no_blending_attachment =
 	.blendEnable = VK_FALSE,
 	.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
 	.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+	.colorBlendOp = VK_BLEND_OP_ADD,
+	.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+	.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+	.alphaBlendOp = VK_BLEND_OP_ADD,
+	.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+};
+
+
+private VkPipelineColorBlendAttachmentState vk_blending_attachment =
+{
+	.blendEnable = VK_TRUE,
+	.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+	.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
 	.colorBlendOp = VK_BLEND_OP_ADD,
 	.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
 	.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
@@ -3620,7 +3627,7 @@ vk_init_shadow_pipeline(
 		.polygonMode = VK_POLYGON_MODE_FILL,
 		.cullMode = VK_CULL_MODE_FRONT_BIT,
 		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-		.depthBiasEnable = VK_TRUE,
+		.depthBiasEnable = VK_FALSE,
 		.depthBiasConstantFactor = 0.0f,
 		.depthBiasClamp = 0.0f,
 		.depthBiasSlopeFactor = 0.0f,
@@ -3662,7 +3669,7 @@ vk_init_shadow_pipeline(
 		.pNext = NULL,
 		.flags = 0,
 		.logicOpEnable = VK_FALSE,
-		.logicOp = VK_LOGIC_OP_COPY,
+		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
 		.pAttachments = &vk_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
@@ -3812,7 +3819,7 @@ vk_init_gbuffer_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3823,7 +3830,7 @@ vk_init_gbuffer_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3834,7 +3841,7 @@ vk_init_gbuffer_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R32_SFLOAT,
 			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3845,7 +3852,7 @@ vk_init_gbuffer_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3856,7 +3863,7 @@ vk_init_gbuffer_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -3867,7 +3874,7 @@ vk_init_gbuffer_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R8G8_UNORM,
 			.samples = vk->samples,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -4296,7 +4303,7 @@ vk_init_gbuffer_pipeline(
 		.pNext = NULL,
 		.flags = 0,
 		.logicOpEnable = VK_FALSE,
-		.logicOp = VK_LOGIC_OP_COPY,
+		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = MACRO_ARRAY_LEN(color_blend_attachments),
 		.pAttachments = color_blend_attachments,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
@@ -4705,7 +4712,7 @@ vk_init_ssao_pipeline(
 		.pNext = NULL,
 		.flags = 0,
 		.logicOpEnable = VK_FALSE,
-		.logicOp = VK_LOGIC_OP_COPY,
+		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
 		.pAttachments = &vk_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
@@ -4845,8 +4852,7 @@ vk_init_ssao_kernel_const(
 {
 	assert_not_null(vk);
 
-	vk_init_ubo_buffer(vk, sizeof(vec4) * vk->options.ssao_kernel_size,
-		vk->frag_ubo_set_layout, &vk->ssao.kernel_ubo);
+	vk_init_frag_ubo_buffer(vk, sizeof(vec4) * vk->options.ssao_kernel_size, &vk->ssao.kernel_ubo);
 
 	uint32_t size = vk->options.ssao_kernel_size;
 	vec4 data[size];
@@ -5303,7 +5309,7 @@ vk_init_skybox_pipeline(
 		.pNext = NULL,
 		.flags = 0,
 		.logicOpEnable = VK_FALSE,
-		.logicOp = VK_LOGIC_OP_COPY,
+		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
 		.pAttachments = &vk_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
@@ -5621,9 +5627,9 @@ vk_init_compose_pipeline(
 		.pNext = NULL,
 		.flags = 0,
 		.logicOpEnable = VK_FALSE,
-		.logicOp = VK_LOGIC_OP_COPY,
+		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &vk_no_blending_attachment,
+		.pAttachments = &vk_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -5855,7 +5861,7 @@ vk_init_preview_pipeline(
 		.pNext = NULL,
 		.flags = 0,
 		.logicOpEnable = VK_FALSE,
-		.logicOp = VK_LOGIC_OP_COPY,
+		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
 		.pAttachments = &vk_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
@@ -6453,8 +6459,7 @@ vk_init_gbuffer_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
-	vk_init_ubo_buffer(vk, sizeof(vk_gbuffer_vert_ubo_data_t),
-		vk->vert_ubo_set_layout, &frame->gbuffer.vert_ubo);
+	vk_init_vert_ubo_buffer(vk, sizeof(vk_gbuffer_vert_ubo_data_t), &frame->gbuffer.vert_ubo);
 
 	frame->gbuffer.normal_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
@@ -6607,8 +6612,7 @@ vk_init_ssao_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
-	vk_init_ubo_buffer(vk, sizeof(vk_ssao_frag_ubo_data_t),
-		vk->frag_ubo_set_layout, &frame->ssao.frag_ubo);
+	vk_init_frag_ubo_buffer(vk, sizeof(vk_ssao_frag_ubo_data_t), &frame->ssao.frag_ubo);
 
 	frame->ssao.map.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT;
@@ -6692,8 +6696,7 @@ vk_init_scene_framebuffer(
 
 	frame->scene.image = *swapchain_image;
 
-	vk_init_ubo_buffer(vk, sizeof(vk_compose_frag_ubo_data_t),
-		vk->frag_ubo_set_layout, &frame->scene.compose.frag_ubo);
+	vk_init_frag_ubo_buffer(vk, sizeof(vk_compose_frag_ubo_data_t), &frame->scene.compose.frag_ubo);
 
 	VkImageViewCreateInfo image_view_info =
 	{
@@ -6991,7 +6994,25 @@ vk_draw_gbuffer(
 	VkClearValue clear_values[] =
 	{
 		{
-			.depthStencil = { 1.0f, 0 }
+			.depthStencil = { 0.0f, 0 }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
 		}
 	};
 
@@ -7023,12 +7044,6 @@ vk_draw_gbuffer(
 	vk_copy_to_buffer(vk, &frame->gbuffer.vert_ubo.buffer,
 		&gbuffer_vert_ubo_data, sizeof(gbuffer_vert_ubo_data));
 
-	vk_gbuffer_frag_constant_data_t gbuffer_frag_constant_data =
-	{
-		.near = camera->near,
-		.far = camera->far
-	};
-
 	vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->gbuffer.pipeline);
 
@@ -7048,7 +7063,7 @@ vk_draw_gbuffer(
 		{
 			vk_material_t* material = vk->materials + mesh->material_idx;
 
-			gbuffer_frag_constant_data.material = material->constant_data;
+			vk_gbuffer_frag_constant_data_t gbuffer_frag_constant_data = material->constant_data;
 
 			vk->table.vkCmdPushConstants(vk->barrier->command_buffer,
 				vk->gbuffer.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -7494,7 +7509,7 @@ vk_draw(
 
 	vk_draw_shadow(vk, frame, &camera, &transform, entity_data);
 	vk_draw_gbuffer(vk, frame, &camera, &transform, entity_data);
-	vk_draw_ssao(vk, frame, &camera, &transform, entity_data);
+	// vk_draw_ssao(vk, frame, &camera, &transform, entity_data);
 	vk_draw_compose(vk, frame, &camera, &transform, entity_data);
 
 	VK_FOR_EACH_MODEL(entities_per_model)

@@ -115,17 +115,17 @@ reconstructPosition(
 	float depth
 	)
 {
-	vec2 ndc = inCoords * 2.0 - 1.0;
-	vec4 clip = vec4(ndc, depth, 1.0);
-	vec4 viewPos = consts.inverse_projection * clip;
-	return viewPos.xyz / viewPos.w;
+	vec4 clip = vec4(inCoords, 1.0, 1.0);
+	vec4 viewRay = consts.inverse_projection * clip;
+	viewRay /= viewRay.w;
+	return normalize(viewRay.xyz) * depth;
 }
 
 void
 main()
 {
 	vec3 normal = texture(inNormal, inCoords).xyz * 2.0 - 1.0;
-	vec3 albedo = texture(inAlbedo, inCoords).rgb;
+	vec4 color = texture(inAlbedo, inCoords);
 	vec3 diffuse = texture(inDiffuse, inCoords).rgb;
 	vec3 ambient = texture(inAmbient, inCoords).rgb;
 	vec2 shininessData = texture(inShininess, inCoords).xy;
@@ -136,8 +136,8 @@ main()
 	float depth = texture(inLinearDepth, inCoords).r;
 	vec3 fragPos = reconstructPosition(depth);
 
-	vec3 N = normalize(normal);
-	vec3 L = normalize((consts.view * consts.light_direction).xyz);
+	vec3 N = normal;
+	vec3 L = consts.light_direction.xyz;
 	vec3 V = normalize(-fragPos);
 	vec3 R = reflect(-L, N);
 	float NL = dot(N, L);
@@ -169,8 +169,8 @@ main()
 
 	if(enable_ssao)
 	{
-		lighting *= ssao;
+		// lighting *= ssao;
 	}
 
-	outColor = vec4(lighting * albedo, 1.0);
+	outColor = vec4(lighting * color.rgb, color.a);
 }

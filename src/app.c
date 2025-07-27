@@ -79,8 +79,7 @@ app_init(
 			.pos = { -10000.0f, 1000.0f, -10000.0f },
 			.angle = { 0.0f, 180.0f, 180.0f },
 			.fov = 60.0f,
-			.near = 10.0f,
-			.far = 50000.0f
+			.near = 10.0f
 		},
 		(simulation_light_t)
 		{

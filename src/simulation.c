@@ -276,9 +276,12 @@ simulation_get_transform(
 
 	simulation_transform_t transform;
 
-	glm_mat4_identity(transform.projection);
-	glm_perspective(simulation->camera.fov, width / height,
-		simulation->camera.far, simulation->camera.near, transform.projection);
+	glm_mat4_zero(transform.projection);
+	float f = 1.0f / tanf(simulation->camera.fov * 0.5f);
+	transform.projection[0][0] = f / (width / height);
+	transform.projection[1][1] = f;
+	transform.projection[2][3] = 1.0f;
+	transform.projection[3][2] = simulation->camera.near;
 
 	glm_mat4_inv(transform.projection, transform.inverse_projection);
 

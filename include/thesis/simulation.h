@@ -47,7 +47,6 @@ typedef struct simulation_camera
 	vec3 angle;
 	float fov;
 	float near;
-	float far;
 }
 simulation_camera_t;
 

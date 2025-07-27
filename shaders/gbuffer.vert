@@ -31,14 +31,16 @@ layout(location = 3) in mat4 inTransform;
 
 layout(location = 0) out vec2 outCoords;
 layout(location = 1) out vec3 outNormal;
+layout(location = 2) out vec3 outViewPos;
 
 void
 main()
 {
-	vec4 inPos = vec4(inPosition, 1.0);
-	vec4 worldPos = inTransform * inPos;
-	gl_Position = consts.projection * consts.view * worldPos;
+	vec4 worldPos = inTransform * vec4(inPosition, 1.0);
+	vec4 viewPos = consts.view * worldPos;
+	gl_Position = consts.projection * viewPos;
 
 	outCoords = inCoords;
 	outNormal = mat3(inTransform) * inNormal;
+	outViewPos = viewPos.xyz;
 }
