@@ -47,7 +47,7 @@ clean:
 	$(RM) -r bin/ thesis/
 
 
-SHADERS=$(wildcard shaders/*)
+SHADERS := $(filter-out $(shell grep -l '^/\* skip \*/' shaders/*),$(wildcard shaders/*))
 BIN_SHADERS=$(SHADERS:shaders/%=bin/shaders/%.spv)
 
 bin/shaders/%.vert.spv: shaders/%.vert | bin/shaders/ thesis/shaders/
@@ -57,6 +57,9 @@ bin/shaders/%.vert.spv: shaders/%.vert | bin/shaders/ thesis/shaders/
 bin/shaders/%.frag.spv: shaders/%.frag | bin/shaders/ thesis/shaders/
 	glslc -O -fshader-stage=frag $< -o $@
 	$(CP) $@ thesis/shaders/
+
+bin/shaders/ssao_blur_h.frag.spv: shaders/ssao_blur.frag
+bin/shaders/ssao_blur_v.frag.spv: shaders/ssao_blur.frag
 
 .PHONY: shaders
 shaders: $(BIN_SHADERS)
@@ -88,10 +91,11 @@ app: shaders
 		--xr_runtime=$$xr_runtime \
 		--window_width=$(WINDOW_WIDTH) \
 		--window_height=$(WINDOW_HEIGHT) \
+		--vk_max_msaa_samples=$(VK_MAX_MSAA_SAMPLES) \
 		--vk_sample_shading=$(VK_SAMPLE_SHADING) \
 		--vk_min_sample_shading=$(VK_MIN_SAMPLE_SHADING) \
 		--vk_mipmap_levels=$(VK_MIPMAP_LEVELS) \
-		--vk_anisotropy=$(VK_ANISOTROPY) \
+		--vk_max_anisotropy=$(VK_MAX_ANISOTROPY) \
 		--vk_preview=$(VK_PREVIEW) \
 		--vk_shadow_map_size=$(VK_SHADOW_MAP_SIZE) \
 		--vk_enable_depth_shadows=$(VK_ENABLE_DEPTH_SHADOWS) \
@@ -104,5 +108,11 @@ app: shaders
 		--vk_ssao_noise_size=$(VK_SSAO_NOISE_SIZE) \
 		--vk_ssao_radius=$(VK_SSAO_RADIUS) \
 		--vk_ssao_bias=$(VK_SSAO_BIAS) \
-		--vk_ssao_power=$(VK_SSAO_POWER)
-
+		--vk_ssao_power=$(VK_SSAO_POWER) \
+		--vk_ssao_depth_k=$(VK_SSAO_DEPTH_K) \
+		--vk_ssao_depth_gamma=$(VK_SSAO_DEPTH_GAMMA) \
+		--vk_ssao_debug=$(VK_SSAO_DEBUG) \
+		--vk_ssao_scale=$(VK_SSAO_SCALE) \
+		--vk_ssao_blur_radius=$(VK_SSAO_BLUR_RADIUS) \
+		--vk_ssao_blur_falloff=$(VK_SSAO_BLUR_FALLOFF) \
+		--vk_ssao_blur_depth_tolerance=$(VK_SSAO_BLUR_DEPTH_TOLERANCE)
