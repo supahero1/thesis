@@ -88,7 +88,10 @@ app: shaders
 		xr_runtime=wivrn; \
 	fi; \
 	cd thesis; $(VALGRIND_CALL) ./thesis_app \
+		--xr_enable=$(XR_ENABLE) \
 		--xr_runtime=$$xr_runtime \
+		--window_enable=$(WINDOW_ENABLE) \
+		--window_fullscreen=$(WINDOW_FULLSCREEN) \
 		--window_width=$(WINDOW_WIDTH) \
 		--window_height=$(WINDOW_HEIGHT) \
 		--vk_max_msaa_samples=$(VK_MAX_MSAA_SAMPLES) \

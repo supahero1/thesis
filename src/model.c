@@ -114,8 +114,7 @@ model_init(
 		printf("        - shininess: %.3f\n", material->shininess);
 
 		float shininess_strength;
-		status = aiGetMaterialFloatArray(sceneMaterial,
-			AI_MATKEY_SHININESS_STRENGTH, &shininess_strength, NULL);
+		status = aiGetMaterialFloatArray(sceneMaterial, AI_MATKEY_SHININESS_STRENGTH, &shininess_strength, NULL);
 		if(status != AI_SUCCESS)
 		{
 			shininess_strength = 1.0f;

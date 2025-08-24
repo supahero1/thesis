@@ -107,7 +107,7 @@ app_init(
 		);
 
 	app->vk = vk_init(app->simulation);
-	// app->xr = xr_init(app->simulation);
+	app->xr = xr_init(app->simulation);
 
 	return app;
 }

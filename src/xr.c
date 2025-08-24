@@ -1,4 +1,3 @@
-/* skip */
 /*
  *   Copyright 2025 Franciszek Balcerak
  *
@@ -16,61 +15,428 @@
  */
 
 #include <thesis/xr.h>
+#include <thesis/file.h>
 #include <thesis/debug.h>
-#include <thesis/openxr.h>
+#include <thesis/atomic.h>
 #include <thesis/shared.h>
 #include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <volk.h>
+
+#define XR_USE_PLATFORM_WAYLAND
+#define XR_USE_GRAPHICS_API_VULKAN
+#include <openxr/openxr_platform.h>
+
 #include <string.h>
 
+#define VK_MAX_IMAGES 8
+#define VK_MAX_FRAMES 2
+#define VK_MAX_INSTANCES 128
+#define VK_POOL_SIZE 16
+#define VK_COMMANDS 8
+
+#define VK_WINDOW_WIDTH 1280
+#define VK_WINDOW_HEIGHT 720
+#define VK_WINDOW_SENSITIVITY 0.003f
+#define VK_WINDOW_SPEED 500.0f
+
+
+typedef enum vk_image_type
+{
+	VK_IMAGE_TYPE_DEPTH,
+	VK_IMAGE_TYPE_ATTACHMENT,
+	VK_IMAGE_TYPE_SAMPLED,
+	VK_IMAGE_TYPE_MULTISAMPLED,
+	VK_IMAGE_TYPE_TRANSIENT,
+	VK_IMAGE_TYPE_TEXTURE,
+	VK_IMAGE_TYPE_CUBE,
+	VK_IMAGE_TYPE_CUSTOM_FORMAT,
+	VK_IMAGE_TYPE_CUSTOM_SIZE,
+	MACRO_ENUM_BITS_EXP(VK_IMAGE_TYPE),
+
+	VK_IMAGE_TYPE_DEPTH_BIT			= MACRO_POWER_OF_2(VK_IMAGE_TYPE_DEPTH),
+	VK_IMAGE_TYPE_ATTACHMENT_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_ATTACHMENT),
+	VK_IMAGE_TYPE_SAMPLED_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_SAMPLED),
+	VK_IMAGE_TYPE_MULTISAMPLED_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_MULTISAMPLED),
+	VK_IMAGE_TYPE_TRANSIENT_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_TRANSIENT),
+	VK_IMAGE_TYPE_TEXTURE_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_TEXTURE),
+	VK_IMAGE_TYPE_CUBE_BIT			= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUBE),
+	VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUSTOM_FORMAT),
+	VK_IMAGE_TYPE_CUSTOM_SIZE_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUSTOM_SIZE),
+
+	VK_IMAGE_TYPE_TEXTURE_2D_BITS = VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_TEXTURE_BIT,
+	VK_IMAGE_TYPE_TEXTURE_CUBE_BITS = VK_IMAGE_TYPE_TEXTURE_2D_BITS | VK_IMAGE_TYPE_CUBE_BIT
+}
+vk_image_type_t;
+
+typedef struct vk_image
+{
+	str_t path;
+
+	void* data;
+	uint32_t size;
+	uint32_t width;
+	uint32_t height;
+	uint32_t levels;
+	uint32_t layers;
+
+	VkFormat format;
+	vk_image_type_t type;
+
+	VkImage image;
+	VkImageView view;
+	VkDeviceMemory memory;
+
+	VkImageAspectFlags aspect;
+	VkImageUsageFlags usage;
+	VkSampleCountFlagBits samples;
+}
+vk_image_t;
+
+typedef struct vk_buffer
+{
+	VkBuffer buffer;
+	VkDeviceMemory memory;
+}
+vk_buffer_t;
+
+typedef struct vk_shadow_vert_constant_data
+{
+	mat4 transform;
+}
+vk_shadow_vert_constant_data_t;
+
+typedef struct vk_shadow_vertex_data
+{
+	vec3 position;
+}
+vk_shadow_vertex_data_t;
+
+typedef struct vk_scene_vert_ubo_data
+{
+	mat4 projection;
+	mat4 view;
+	mat4 light_transform;
+	vec4 light_direction;
+	vec3 camera_position;
+}
+vk_scene_vert_ubo_data_t;
+
+typedef struct vk_mesh_vertex_data
+{
+	vec3 position;
+	vec3 normal;
+	vec2 coords;
+}
+vk_mesh_vertex_data_t;
+
+typedef struct vk_material_constant_data
+{
+	vec4 diffuse;
+	vec4 ambient;
+	float shininess;
+	float shininess_strength;
+}
+vk_material_constant_data_t;
+
+typedef struct vk_scene_frag_constant_data
+{
+	vec4 diffuse;
+	vec4 ambient;
+	float shininess;
+	float shininess_strength;
+
+	float near;
+}
+vk_scene_frag_constant_data_t;
+
+typedef struct vk_ssao_frag_ubo_data
+{
+	mat4 projection;
+}
+vk_ssao_frag_ubo_data_t;
+
+typedef struct vk_ssao_frag_kernel_ubo_data
+{
+	vec4 samples[];
+}
+vk_ssao_frag_kernel_ubo_data_t;
+
+typedef struct vk_skybox_constant_data
+{
+	mat4 transform;
+}
+vk_skybox_constant_data_t;
+
+typedef struct vk_skybox_vertex_data
+{
+	vec3 position;
+}
+vk_skybox_vertex_data_t;
+
+typedef struct vk_material
+{
+	vk_image_t texture;
+	vk_material_constant_data_t constant_data;
+	VkDescriptorSet set;
+}
+vk_material_t;
+
+typedef struct vk_mesh
+{
+	uint32_t material_idx;
+	uint32_t vertex_count;
+	uint32_t index_count;
+
+	vk_buffer_t shadow_vertex_buffer;
+	vk_buffer_t scene_vertex_buffer;
+	vk_buffer_t index_buffer;
+}
+vk_mesh_t;
+
+typedef struct vk_model
+{
+	vk_mesh_t* meshes;
+	uint32_t mesh_count;
+
+	vk_buffer_t instance_buffer;
+}
+vk_model_t;
+
+typedef struct vk_model_instance_data
+{
+	mat4 transform;
+}
+vk_model_instance_data_t;
+
+typedef struct vk_entities_per_model
+{
+	simulation_entity_data_t** entities;
+	uint32_t entities_used;
+	uint32_t entities_size;
+}
+vk_entities_per_model_t;
+
+typedef struct vk_frame_image
+{
+	vk_image_t image;
+	VkDescriptorSet set;
+}
+vk_frame_image_t;
+
+typedef struct vk_frame_buffer
+{
+	vk_buffer_t buffer;
+	VkDescriptorSet set;
+}
+vk_frame_buffer_t;
+
+typedef struct barrier vk_barrier_t;
+
+typedef struct frame
+{
+	struct
+	{
+		vk_frame_image_t map;
+
+		VkFramebuffer framebuffer;
+	}
+	shadow;
+
+	struct
+	{
+		vk_frame_buffer_t vert_ubo;
+
+		vk_frame_image_t position_ms;
+		vk_frame_image_t normal_ms;
+
+		vk_frame_image_t position;
+		vk_frame_image_t normal;
+		VkDescriptorSet set;
+
+		vk_frame_image_t map_ms;
+		vk_frame_image_t map;
+
+		vk_image_t depth;
+		VkFramebuffer framebuffer;
+	}
+	scene;
+
+	struct
+	{
+		vk_frame_buffer_t frag_ubo;
+
+		vk_frame_image_t map;
+
+		VkFramebuffer framebuffer;
+	}
+	ssao;
+
+	struct
+	{
+		vk_frame_image_t map;
+
+		VkFramebuffer framebuffer;
+	}
+	ssao_blur;
+
+	struct
+	{
+		VkImage image;
+		VkImageView image_view;
+		VkFramebuffer framebuffer;
+	}
+	output;
+
+	VkSemaphore semaphore;
+	vk_barrier_t* barrier;
+}
+vk_frame_t;
+
+struct barrier
+{
+	VkSemaphore semaphore;
+	VkFence fence;
+	VkCommandBuffer command_buffer;
+};
+
+typedef enum vk_preview
+{
+	VK_PREVIEW_NONE,
+	VK_PREVIEW_SHADOW_MAP,
+	VK_PREVIEW_SCENE_POSITION_MAP,
+	VK_PREVIEW_SCENE_NORMAL_MAP,
+	VK_PREVIEW_SCENE_MAP,
+	VK_PREVIEW_SSAO_MAP,
+	VK_PREVIEW_SSAO_BLUR_MAP,
+	MACRO_ENUM_BITS(VK_PREVIEW)
+}
+vk_preview_t;
+
+typedef struct vk_extent
+{
+	uint32_t width;
+	uint32_t height;
+	VkExtent2D extent;
+	VkViewport viewport;
+	VkRect2D scissor;
+}
+vk_extent_t;
+
+typedef struct vk_command
+{
+	VkCommandBuffer buffer;
+	VkFence fence;
+
+	vk_buffer_t staging_buffer;
+}
+vk_command_t;
+
+typedef struct vk_descriptor_pool vk_descriptor_pool_t;
+
+struct vk_descriptor_pool
+{
+	vk_descriptor_pool_t* next;
+	vk_descriptor_pool_t* prev;
+	vk_descriptor_pool_t* free_next;
+	vk_descriptor_pool_t* free_prev;
+
+	VkDescriptorPool pool;
+	uint32_t allocations;
+};
+
+typedef struct vk_descriptor_set_pool
+{
+	vk_descriptor_pool_t* head;
+	vk_descriptor_pool_t* free_head;
+	VkDescriptorPoolSize* sizes;
+	uint32_t size_count;
+	uint32_t refs;
+}
+vk_descriptor_set_pool_t;
+
+typedef struct vk_descriptor_set_layout
+{
+	VkDescriptorSetLayout layout;
+	vk_descriptor_set_pool_t* set_pool;
+	uint32_t multiplier;
+}
+vk_descriptor_set_layout_t;
 
 struct xr
 {
 	simulation_t simulation;
 
+	struct
+	{
+		bool xr_enable;
+
+		uint32_t max_msaa_samples;
+		bool sample_shading;
+		float min_sample_shading;
+		uint32_t mipmap_levels;
+		float max_anisotropy;
+		vk_preview_t preview;
+
+		uint32_t shadow_map_size;
+		bool enable_depth_shadows;
+		bool enable_backface_shadows;
+		bool enable_specular;
+		float shadow_value;
+		float lambert_start_angle;
+
+		bool enable_ssao;
+		uint32_t ssao_kernel_size;
+		uint32_t ssao_noise_size;
+		float ssao_radius;
+		float ssao_bias;
+		float ssao_power;
+		float ssao_depth_k;
+		float ssao_depth_gamma;
+		bool ssao_debug;
+		float ssao_scale;
+
+		float ssao_blur_radius;
+		float ssao_blur_falloff;
+		float ssao_blur_depth_tolerance;
+	}
+	options;
+
 #ifndef NDEBUG
-	XrDebugUtilsMessengerEXT xr_debug_messenger;
+	XrDebugUtilsMessengerEXT debug_messenger;
 #endif
 
-	XrInstance xr_instance;
-	XrSystemId xr_system;
-	XrSession xr_session;
+	XrInstance instance;
+	XrSystemId system;
+	XrSession session;
 
-	PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+	struct
+	{
+		PFN_vkGetInstanceProcAddr proc_addr_fn;
 
 #ifndef NDEBUG
-	VkDebugUtilsMessengerEXT vk_debug_messenger;
+		VkDebugUtilsMessengerEXT debug_messenger;
 #endif
 
-	VkInstance vk_instance;
+		VkInstance instance;
 
-	VkSurfaceKHR vk_surface;
-	VkSurfaceCapabilitiesKHR vk_surface_capabilities;
+		VkSurfaceKHR surface;
+		VkSurfaceCapabilitiesKHR surface_capabilities;
 
-	VkPhysicalDevice vk_physical_device;
-	uint32_t vk_queue_id;
+		VkPhysicalDevice physical_device;
+		uint32_t queue_id;
 
-	VkDevice vk_device;
-	struct VolkDeviceTable vk_table;
-	VkQueue vk_queue;
+		VkDevice device;
+		struct VolkDeviceTable table;
+		VkQueue queue;
 
-	VkSampleCountFlagBits vk_samples;
-	VkPhysicalDeviceLimits vk_device_limits;
-	VkPhysicalDeviceMemoryProperties vk_memory_properties;
-
-
-	VkCommandPool vk_command_pool;
-	VkCommandBuffer vk_command_buffer;
-	VkFence vk_fence;
-
-	VkExtent2D extent;
-	uint32_t min_image_count;
-	VkSurfaceTransformFlagBitsKHR transform;
-	VkPresentModeKHR present_mode;
+		VkSampleCountFlagBits samples;
+		VkPhysicalDeviceLimits device_limits;
+		VkPhysicalDeviceMemoryProperties memory_properties;
+	}
+	vk;
 };
 
 
@@ -119,6 +485,57 @@ private const char* xr_vk_device_layers[] =
 };
 
 
+private vk_skybox_vertex_data_t xr_vk_skybox_vertex_data[] =
+{
+	{ { -1.0f, -1.0f, -1.0f } },
+	{ { -1.0f, -1.0f,  1.0f } },
+	{ { -1.0f,  1.0f, -1.0f } },
+	{ { -1.0f,  1.0f,  1.0f } },
+	{ {  1.0f, -1.0f, -1.0f } },
+	{ {  1.0f, -1.0f,  1.0f } },
+	{ {  1.0f,  1.0f, -1.0f } },
+	{ {  1.0f,  1.0f,  1.0f } },
+};
+
+private uint16_t xr_vk_skybox_index_data[] =
+{
+	0, 1, 2, 2, 1, 3,
+	4, 6, 5, 5, 6, 7,
+	0, 4, 1, 1, 4, 5,
+	2, 3, 6, 6, 3, 7,
+	0, 2, 4, 4, 2, 6,
+	1, 5, 3, 3, 5, 7
+};
+
+
+private VkPipelineColorBlendAttachmentState xr_vk_no_blending_attachment =
+{
+	.blendEnable = VK_FALSE,
+	.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+	.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+	.colorBlendOp = VK_BLEND_OP_ADD,
+	.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+	.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+	.alphaBlendOp = VK_BLEND_OP_ADD,
+	.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+};
+
+
+private VkPipelineColorBlendAttachmentState xr_vk_blending_attachment =
+{
+	.blendEnable = VK_TRUE,
+	.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+	.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+	.colorBlendOp = VK_BLEND_OP_ADD,
+	.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+	.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+	.alphaBlendOp = VK_BLEND_OP_ADD,
+	.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+};
+
+
 private void
 xr_init_options(
 	xr_t xr
@@ -128,6 +545,109 @@ xr_init_options(
 
 	puts("\nXR options:");
 
+	xr->options.xr_enable =
+		options_get_boolean(global_options, "xr_enable", true);
+	printf("- xr_enable: %d\n", xr->options.xr_enable);
+
+	xr->options.max_msaa_samples =
+		options_get_i64(global_options, "vk_max_msaa_samples", 1, 64, 8);
+	printf("- max_msaa_samples: %u\n", xr->options.max_msaa_samples);
+
+	xr->options.sample_shading =
+		options_get_boolean(global_options, "vk_sample_shading", false);
+	printf("- sample_shading: %d\n", xr->options.sample_shading);
+
+	xr->options.min_sample_shading =
+		options_get_f32(global_options, "vk_min_sample_shading", 0.0f, 1.0f, 0.2f);
+	printf("- min_sample_shading: %.2f\n", xr->options.min_sample_shading);
+
+	xr->options.mipmap_levels =
+		options_get_i64(global_options, "vk_mipmap_levels", 0, 16, 3);
+	printf("- mipmap_levels: %u\n", xr->options.mipmap_levels);
+
+	xr->options.max_anisotropy =
+		options_get_f32(global_options, "vk_max_anisotropy", 0.0f, 100.0f, 100.0f);
+	printf("- max_anisotropy: %.1f\n", xr->options.max_anisotropy);
+
+	xr->options.preview =
+		options_get_i64(global_options, "vk_preview", 0, VK_PREVIEW__COUNT - 1, VK_PREVIEW_NONE);
+	printf("- preview: %d\n", xr->options.preview);
+
+	xr->options.shadow_map_size =
+		options_get_i64(global_options, "vk_shadow_map_size", 1, 16384, 4096);
+	printf("- shadow_map_size: %u\n", xr->options.shadow_map_size);
+
+	xr->options.enable_depth_shadows =
+		options_get_boolean(global_options, "vk_enable_depth_shadows", true);
+	printf("- enable_depth_shadows: %d\n", xr->options.enable_depth_shadows);
+
+	xr->options.enable_backface_shadows =
+		options_get_boolean(global_options, "vk_enable_backface_shadows", true);
+	printf("- enable_backface_shadows: %d\n", xr->options.enable_backface_shadows);
+
+	xr->options.enable_specular =
+		options_get_boolean(global_options, "vk_enable_specular", true);
+	printf("- enable_specular: %d\n", xr->options.enable_specular);
+
+	xr->options.shadow_value =
+		options_get_f32(global_options, "vk_shadow_value", 0.0f, 1.0f, 0.2f);
+	printf("- shadow_value: %.2f\n", xr->options.shadow_value);
+
+	xr->options.lambert_start_angle =
+		options_get_f32(global_options, "vk_lambert_start_angle", 0.0f, 90.0f, 80.0f);
+	printf("- lambert_start_angle: %.1f\n", xr->options.lambert_start_angle);
+
+	xr->options.enable_ssao =
+		options_get_boolean(global_options, "vk_enable_ssao", true);
+	printf("- enable_ssao: %d\n", xr->options.enable_ssao);
+
+	xr->options.ssao_kernel_size =
+		options_get_i64(global_options, "vk_ssao_kernel_size", 1, 256, 40);
+	printf("- ssao_kernel_size: %u\n", xr->options.ssao_kernel_size);
+
+	xr->options.ssao_noise_size =
+		options_get_i64(global_options, "vk_ssao_noise_size", 1, 64, 4);
+	printf("- ssao_noise_size: %u\n", xr->options.ssao_noise_size);
+
+	xr->options.ssao_radius =
+		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 64.0f, 6.0f);
+	printf("- ssao_radius: %.2f\n", xr->options.ssao_radius);
+
+	xr->options.ssao_bias =
+		options_get_f32(global_options, "vk_ssao_bias", 0.0f, 1.0f, 0.05f);
+	printf("- ssao_bias: %.3f\n", xr->options.ssao_bias);
+
+	xr->options.ssao_power =
+		options_get_f32(global_options, "vk_ssao_power", 0.0f, 5.0f, 2.0f);
+	printf("- ssao_power: %.2f\n", xr->options.ssao_power);
+
+	xr->options.ssao_depth_k =
+		options_get_f32(global_options, "vk_ssao_depth_k", 0.0f, 1.0f, 0.007f);
+	printf("- ssao_depth_k: %.4f\n", xr->options.ssao_depth_k);
+
+	xr->options.ssao_depth_gamma =
+		options_get_f32(global_options, "vk_ssao_depth_gamma", 0.0f, 8.0f, 1.5f);
+	printf("- ssao_depth_gamma: %.2f\n", xr->options.ssao_depth_gamma);
+
+	xr->options.ssao_debug =
+		options_get_boolean(global_options, "vk_ssao_debug", false);
+	printf("- ssao_debug: %d\n", xr->options.ssao_debug);
+
+	xr->options.ssao_scale =
+		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 1.0f);
+	printf("- ssao_scale: %.2f\n", xr->options.ssao_scale);
+
+	xr->options.ssao_blur_radius =
+		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 4.0f);
+	printf("- ssao_blur_radius: %.2f\n", xr->options.ssao_blur_radius);
+
+	xr->options.ssao_blur_falloff =
+		options_get_f32(global_options, "vk_ssao_blur_falloff", 0.0f, 4.0f, 1.9f);
+	printf("- ssao_blur_falloff: %.2f\n", xr->options.ssao_blur_falloff);
+
+	xr->options.ssao_blur_depth_tolerance =
+		options_get_f32(global_options, "vk_ssao_blur_depth_tolerance", 0.0f, 16.0f, 2.0f);
+	printf("- ssao_blur_depth_tolerance: %.2f\n", xr->options.ssao_blur_depth_tolerance);
 }
 
 
@@ -161,7 +681,7 @@ xr_vk_debug_callback(
 
 
 private void*
-xr_xr_get_func(
+xr_xr_load_func(
 	xr_t xr,
 	const char* name
 	)
@@ -170,8 +690,8 @@ xr_xr_get_func(
 	assert_not_null(name);
 
 	PFN_xrVoidFunction func;
-	XrResult xr_result = xrGetInstanceProcAddr(xr->xr_instance, name, &func);
-	assert_eq(xr_result, XR_SUCCESS);
+	XrResult result = xrGetInstanceProcAddr(xr->instance, name, &func);
+	hard_assert_eq(result, XR_SUCCESS, fprintf(stderr, "XR function %s not found\n", name));
 	assert_not_null(func);
 
 	return func;
@@ -179,7 +699,7 @@ xr_xr_get_func(
 
 
 private void*
-xr_vk_get_func(
+xr_vk_load_func(
 	xr_t xr,
 	const char* name
 	)
@@ -187,26 +707,10 @@ xr_vk_get_func(
 	assert_not_null(xr);
 	assert_not_null(name);
 
-	void* func = xr->vkGetInstanceProcAddr(xr->vk_instance, name);
-	assert_not_null(func);
+	void* func = xr->vk.proc_addr_fn(xr->vk.instance, name);
+	hard_assert_not_null(func, fprintf(stderr, "VK function %s not found\n", name));
 
 	return func;
-}
-
-
-private void
-xr_free_str_array(
-	const char** start,
-	const char** end
-	)
-{
-	assert_not_null(start);
-	assert_not_null(end);
-
-	while(start < end)
-	{
-		free((void*) *(start++));
-	}
 }
 
 
@@ -219,61 +723,61 @@ xr_xr_get_instance_extensions(
 	assert_not_null(xr);
 	assert_not_null(extension);
 
-	uint32_t xr_instance_extension_count = 0;
-	XrResult xr_result = xrEnumerateInstanceExtensionProperties(
-		NULL, 0, &xr_instance_extension_count, NULL);
+	uint32_t available_instance_extension_count = 0;
+	XrResult result = xrEnumerateInstanceExtensionProperties(NULL, 0, &available_instance_extension_count, NULL);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	XrExtensionProperties xr_instance_extensions[xr_instance_extension_count];
+	XrExtensionProperties available_instance_extensions[available_instance_extension_count];
 
-	XrExtensionProperties* xr_instance_extension = xr_instance_extensions;
-	XrExtensionProperties* xr_instance_extension_end =
-		xr_instance_extension + xr_instance_extension_count;
+	XrExtensionProperties* available_instance_extension = available_instance_extensions;
+	XrExtensionProperties* available_instance_extension_end =
+		available_instance_extension + available_instance_extension_count;
 
-	while(xr_instance_extension < xr_instance_extension_end)
+	while(available_instance_extension < available_instance_extension_end)
 	{
-		*(xr_instance_extension++) = (XrExtensionProperties){XR_TYPE_EXTENSION_PROPERTIES};
+		*(available_instance_extension++) = (XrExtensionProperties){XR_TYPE_EXTENSION_PROPERTIES};
 	}
 
-	xr_result = xrEnumerateInstanceExtensionProperties(NULL,
-		xr_instance_extension_count, &xr_instance_extension_count, xr_instance_extensions);
-	assert_eq(xr_result, XR_SUCCESS);
+	result = xrEnumerateInstanceExtensionProperties(NULL,
+		available_instance_extension_count, &available_instance_extension_count, available_instance_extensions);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	puts("XR instance extensions:");
+	puts("\nXR instance extensions:");
 
 	for(
-		xr_instance_extension = xr_instance_extensions;
-		xr_instance_extension < xr_instance_extension_end;
-		xr_instance_extension++
+		available_instance_extension = available_instance_extensions;
+		available_instance_extension < available_instance_extension_end;
+		available_instance_extension++
 		)
 	{
-		printf("- %s\n", xr_instance_extension->extensionName);
+		printf("- %s\n", available_instance_extension->extensionName);
 	}
 
 	puts("");
 
-	const char* const* xr_xr_instance_extension = xr_xr_instance_extensions;
-	const char* const* xr_xr_instance_extension_end =
-		xr_xr_instance_extension + MACRO_ARRAY_LEN(xr_xr_instance_extensions);
+	const char* const* instance_extension = xr_xr_instance_extensions;
+	const char* const* instance_extension_end = instance_extension + MACRO_ARRAY_LEN(xr_xr_instance_extensions);
 
-	while(xr_xr_instance_extension < xr_xr_instance_extension_end)
+	while(instance_extension < instance_extension_end)
 	{
 		bool found = false;
-		const char* extension_name = *(xr_xr_instance_extension++);
+		const char* extension_name = *(instance_extension++);
 
-		xr_instance_extension = xr_instance_extensions;
-		while(xr_instance_extension < xr_instance_extension_end)
+		available_instance_extension = available_instance_extensions;
+		while(available_instance_extension < available_instance_extension_end)
 		{
-			if(strcmp(extension_name, xr_instance_extension->extensionName) == 0)
+			if(strcmp(extension_name, available_instance_extension->extensionName) == 0)
 			{
 				found = true;
 				break;
 			}
 
-			xr_instance_extension++;
+			available_instance_extension++;
 		}
 
-		assert_true(found, fprintf(stderr, "XR instance extension %s not found\n", extension_name));
-		*(extension++) = strdup(extension_name);
+		hard_assert_true(found, fprintf(stderr, "XR instance extension %s not found\n", extension_name));
+		printf("+ %s\n", extension_name);
+		*(extension++) = cstr_init(extension_name);
 	}
 
 	return extension;
@@ -289,61 +793,60 @@ xr_xr_get_instance_layers(
 	assert_not_null(xr);
 	assert_not_null(layer);
 
-	uint32_t xr_instance_layer_count = 0;
-	XrResult xr_result = xrEnumerateApiLayerProperties(0, &xr_instance_layer_count, NULL);
-	assert_eq(xr_result, XR_SUCCESS);
+	uint32_t available_instance_layer_count = 0;
+	XrResult result = xrEnumerateApiLayerProperties(0, &available_instance_layer_count, NULL);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	XrApiLayerProperties xr_instance_layers[xr_instance_layer_count];
+	XrApiLayerProperties available_instance_layers[available_instance_layer_count];
 
-	XrApiLayerProperties* xr_instance_layer = xr_instance_layers;
-	XrApiLayerProperties* xr_instance_layer_end =
-		xr_instance_layer + xr_instance_layer_count;
+	XrApiLayerProperties* available_instance_layer = available_instance_layers;
+	XrApiLayerProperties* available_instance_layer_end = available_instance_layer + available_instance_layer_count;
 
-	while(xr_instance_layer < xr_instance_layer_end)
+	while(available_instance_layer < available_instance_layer_end)
 	{
-		*(xr_instance_layer++) = (XrApiLayerProperties){XR_TYPE_API_LAYER_PROPERTIES};
+		*(available_instance_layer++) = (XrApiLayerProperties){XR_TYPE_API_LAYER_PROPERTIES};
 	}
 
-	xr_result = xrEnumerateApiLayerProperties(
-		xr_instance_layer_count, &xr_instance_layer_count, xr_instance_layers);
-	assert_eq(xr_result, XR_SUCCESS);
+	result = xrEnumerateApiLayerProperties(available_instance_layer_count,
+		&available_instance_layer_count, available_instance_layers);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	puts("XR instance layers:");
+	puts("\nXR instance layers:");
 
 	for(
-		xr_instance_layer = xr_instance_layers;
-		xr_instance_layer < xr_instance_layer_end;
-		xr_instance_layer++
+		available_instance_layer = available_instance_layers;
+		available_instance_layer < available_instance_layer_end;
+		available_instance_layer++
 		)
 	{
-		printf("- %s\n", xr_instance_layer->layerName);
+		printf("- %s\n", available_instance_layer->layerName);
 	}
 
 	puts("");
 
-	const char* const* xr_xr_instance_layer = xr_xr_instance_layers;
-	const char* const* xr_xr_instance_layer_end =
-		xr_xr_instance_layer + MACRO_ARRAY_LEN(xr_xr_instance_layers);
+	const char* const* instance_layer = xr_xr_instance_layers;
+	const char* const* instance_layer_end = instance_layer + MACRO_ARRAY_LEN(xr_xr_instance_layers);
 
-	while(xr_xr_instance_layer < xr_xr_instance_layer_end)
+	while(instance_layer < instance_layer_end)
 	{
 		bool found = false;
-		const char* layer_name = *(xr_xr_instance_layer++);
+		const char* layer_name = *(instance_layer++);
 
-		xr_instance_layer = xr_instance_layers;
-		while(xr_instance_layer < xr_instance_layer_end)
+		available_instance_layer = available_instance_layers;
+		while(available_instance_layer < available_instance_layer_end)
 		{
-			if(strcmp(layer_name, xr_instance_layer->layerName) == 0)
+			if(strcmp(layer_name, available_instance_layer->layerName) == 0)
 			{
 				found = true;
 				break;
 			}
 
-			xr_instance_layer++;
+			available_instance_layer++;
 		}
 
-		assert_true(found, fprintf(stderr, "XR instance layer %s not found\n", layer_name));
-		*(layer++) = strdup(layer_name);
+		hard_assert_true(found, fprintf(stderr, "XR instance layer %s not found\n", layer_name));
+		printf("+ %s\n", layer_name);
+		*(layer++) = cstr_init(layer_name);
 	}
 
 	return layer;
@@ -357,19 +860,15 @@ xr_init_xr_instance(
 {
 	assert_not_null(xr);
 
-	const char* xr_instance_extensions[64];
-	const char** xr_instance_extension =
-		xr_xr_get_instance_extensions(xr, xr_instance_extensions);
-	assert_lt(xr_instance_extension,
-		xr_instance_extensions + MACRO_ARRAY_LEN(xr_instance_extensions));
+	const char* instance_extensions[64];
+	const char** instance_extension = xr_xr_get_instance_extensions(xr, instance_extensions);
+	assert_lt(instance_extension, instance_extensions + MACRO_ARRAY_LEN(instance_extensions));
 
-	const char* xr_instance_layers[64];
-	const char** xr_instance_layer =
-		xr_xr_get_instance_layers(xr, xr_instance_layers);
-	assert_lt(xr_instance_layer,
-		xr_instance_layers + MACRO_ARRAY_LEN(xr_instance_layers));
+	const char* instance_layers[64];
+	const char** instance_layer = xr_xr_get_instance_layers(xr, instance_layers);
+	assert_lt(instance_layer, instance_layers + MACRO_ARRAY_LEN(instance_layers));
 
-	XrInstanceCreateInfo xr_instance_info =
+	XrInstanceCreateInfo instance_info =
 	{
 		.type = XR_TYPE_INSTANCE_CREATE_INFO,
 		.next = NULL,
@@ -378,16 +877,16 @@ xr_init_xr_instance(
 		{
 			.apiVersion = XR_CURRENT_API_VERSION
 		},
-		.enabledExtensionCount = xr_instance_extension - xr_instance_extensions,
-		.enabledExtensionNames = xr_instance_extensions,
-		.enabledApiLayerCount = xr_instance_layer - xr_instance_layers,
-		.enabledApiLayerNames = xr_instance_layers,
+		.enabledExtensionCount = instance_extension - instance_extensions,
+		.enabledExtensionNames = instance_extensions,
+		.enabledApiLayerCount = instance_layer - instance_layers,
+		.enabledApiLayerNames = instance_layers,
 	};
 
-	strcpy(xr_instance_info.applicationInfo.applicationName, "Thesis");
+	strcpy(instance_info.applicationInfo.applicationName, "Thesis");
 
 #ifndef NDEBUG
-	XrDebugUtilsMessengerCreateInfoEXT xr_debug_info =
+	XrDebugUtilsMessengerCreateInfoEXT debug_info =
 	{
 		.type = XR_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 		.next = NULL,
@@ -405,65 +904,64 @@ xr_init_xr_instance(
 		.userData = NULL
 	};
 
-	xr_instance_info.next = &xr_debug_info;
+	instance_info.next = &debug_info;
 #endif
 
-	XrResult xr_result = xrCreateInstance(&xr_instance_info, &xr->xr_instance);
-	assert_eq(xr_result, XR_SUCCESS);
+	XrResult result = xrCreateInstance(&instance_info, &xr->instance);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	xr_free_str_array(xr_instance_extensions, xr_instance_extension);
-	xr_free_str_array(xr_instance_layers, xr_instance_layer);
+	shared_free_str_array(instance_extensions, instance_extension);
+	shared_free_str_array(instance_layers, instance_layer);
 
 #ifndef NDEBUG
 	PFN_xrCreateDebugUtilsMessengerEXT xrCreateDebugUtilsMessengerEXT =
-		xr_xr_get_func(xr, "xrCreateDebugUtilsMessengerEXT");
+		xr_xr_load_func(xr, "xrCreateDebugUtilsMessengerEXT");
 
-	xr_result = xrCreateDebugUtilsMessengerEXT(
-		xr->xr_instance, &xr_debug_info, &xr->xr_debug_messenger);
-	assert_eq(xr_result, XR_SUCCESS);
+	result = xrCreateDebugUtilsMessengerEXT(xr->instance, &debug_info, &xr->debug_messenger);
+	hard_assert_eq(result, XR_SUCCESS);
 #endif
 
-	XrInstanceProperties xr_instance_properties = {XR_TYPE_INSTANCE_PROPERTIES};
-	xr_result = xrGetInstanceProperties(xr->xr_instance, &xr_instance_properties);
-	assert_eq(xr_result, XR_SUCCESS);
+	XrInstanceProperties instance_properties = {XR_TYPE_INSTANCE_PROPERTIES};
+	result = xrGetInstanceProperties(xr->instance, &instance_properties);
+	hard_assert_eq(result, XR_SUCCESS);
 
 	printf(
-		"XR runtime: '%s' ver. %u.%u.%u\n",
-		xr_instance_properties.runtimeName,
-		XR_VERSION_MAJOR(xr_instance_properties.runtimeVersion),
-		XR_VERSION_MINOR(xr_instance_properties.runtimeVersion),
-		XR_VERSION_PATCH(xr_instance_properties.runtimeVersion)
+		"\nXR runtime: '%s' ver. %u.%u.%u\n",
+		instance_properties.runtimeName,
+		XR_VERSION_MAJOR(instance_properties.runtimeVersion),
+		XR_VERSION_MINOR(instance_properties.runtimeVersion),
+		XR_VERSION_PATCH(instance_properties.runtimeVersion)
 		);
 
-	XrSystemGetInfo xr_system_info =
+	XrSystemGetInfo system_info =
 	{
 		.type = XR_TYPE_SYSTEM_GET_INFO,
 		.next = NULL,
 		.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY
 	};
-	xr_result = xrGetSystem(xr->xr_instance, &xr_system_info, &xr->xr_system);
-	assert_eq(xr_result, XR_SUCCESS);
+	result = xrGetSystem(xr->instance, &system_info, &xr->system);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	XrSystemHandTrackingPropertiesEXT xr_hand_tracking_properties =
+	XrSystemHandTrackingPropertiesEXT hand_tracking_properties =
 	{
 		.type = XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT,
 		.next = NULL,
 		.supportsHandTracking = false
 	};
 
-	XrSystemProperties xr_system_properties = {
+	XrSystemProperties system_properties =
+	{
 		.type = XR_TYPE_SYSTEM_PROPERTIES,
-		.next = &xr_hand_tracking_properties
+		.next = &hand_tracking_properties
 	};
 
-	xr_result = xrGetSystemProperties(xr->xr_instance,
-		xr->xr_system, &xr_system_properties);
-	assert_eq(xr_result, XR_SUCCESS);
+	result = xrGetSystemProperties(xr->instance, xr->system, &system_properties);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	assert_true(xr_hand_tracking_properties.supportsHandTracking);
+	hard_assert_true(hand_tracking_properties.supportsHandTracking);
 
-	printf("XR system: %s\n", xr_system_properties.systemName);
-	printf("XR system vendor: %u\n", xr_system_properties.vendorId);
+	printf("\nXR system: %s\n", system_properties.systemName);
+	printf("XR system vendor: %u\n", system_properties.vendorId);
 	printf(
 		"XR system properties:\n"
 		"\tmaxSwapchainImageHeight: %u\n"
@@ -471,11 +969,11 @@ xr_init_xr_instance(
 		"\tmaxLayerCount: %u\n"
 		"\torientationTracking: %d\n"
 		"\tpositionTracking: %d\n",
-		xr_system_properties.graphicsProperties.maxSwapchainImageHeight,
-		xr_system_properties.graphicsProperties.maxSwapchainImageWidth,
-		xr_system_properties.graphicsProperties.maxLayerCount,
-		xr_system_properties.trackingProperties.orientationTracking,
-		xr_system_properties.trackingProperties.positionTracking
+		system_properties.graphicsProperties.maxSwapchainImageHeight,
+		system_properties.graphicsProperties.maxSwapchainImageWidth,
+		system_properties.graphicsProperties.maxLayerCount,
+		system_properties.trackingProperties.orientationTracking,
+		system_properties.trackingProperties.positionTracking
 		);
 }
 
@@ -489,12 +987,13 @@ xr_free_xr_instance(
 
 #ifndef NDEBUG
 	PFN_xrDestroyDebugUtilsMessengerEXT xrDestroyDebugUtilsMessengerEXT =
-		xr_xr_get_func(xr, "xrDestroyDebugUtilsMessengerEXT");
+		xr_xr_load_func(xr, "xrDestroyDebugUtilsMessengerEXT");
 
-	xrDestroyDebugUtilsMessengerEXT(xr->xr_debug_messenger);
+	XrResult result = xrDestroyDebugUtilsMessengerEXT(xr->debug_messenger);
+	hard_assert_eq(result, XR_SUCCESS);
 #endif
 
-	xrDestroyInstance(xr->xr_instance);
+	xrDestroyInstance(xr->instance);
 }
 
 
@@ -507,92 +1006,61 @@ xr_vk_get_instance_extensions(
 	assert_not_null(xr);
 	assert_not_null(extension);
 
-	uint32_t vk_instance_extension_count = 0;
-	VkResult vk_result = vkEnumerateInstanceExtensionProperties(
-		NULL, &vk_instance_extension_count, NULL);
-	assert_eq(vk_result, VK_SUCCESS);
+	uint32_t available_instance_extension_count = 0;
+	VkResult result = vkEnumerateInstanceExtensionProperties(NULL, &available_instance_extension_count, NULL);
+	hard_assert_eq(result, VK_SUCCESS);
 
-	VkExtensionProperties vk_instance_extensions[vk_instance_extension_count];
+	VkExtensionProperties available_instance_extensions[available_instance_extension_count];
 
-	VkExtensionProperties* vk_instance_extension = vk_instance_extensions;
-	VkExtensionProperties* vk_instance_extension_end =
-		vk_instance_extension + vk_instance_extension_count;
+	VkExtensionProperties* available_instance_extension = available_instance_extensions;
+	VkExtensionProperties* available_instance_extension_end =
+		available_instance_extension + available_instance_extension_count;
 
-	while(vk_instance_extension < vk_instance_extension_end)
+	while(available_instance_extension < available_instance_extension_end)
 	{
-		*(vk_instance_extension++) = (VkExtensionProperties){0};
+		*(available_instance_extension++) = (VkExtensionProperties){0};
 	}
 
-	vk_result = vkEnumerateInstanceExtensionProperties(
-		NULL, &vk_instance_extension_count, vk_instance_extensions);
-	assert_eq(vk_result, VK_SUCCESS);
+	result = vkEnumerateInstanceExtensionProperties(NULL,
+		&available_instance_extension_count, available_instance_extensions);
+	hard_assert_eq(result, VK_SUCCESS);
 
-	puts("VK instance extensions:");
+	puts("\nVK instance extensions:");
 
 	for(
-		vk_instance_extension = vk_instance_extensions;
-		vk_instance_extension < vk_instance_extension_end;
-		vk_instance_extension++
+		available_instance_extension = available_instance_extensions;
+		available_instance_extension < available_instance_extension_end;
+		available_instance_extension++
 		)
 	{
-		printf("- %s\n", vk_instance_extension->extensionName);
+		printf("- %s\n", available_instance_extension->extensionName);
 	}
 
 	puts("");
 
-	const char* const* xr_vk_instance_extension = xr_vk_instance_extensions;
-	const char* const* xr_vk_instance_extension_end =
-		xr_vk_instance_extension + MACRO_ARRAY_LEN(xr_vk_instance_extensions);
+	const char* const* instance_extension = xr_vk_instance_extensions;
+	const char* const* instance_extension_end = instance_extension + MACRO_ARRAY_LEN(xr_vk_instance_extensions);
 
-	while(xr_vk_instance_extension < xr_vk_instance_extension_end)
+	while(instance_extension < instance_extension_end)
 	{
 		bool found = false;
-		const char* extension_name = *(xr_vk_instance_extension++);
+		const char* extension_name = *(instance_extension++);
 
-		vk_instance_extension = vk_instance_extensions;
-		while(vk_instance_extension < vk_instance_extension_end)
+		available_instance_extension = available_instance_extensions;
+		while(available_instance_extension < available_instance_extension_end)
 		{
-			if(strcmp(extension_name, vk_instance_extension->extensionName) == 0)
+			if(strcmp(extension_name, available_instance_extension->extensionName) == 0)
 			{
 				found = true;
 				break;
 			}
 
-			vk_instance_extension++;
+			available_instance_extension++;
 		}
 
-		assert_true(found, fprintf(stderr, "VK instance extension %s not found\n", extension_name));
-		*(extension++) = strdup(extension_name);
-	}
-
-	uint32_t sdl_instance_extension_count = 0;
-	const char* const* sdl_instance_extensions =
-		window_get_vulkan_extensions(&sdl_instance_extension_count);
-	assert_ptr(sdl_instance_extensions, sdl_instance_extension_count);
-
-	const char* const* sdl_instance_extension = sdl_instance_extensions;
-	const char* const* sdl_instance_extension_end =
-		sdl_instance_extension + sdl_instance_extension_count;
-
-	while(sdl_instance_extension < sdl_instance_extension_end)
-	{
-		bool found = false;
-		const char* extension_name = *(sdl_instance_extension++);
-
-		vk_instance_extension = vk_instance_extensions;
-		while(vk_instance_extension < vk_instance_extension_end)
-		{
-			if(strcmp(extension_name, vk_instance_extension->extensionName) == 0)
-			{
-				found = true;
-				break;
-			}
-
-			vk_instance_extension++;
-		}
-
-		assert_true(found, fprintf(stderr, "SDL VK instance extension %s not found\n", extension_name));
-		*(extension++) = strdup(extension_name);
+		hard_assert_true(found, fprintf(stderr, "VK instance extension %s not found\n", extension_name));
+		printf("+ %s\n", extension_name);
+		*(extension++) = cstr_init(extension_name);
 	}
 
 	return extension;
@@ -608,60 +1076,59 @@ xr_vk_get_instance_layers(
 	assert_not_null(xr);
 	assert_not_null(layer);
 
-	uint32_t vk_instance_layer_count = 0;
-	VkResult vk_result = vkEnumerateInstanceLayerProperties(&vk_instance_layer_count, NULL);
-	assert_eq(vk_result, VK_SUCCESS);
+	uint32_t available_instance_layer_count = 0;
+	VkResult result = vkEnumerateInstanceLayerProperties(&available_instance_layer_count, NULL);
+	hard_assert_eq(result, VK_SUCCESS);
 
-	VkLayerProperties vk_instance_layers[vk_instance_layer_count];
+	VkLayerProperties available_instance_layers[available_instance_layer_count];
 
-	VkLayerProperties* vk_instance_layer = vk_instance_layers;
-	VkLayerProperties* vk_instance_layer_end =
-		vk_instance_layer + vk_instance_layer_count;
+	VkLayerProperties* available_instance_layer = available_instance_layers;
+	VkLayerProperties* available_instance_layer_end = available_instance_layer + available_instance_layer_count;
 
-	while(vk_instance_layer < vk_instance_layer_end)
+	while(available_instance_layer < available_instance_layer_end)
 	{
-		*(vk_instance_layer++) = (VkLayerProperties){0};
+		*(available_instance_layer++) = (VkLayerProperties){0};
 	}
 
-	vk_result = vkEnumerateInstanceLayerProperties(&vk_instance_layer_count, vk_instance_layers);
-	assert_eq(vk_result, VK_SUCCESS);
+	result = vkEnumerateInstanceLayerProperties(&available_instance_layer_count, available_instance_layers);
+	hard_assert_eq(result, VK_SUCCESS);
 
-	puts("VK instance layers:");
+	puts("\nVK instance layers:");
 
 	for(
-		vk_instance_layer = vk_instance_layers;
-		vk_instance_layer < vk_instance_layer_end;
-		vk_instance_layer++
+		available_instance_layer = available_instance_layers;
+		available_instance_layer < available_instance_layer_end;
+		available_instance_layer++
 		)
 	{
-		printf("- %s\n", vk_instance_layer->layerName);
+		printf("- %s\n", available_instance_layer->layerName);
 	}
 
 	puts("");
 
-	const char* const* xr_vk_instance_layer = xr_vk_instance_layers;
-	const char* const* xr_vk_instance_layer_end =
-		xr_vk_instance_layer + MACRO_ARRAY_LEN(xr_vk_instance_layers);
+	const char* const* instance_layer = xr_vk_instance_layers;
+	const char* const* instance_layer_end = instance_layer + MACRO_ARRAY_LEN(xr_vk_instance_layers);
 
-	while(xr_vk_instance_layer < xr_vk_instance_layer_end)
+	while(instance_layer < instance_layer_end)
 	{
 		bool found = false;
-		const char* layer_name = *(xr_vk_instance_layer++);
+		const char* layer_name = *(instance_layer++);
 
-		vk_instance_layer = vk_instance_layers;
-		while(vk_instance_layer < vk_instance_layer_end)
+		available_instance_layer = available_instance_layers;
+		while(available_instance_layer < available_instance_layer_end)
 		{
-			if(strcmp(layer_name, vk_instance_layer->layerName) == 0)
+			if(strcmp(layer_name, available_instance_layer->layerName) == 0)
 			{
 				found = true;
 				break;
 			}
 
-			vk_instance_layer++;
+			available_instance_layer++;
 		}
 
-		assert_true(found, fprintf(stderr, "VK instance layer %s not found\n", layer_name));
-		*(layer++) = strdup(layer_name);
+		hard_assert_true(found, fprintf(stderr, "VK instance layer %s not found\n", layer_name));
+		printf("+ %s\n", layer_name);
+		*(layer++) = cstr_init(layer_name);
 	}
 
 	return layer;
@@ -675,12 +1142,13 @@ xr_init_vk_instance(
 {
 	assert_not_null(xr);
 
-	xr->vkGetInstanceProcAddr = window_get_vulkan_proc_addr_fn();
-	assert_not_null(xr->vkGetInstanceProcAddr);
+	VkResult vk_result = volkInitialize();
+	hard_assert_eq(vk_result, VK_SUCCESS);
 
-	volkInitializeCustom(xr->vkGetInstanceProcAddr);
+	hard_assert_not_null(vkGetInstanceProcAddr);
+	xr->vk.proc_addr_fn = vkGetInstanceProcAddr;
 
-	XrGraphicsRequirementsVulkanKHR xr_xr_requirements =
+	XrGraphicsRequirementsVulkanKHR requirements =
 	{
 		.type = XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR,
 		.next = NULL,
@@ -689,25 +1157,20 @@ xr_init_vk_instance(
 	};
 
 	PFN_xrGetVulkanGraphicsRequirementsKHR xrGetVulkanGraphicsRequirementsKHR =
-		xr_xr_get_func(xr, "xrGetVulkanGraphicsRequirementsKHR");
+		xr_xr_load_func(xr, "xrGetVulkanGraphicsRequirementsKHR");
 
-	XrResult xr_result = xrGetVulkanGraphicsRequirementsKHR(
-		xr->xr_instance, xr->xr_system, &xr_xr_requirements);
-	assert_eq(xr_result, XR_SUCCESS);
+	XrResult result = xrGetVulkanGraphicsRequirementsKHR(xr->instance, xr->system, &requirements);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	const char* vk_instance_extensions[64];
-	const char** vk_instance_extension =
-		xr_vk_get_instance_extensions(xr, vk_instance_extensions);
-	assert_lt(vk_instance_extension,
-		vk_instance_extensions + MACRO_ARRAY_LEN(vk_instance_extensions));
+	const char* instance_extensions[64];
+	const char** instance_extension = xr_vk_get_instance_extensions(xr, instance_extensions);
+	assert_lt(instance_extension, instance_extensions + MACRO_ARRAY_LEN(instance_extensions));
 
-	const char* vk_instance_layers[64];
-	const char** vk_instance_layer =
-		xr_vk_get_instance_layers(xr, vk_instance_layers);
-	assert_lt(vk_instance_layer,
-		vk_instance_layers + MACRO_ARRAY_LEN(vk_instance_layers));
+	const char* instance_layers[64];
+	const char** instance_layer = xr_vk_get_instance_layers(xr, instance_layers);
+	assert_lt(instance_layer, instance_layers + MACRO_ARRAY_LEN(instance_layers));
 
-	VkApplicationInfo vk_application_info =
+	VkApplicationInfo application_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		.pNext = NULL,
@@ -715,20 +1178,20 @@ xr_init_vk_instance(
 		.apiVersion = VK_API_VERSION_1_0
 	};
 
-	VkInstanceCreateInfo vk_instance_info =
+	VkInstanceCreateInfo instance_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.pApplicationInfo = &vk_application_info,
-		.enabledLayerCount = vk_instance_layer - vk_instance_layers,
-		.ppEnabledLayerNames = vk_instance_layers,
-		.enabledExtensionCount = vk_instance_extension - vk_instance_extensions,
-		.ppEnabledExtensionNames = vk_instance_extensions
+		.pApplicationInfo = &application_info,
+		.enabledLayerCount = instance_layer - instance_layers,
+		.ppEnabledLayerNames = instance_layers,
+		.enabledExtensionCount = instance_extension - instance_extensions,
+		.ppEnabledExtensionNames = instance_extensions
 	};
 
 #ifndef NDEBUG
-	VkDebugUtilsMessengerCreateInfoEXT vk_debug_info =
+	VkDebugUtilsMessengerCreateInfoEXT debug_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 		.pNext = NULL,
@@ -745,42 +1208,39 @@ xr_init_vk_instance(
 		.pUserData = NULL
 	};
 
-	vk_instance_info.pNext = &vk_debug_info;
+	instance_info.pNext = &debug_info;
 #endif
 
-	XrVulkanInstanceCreateInfoKHR xr_vk_instance_info =
+	XrVulkanInstanceCreateInfoKHR xr_instance_info =
 	{
 		.type = XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR,
 		.next = NULL,
-		.systemId = xr->xr_system,
+		.systemId = xr->system,
 		.createFlags = 0,
-		.pfnGetInstanceProcAddr = vkGetInstanceProcAddr,
-		.vulkanCreateInfo = &vk_instance_info,
+		.pfnGetInstanceProcAddr = xr->vk.proc_addr_fn,
+		.vulkanCreateInfo = &instance_info,
 		.vulkanAllocator = NULL
 	};
 
 	PFN_xrCreateVulkanInstanceKHR xrCreateVulkanInstanceKHR =
-		xr_xr_get_func(xr, "xrCreateVulkanInstanceKHR");
+		xr_xr_load_func(xr, "xrCreateVulkanInstanceKHR");
 
-	VkResult vk_result;
-	xr_result = xrCreateVulkanInstanceKHR(xr->xr_instance,
-		&xr_vk_instance_info, &xr->vk_instance, &vk_result);
-	assert_eq(xr_result, XR_SUCCESS);
-	assert_eq(vk_result, VK_SUCCESS);
+	result = xrCreateVulkanInstanceKHR(xr->instance, &xr_instance_info, &xr->vk.instance, &vk_result);
+	hard_assert_eq(result, XR_SUCCESS);
+	hard_assert_eq(vk_result, VK_SUCCESS);
 
-	xr_free_str_array(vk_instance_extensions, vk_instance_extension);
-	xr_free_str_array(vk_instance_layers, vk_instance_layer);
+	shared_free_str_array(instance_extensions, instance_extension);
+	shared_free_str_array(instance_layers, instance_layer);
 
 #ifndef NDEBUG
 	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT =
-		xr_vk_get_func(xr, "vkCreateDebugUtilsMessengerEXT");
+		xr_vk_load_func(xr, "vkCreateDebugUtilsMessengerEXT");
 
-	vk_result = vkCreateDebugUtilsMessengerEXT(xr->vk_instance,
-		&vk_debug_info, NULL, &xr->vk_debug_messenger);
-	assert_eq(vk_result, VK_SUCCESS);
+	vk_result = vkCreateDebugUtilsMessengerEXT(xr->vk.instance, &debug_info, NULL, &xr->vk.debug_messenger);
+	hard_assert_eq(vk_result, VK_SUCCESS);
 #endif
 
-	volkLoadInstanceOnly(xr->vk_instance);
+	volkLoadInstanceOnly(xr->vk.instance);
 }
 
 
@@ -793,11 +1253,10 @@ xr_free_vk_instance(
 
 #ifndef NDEBUG
 	/* Volk loaded the function already */
-	vkDestroyDebugUtilsMessengerEXT(
-		xr->vk_instance, xr->vk_debug_messenger, NULL);
+	vkDestroyDebugUtilsMessengerEXT(xr->vk.instance, xr->vk.debug_messenger, NULL);
 #endif
 
-	vkDestroyInstance(xr->vk_instance, NULL);
+	vkDestroyInstance(xr->vk.instance, NULL);
 
 	volkFinalize();
 }
@@ -814,26 +1273,26 @@ xr_init_vk_physical_device(
 	{
 		.type = XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR,
 		.next = NULL,
-		.systemId = xr->xr_system,
-		.vulkanInstance = xr->vk_instance
+		.systemId = xr->system,
+		.vulkanInstance = xr->vk.instance
 	};
 
 	PFN_xrGetVulkanGraphicsDevice2KHR xrGetVulkanGraphicsDevice2KHR =
-		xr_xr_get_func(xr, "xrGetVulkanGraphicsDevice2KHR");
+		xr_xr_load_func(xr, "xrGetVulkanGraphicsDevice2KHR");
 
 	XrResult xr_result = xrGetVulkanGraphicsDevice2KHR(
-		xr->xr_instance, &xr_vk_device_info, &xr->vk_physical_device);
+		xr->instance, &xr_vk_device_info, &xr->vk.physical_device);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	uint32_t vk_queue_family_count = 0;
 	vkGetPhysicalDeviceQueueFamilyProperties(
-		xr->vk_physical_device, &vk_queue_family_count, NULL);
+		xr->vk.physical_device, &vk_queue_family_count, NULL);
 	assert_gt(vk_queue_family_count, 0);
 
 	VkQueueFamilyProperties vk_queue_family_properties[vk_queue_family_count];
 
 	vkGetPhysicalDeviceQueueFamilyProperties(
-		xr->vk_physical_device, &vk_queue_family_count, vk_queue_family_properties);
+		xr->vk.physical_device, &vk_queue_family_count, vk_queue_family_properties);
 	assert_gt(vk_queue_family_count, 0);
 
 	VkQueueFamilyProperties* vk_queue_family_property = vk_queue_family_properties;
@@ -851,7 +1310,7 @@ xr_init_vk_physical_device(
 	}
 
 	assert_lt(vk_queue_family_property, vk_queue_family_property_end);
-	xr->vk_queue_id = vk_queue_family_property - vk_queue_family_properties;
+	xr->vk.queue_id = vk_queue_family_property - vk_queue_family_properties;
 }
 
 
@@ -877,7 +1336,7 @@ xr_vk_get_device_extensions(
 
 	uint32_t vk_device_extension_count = 0;
 	vkEnumerateDeviceExtensionProperties(
-		xr->vk_physical_device, NULL, &vk_device_extension_count, NULL);
+		xr->vk.physical_device, NULL, &vk_device_extension_count, NULL);
 
 	VkExtensionProperties vk_device_extensions[vk_device_extension_count];
 
@@ -885,7 +1344,7 @@ xr_vk_get_device_extensions(
 	VkExtensionProperties* vk_device_extension_end =
 		vk_device_extension + vk_device_extension_count;
 
-	vkEnumerateDeviceExtensionProperties(xr->vk_physical_device,
+	vkEnumerateDeviceExtensionProperties(xr->vk.physical_device,
 		NULL, &vk_device_extension_count, vk_device_extensions);
 
 	puts("VK device extensions:");
@@ -929,16 +1388,16 @@ xr_vk_get_device_extensions(
 	uint32_t xr_vk_device_extension_count = 0;
 
 	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensionsKHR =
-		xr_xr_get_func(xr, "xrGetVulkanDeviceExtensionsKHR");
+		xr_xr_load_func(xr, "xrGetVulkanDeviceExtensionsKHR");
 
-	XrResult xr_result = xrGetVulkanDeviceExtensionsKHR(xr->xr_instance,
-		xr->xr_system, 0, &xr_vk_device_extension_count, NULL);
+	XrResult xr_result = xrGetVulkanDeviceExtensionsKHR(xr->instance,
+		xr->system, 0, &xr_vk_device_extension_count, NULL);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	char xr_vk_device_extensions[xr_vk_device_extension_count + 1];
 	xr_vk_device_extensions[xr_vk_device_extension_count] = '\0';
 
-	xr_result = xrGetVulkanDeviceExtensionsKHR(xr->xr_instance, xr->xr_system,
+	xr_result = xrGetVulkanDeviceExtensionsKHR(xr->instance, xr->system,
 		xr_vk_device_extension_count, &xr_vk_device_extension_count, xr_vk_device_extensions);
 	assert_eq(xr_result, XR_SUCCESS);
 
@@ -982,14 +1441,14 @@ xr_vk_get_device_layers(
 
 	uint32_t vk_device_layer_count = 0;
 	vkEnumerateDeviceLayerProperties(
-		xr->vk_physical_device, &vk_device_layer_count, NULL);
+		xr->vk.physical_device, &vk_device_layer_count, NULL);
 
 	VkLayerProperties vk_device_layers[vk_device_layer_count];
 
 	VkLayerProperties* vk_device_layer = vk_device_layers;
 	VkLayerProperties* vk_device_layer_end = vk_device_layer + vk_device_layer_count;
 
-	vkEnumerateDeviceLayerProperties(xr->vk_physical_device,
+	vkEnumerateDeviceLayerProperties(xr->vk.physical_device,
 		&vk_device_layer_count, vk_device_layers);
 
 	puts("VK device layers:");
@@ -1060,7 +1519,7 @@ xr_init_vk_logical_device(
 		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.queueFamilyIndex = xr->vk_queue_id,
+		.queueFamilyIndex = xr->vk.queue_id,
 		.queueCount = 1,
 		.pQueuePriorities = &vk_queue_priority
 	};
@@ -1099,33 +1558,33 @@ xr_init_vk_logical_device(
 	{
 		.type = XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR,
 		.next = NULL,
-		.systemId = xr->xr_system,
+		.systemId = xr->system,
 		.createFlags = 0,
-		.pfnGetInstanceProcAddr = xr->vkGetInstanceProcAddr,
-		.vulkanPhysicalDevice = xr->vk_physical_device,
+		.pfnGetInstanceProcAddr = xr->vk.proc_addr_fn,
+		.vulkanPhysicalDevice = xr->vk.physical_device,
 		.vulkanCreateInfo = &vk_device_info,
 		.vulkanAllocator = NULL
 	};
 
 	PFN_xrCreateVulkanDeviceKHR xrCreateVulkanDeviceKHR =
-		xr_xr_get_func(xr, "xrCreateVulkanDeviceKHR");
+		xr_xr_load_func(xr, "xrCreateVulkanDeviceKHR");
 
 	VkResult vk_result;
 	XrResult xr_result = xrCreateVulkanDeviceKHR(
-		xr->xr_instance, &xr_vk_device_info, &xr->vk_device, &vk_result);
+		xr->instance, &xr_vk_device_info, &xr->vk.device, &vk_result);
 	assert_eq(xr_result, XR_SUCCESS);
 	assert_eq(vk_result, VK_SUCCESS);
 
-	xr_free_str_array(vk_device_extensions, vk_device_extension);
-	xr_free_str_array(vk_device_layers, vk_device_layer);
+	shared_free_str_array(vk_device_extensions, vk_device_extension);
+	shared_free_str_array(vk_device_layers, vk_device_layer);
 
-	volkLoadDeviceTable(&xr->vk_table, xr->vk_device);
+	volkLoadDeviceTable(&xr->vk.table, xr->vk.device);
 
-	xr->vk_table.vkGetDeviceQueue(xr->vk_device,
-		xr->vk_queue_id, 0, &xr->vk_queue);
+	xr->vk.table.vkGetDeviceQueue(xr->vk.device,
+		xr->vk.queue_id, 0, &xr->vk.queue);
 
 	// vkGetPhysicalDeviceMemoryProperties(
-	// 	xr->vk_physical_device, &xr->vk_memory_properties);
+	// 	xr->vk.physical_device, &xr->vk.memory_properties);
 }
 
 
@@ -1136,7 +1595,7 @@ xr_free_vk_logical_device(
 {
 	assert_not_null(xr);
 
-	xr->vk_table.vkDestroyDevice(xr->vk_device, NULL);
+	xr->vk.table.vkDestroyDevice(xr->vk.device, NULL);
 }
 
 
@@ -1151,10 +1610,10 @@ xr_init_xr_session(
 	{
 		.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR,
 		.next = NULL,
-		.instance = xr->vk_instance,
-		.physicalDevice = xr->vk_physical_device,
-		.device = xr->vk_device,
-		.queueFamilyIndex = xr->vk_queue_id,
+		.instance = xr->vk.instance,
+		.physicalDevice = xr->vk.physical_device,
+		.device = xr->vk.device,
+		.queueFamilyIndex = xr->vk.queue_id,
 		.queueIndex = 0
 	};
 
@@ -1163,11 +1622,11 @@ xr_init_xr_session(
 		.type = XR_TYPE_SESSION_CREATE_INFO,
 		.next = &xr_vk_binding,
 		.createFlags = 0,
-		.systemId = xr->xr_system
+		.systemId = xr->system
 	};
 
 	XrResult xr_result = xrCreateSession(
-		xr->xr_instance, &xr_session_info, &xr->xr_session);
+		xr->instance, &xr_session_info, &xr->session);
 	assert_eq(xr_result, XR_SUCCESS);
 }
 
@@ -1179,7 +1638,7 @@ xr_free_xr_session(
 {
 	assert_not_null(xr);
 
-	XrResult xr_result = xrDestroySession(xr->xr_session);
+	XrResult xr_result = xrDestroySession(xr->session);
 	assert_eq(xr_result, XR_SUCCESS);
 }
 

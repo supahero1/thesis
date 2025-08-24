@@ -28,7 +28,6 @@
 
 #include <signal.h>
 #include <string.h>
-#include <stdatomic.h>
 
 #define VK_MAX_IMAGES 8
 #define VK_MAX_FRAMES 2
@@ -370,32 +369,8 @@ struct vk
 
 	struct
 	{
-		event_listener_t* close_once_listener;
-		event_listener_t* resize_listener;
-		event_listener_t* mouse_down_listener;
-		event_listener_t* mouse_up_listener;
-		event_listener_t* mouse_move_listener;
-		event_listener_t* key_down_listener;
-		event_listener_t* key_up_listener;
-
-		window_manager_t manager;
-		window_t handle;
-		thread_t thread;
-
-		struct
-		{
-			_Atomic bool boolean;
-			sync_mtx_t mtx;
-			sync_cond_t cond;
-		}
-		resize;
-
-		bool mouse_holding;
-	}
-	window;
-
-	struct
-	{
+		bool window_enable;
+		bool window_fullscreen;
 		float window_width;
 		float window_height;
 
@@ -429,6 +404,32 @@ struct vk
 		float ssao_blur_depth_tolerance;
 	}
 	options;
+
+	struct
+	{
+		event_listener_t* close_once_listener;
+		event_listener_t* resize_listener;
+		event_listener_t* mouse_down_listener;
+		event_listener_t* mouse_up_listener;
+		event_listener_t* mouse_move_listener;
+		event_listener_t* key_down_listener;
+		event_listener_t* key_up_listener;
+
+		window_manager_t manager;
+		window_t handle;
+		thread_t thread;
+
+		struct
+		{
+			_Atomic bool boolean;
+			sync_mtx_t mtx;
+			sync_cond_t cond;
+		}
+		resize;
+
+		bool mouse_holding;
+	}
+	window;
 
 	thread_t thread;
 	_Atomic bool is_running;
@@ -675,6 +676,14 @@ vk_init_options(
 
 	puts("\nVK options:");
 
+	vk->options.window_enable =
+		options_get_boolean(global_options, "window_enable", true);
+	printf("- window_enable: %d\n", vk->options.window_enable);
+
+	vk->options.window_fullscreen =
+		options_get_boolean(global_options, "window_fullscreen", false);
+	printf("- window_fullscreen: %d\n", vk->options.window_fullscreen);
+
 	vk->options.window_width =
 		options_get_i64(global_options, "window_width", 1, 16384, VK_WINDOW_WIDTH);
 	printf("- window_width: %.0f\n", vk->options.window_width);
@@ -828,8 +837,7 @@ vk_get_instance_extensions(
 	assert_not_null(extension);
 
 	uint32_t available_instance_extension_count = 0;
-	VkResult result = vkEnumerateInstanceExtensionProperties(
-		NULL, &available_instance_extension_count, NULL);
+	VkResult result = vkEnumerateInstanceExtensionProperties(NULL, &available_instance_extension_count, NULL);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	VkExtensionProperties available_instance_extensions[available_instance_extension_count];
@@ -843,8 +851,8 @@ vk_get_instance_extensions(
 		*(available_instance_extension++) = (VkExtensionProperties){0};
 	}
 
-	result = vkEnumerateInstanceExtensionProperties(
-		NULL, &available_instance_extension_count, available_instance_extensions);
+	result = vkEnumerateInstanceExtensionProperties(NULL,
+		&available_instance_extension_count, available_instance_extensions);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	puts("\nVK available instance extensions:");
@@ -886,13 +894,11 @@ vk_get_instance_extensions(
 	}
 
 	uint32_t sdl_instance_extension_count = 0;
-	const char* const* sdl_instance_extensions =
-		window_get_vulkan_extensions(&sdl_instance_extension_count);
+	const char* const* sdl_instance_extensions = window_get_vulkan_extensions(&sdl_instance_extension_count);
 	hard_assert_ptr(sdl_instance_extensions, sdl_instance_extension_count);
 
 	const char* const* sdl_instance_extension = sdl_instance_extensions;
-	const char* const* sdl_instance_extension_end =
-		sdl_instance_extension + sdl_instance_extension_count;
+	const char* const* sdl_instance_extension_end = sdl_instance_extension + sdl_instance_extension_count;
 
 	while(sdl_instance_extension < sdl_instance_extension_end)
 	{
@@ -936,16 +942,14 @@ vk_get_instance_layers(
 	VkLayerProperties available_instance_layers[available_instance_layer_count];
 
 	VkLayerProperties* available_instance_layer = available_instance_layers;
-	VkLayerProperties* available_instance_layer_end =
-		available_instance_layer + available_instance_layer_count;
+	VkLayerProperties* available_instance_layer_end = available_instance_layer + available_instance_layer_count;
 
 	while(available_instance_layer < available_instance_layer_end)
 	{
 		*(available_instance_layer++) = (VkLayerProperties){0};
 	}
 
-	result = vkEnumerateInstanceLayerProperties(
-		&available_instance_layer_count, available_instance_layers);
+	result = vkEnumerateInstanceLayerProperties(&available_instance_layer_count, available_instance_layers);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	puts("\nVK available instance layers:");
@@ -962,8 +966,7 @@ vk_get_instance_layers(
 	puts("");
 
 	const char* const* instance_layer = vk_instance_layers;
-	const char* const* instance_layer_end =
-		instance_layer + MACRO_ARRAY_LEN(vk_instance_layers);
+	const char* const* instance_layer_end = instance_layer + MACRO_ARRAY_LEN(vk_instance_layers);
 
 	while(instance_layer < instance_layer_end)
 	{
@@ -1304,8 +1307,7 @@ vk_get_device_layers(
 	}
 
 	VkLayerProperties available_device_layers[available_device_layer_count];
-	result = vkEnumerateDeviceLayerProperties(device,
-		&available_device_layer_count, available_device_layers);
+	result = vkEnumerateDeviceLayerProperties(device, &available_device_layer_count, available_device_layers);
 	if(result != VK_SUCCESS)
 	{
 		hard_assert_log();
@@ -1886,8 +1888,7 @@ vk_free_commands(
 		++command;
 	}
 
-	vk->table.vkFreeCommandBuffers(vk->device,
-		vk->command_pool, MACRO_ARRAY_LEN(vk->commands), command_buffers);
+	vk->table.vkFreeCommandBuffers(vk->device, vk->command_pool, MACRO_ARRAY_LEN(vk->commands), command_buffers);
 
 	vk->table.vkDestroyCommandPool(vk->device, vk->command_pool, NULL);
 }
@@ -8260,7 +8261,7 @@ vk_init_window(
 			.w = vk->options.window_width,
 			.h = vk->options.window_height
 		},
-		.fullscreen = true,
+		.fullscreen = vk->options.window_fullscreen,
 		.rel_mouse_in_fullscreen = true
 	};
 	window_manager_add(vk->window.manager, vk->window.handle, "Thesis", &history);
@@ -8389,6 +8390,12 @@ vk_init(
 	assert_not_null(vk);
 
 	vk_init_options(vk);
+
+	if(!vk->options.window_enable)
+	{
+		alloc_free(vk, sizeof(*vk));
+		return NULL;
+	}
 
 	vk->simulation = simulation;
 
