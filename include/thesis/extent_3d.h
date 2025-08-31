@@ -19,63 +19,69 @@
 #include <stdint.h>
 
 
-typedef union pair
+typedef union triplet
 {
 	struct
 	{
 		float x;
 		float y;
+		float z;
 	};
 
 	struct
 	{
 		float w;
 		float h;
+		float d;
 	};
 }
-pair_t;
+triplet_t;
 
 
-typedef union ipair
+typedef union itriplet
 {
 	struct
 	{
 		int x;
 		int y;
+		int z;
 	};
 
 	struct
 	{
 		int w;
 		int h;
+		int d;
 	};
 }
-ipair_t;
+itriplet_t;
 
 
-typedef union half_extent
+typedef union half_extent_3d
 {
 	struct
 	{
 		union
 		{
-			pair_t pos;
+			triplet_t pos;
 
 			struct
 			{
 				float x;
 				float y;
+				float z;
 			};
 		};
 
 		union
 		{
-			pair_t size;
+			triplet_t size;
 
 			struct
 			{
 				float w;
 				float h;
+				float d;
 			};
 		};
 	};
@@ -86,59 +92,63 @@ typedef union half_extent
 		float left;
 		float right;
 		float bottom;
+		float front;
+		float back;
 	};
 }
-half_extent_t;
+half_extent_3d_t;
 
 
-typedef struct rect_extent
+typedef struct rect_extent_3d
 {
 	union
 	{
-		pair_t min;
+		triplet_t min;
 
 		struct
 		{
 			float min_x;
 			float min_y;
+			float min_z;
 		};
 	};
 
 	union
 	{
-		pair_t max;
+		triplet_t max;
 
 		struct
 		{
 			float max_x;
 			float max_y;
+			float max_z;
 		};
 	};
 }
-rect_extent_t;
+rect_extent_3d_t;
 
 
 extern bool
-rect_extent_intersects(
-	rect_extent_t a,
-	rect_extent_t b
+rect_extent_3d_intersects(
+	rect_extent_3d_t a,
+	rect_extent_3d_t b
 	);
 
 
 extern bool
-rect_extent_is_inside(
-	rect_extent_t a,
-	rect_extent_t b
+rect_extent_3d_is_inside(
+	rect_extent_3d_t a,
+	rect_extent_3d_t b
 	);
 
 
-extern rect_extent_t
-half_to_rect_extent(
-	half_extent_t extent
+extern rect_extent_3d_t
+half_to_rect_3d_extent(
+	half_extent_3d_t extent
 	);
 
 
-extern half_extent_t
-rect_to_half_extent(
-	rect_extent_t extent
+extern half_extent_3d_t
+rect_to_half_3d_extent(
+	rect_extent_3d_t extent
 	);

@@ -394,6 +394,7 @@ struct vk
 		float ssao_radius;
 		float ssao_bias;
 		float ssao_power;
+		float ssao_range_check;
 		float ssao_depth_k;
 		float ssao_depth_gamma;
 		bool ssao_debug;
@@ -681,7 +682,7 @@ vk_init_options(
 	printf("- window_enable: %d\n", vk->options.window_enable);
 
 	vk->options.window_fullscreen =
-		options_get_boolean(global_options, "window_fullscreen", false);
+		options_get_boolean(global_options, "window_fullscreen", true);
 	printf("- window_fullscreen: %d\n", vk->options.window_fullscreen);
 
 	vk->options.window_width =
@@ -745,7 +746,7 @@ vk_init_options(
 	printf("- enable_ssao: %d\n", vk->options.enable_ssao);
 
 	vk->options.ssao_kernel_size =
-		options_get_i64(global_options, "vk_ssao_kernel_size", 1, 256, 40);
+		options_get_i64(global_options, "vk_ssao_kernel_size", 1, 256, 30);
 	printf("- ssao_kernel_size: %u\n", vk->options.ssao_kernel_size);
 
 	vk->options.ssao_noise_size =
@@ -753,16 +754,20 @@ vk_init_options(
 	printf("- ssao_noise_size: %u\n", vk->options.ssao_noise_size);
 
 	vk->options.ssao_radius =
-		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 64.0f, 6.0f);
+		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 1024.0f, 200.0f);
 	printf("- ssao_radius: %.2f\n", vk->options.ssao_radius);
 
 	vk->options.ssao_bias =
-		options_get_f32(global_options, "vk_ssao_bias", 0.0f, 1.0f, 0.05f);
+		options_get_f32(global_options, "vk_ssao_bias", 0.0f, 1.0f, 0.1f);
 	printf("- ssao_bias: %.3f\n", vk->options.ssao_bias);
 
 	vk->options.ssao_power =
-		options_get_f32(global_options, "vk_ssao_power", 0.0f, 5.0f, 2.0f);
+		options_get_f32(global_options, "vk_ssao_power", 0.0f, 10.0f, 6.0f);
 	printf("- ssao_power: %.2f\n", vk->options.ssao_power);
+
+	vk->options.ssao_range_check =
+		options_get_f32(global_options, "vk_ssao_range_check", 0.0f, 8.0f, 2.0f);
+	printf("- ssao_range_check: %.2f\n", vk->options.ssao_range_check);
 
 	vk->options.ssao_depth_k =
 		options_get_f32(global_options, "vk_ssao_depth_k", 0.0f, 1.0f, 0.007f);
@@ -777,11 +782,11 @@ vk_init_options(
 	printf("- ssao_debug: %d\n", vk->options.ssao_debug);
 
 	vk->options.ssao_scale =
-		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 1.0f);
+		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 0.7f);
 	printf("- ssao_scale: %.2f\n", vk->options.ssao_scale);
 
 	vk->options.ssao_blur_radius =
-		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 4.0f);
+		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 8.0f);
 	printf("- ssao_blur_radius: %.2f\n", vk->options.ssao_blur_radius);
 
 	vk->options.ssao_blur_falloff =
@@ -789,7 +794,7 @@ vk_init_options(
 	printf("- ssao_blur_falloff: %.2f\n", vk->options.ssao_blur_falloff);
 
 	vk->options.ssao_blur_depth_tolerance =
-		options_get_f32(global_options, "vk_ssao_blur_depth_tolerance", 0.0f, 16.0f, 2.0f);
+		options_get_f32(global_options, "vk_ssao_blur_depth_tolerance", 0.0f, 1024.0f, 256.0f);
 	printf("- ssao_blur_depth_tolerance: %.2f\n", vk->options.ssao_blur_depth_tolerance);
 }
 
@@ -4591,6 +4596,7 @@ vk_init_ssao_pipeline(
 		float ssao_radius;
 		float ssao_bias;
 		float ssao_power;
+		float ssao_range_check;
 		float ssao_depth_k;
 		float ssao_depth_gamma;
 		int32_t ssao_debug;
@@ -4604,6 +4610,7 @@ vk_init_ssao_pipeline(
 		.ssao_radius = vk->options.ssao_radius,
 		.ssao_bias = vk->options.ssao_bias,
 		.ssao_power = vk->options.ssao_power,
+		.ssao_range_check = vk->options.ssao_range_check,
 		.ssao_depth_k = vk->options.ssao_depth_k,
 		.ssao_depth_gamma = vk->options.ssao_depth_gamma,
 		.ssao_debug = vk->options.ssao_debug
@@ -4638,16 +4645,21 @@ vk_init_ssao_pipeline(
 		},
 		{
 			.constantID = 5,
+			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_range_check),
+			.size = sizeof(frag_specialization_data.ssao_range_check)
+		},
+		{
+			.constantID = 6,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_depth_k),
 			.size = sizeof(frag_specialization_data.ssao_depth_k)
 		},
 		{
-			.constantID = 6,
+			.constantID = 7,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_depth_gamma),
 			.size = sizeof(frag_specialization_data.ssao_depth_gamma)
 		},
 		{
-			.constantID = 7,
+			.constantID = 8,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_debug),
 			.size = sizeof(frag_specialization_data.ssao_debug)
 		}
@@ -4953,7 +4965,7 @@ vk_init_ssao_kernel_const(
 
 		float scale = (float)(kernel - data) / size;
 		scale = glm_lerp(0.1f, 1.0f, scale * scale);
-		scale *= drand48();
+
 		sample[0] *= scale;
 		sample[1] *= scale;
 		sample[2] *= scale;

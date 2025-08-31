@@ -16,9 +16,9 @@
 
 #version 450
 
-layout(constant_id = 0) const float ssao_blur_radius = 4.0;
+layout(constant_id = 0) const float ssao_blur_radius = 8.0;
 layout(constant_id = 1) const float ssao_blur_falloff = 1.9;
-layout(constant_id = 2) const float ssao_blur_depth_tolerance = 2.0;
+layout(constant_id = 2) const float ssao_blur_depth_tolerance = 256.0;
 
 layout(set = 0, binding = 0) uniform sampler2D inViewPosition;
 layout(set = 0, binding = 1) uniform sampler2D inViewNormal;

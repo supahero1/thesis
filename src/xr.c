@@ -546,7 +546,7 @@ xr_init_options(
 	puts("\nXR options:");
 
 	xr->options.xr_enable =
-		options_get_boolean(global_options, "xr_enable", true);
+		options_get_boolean(global_options, "xr_enable", false);
 	printf("- xr_enable: %d\n", xr->options.xr_enable);
 
 	xr->options.max_msaa_samples =
@@ -1698,6 +1698,12 @@ xr_init(
 	assert_ptr(xr, sizeof(*xr));
 
 	xr_init_options(xr);
+
+	if(!xr->options.xr_enable)
+	{
+		alloc_free(xr, sizeof(*xr));
+		return NULL;
+	}
 
 	xr->simulation = simulation;
 
