@@ -36,12 +36,14 @@ const_basename(
 
 model_t*
 model_init(
-	const char* path
+	const char* path,
+	float scale
 	)
 {
 	model_t* model = alloc_malloc(sizeof(*model));
 	assert_not_null(model);
 
+	printf("%s\n", path);
 	const struct aiScene* scene = aiImportFile(
 		path,
 		aiProcess_GenNormals |
@@ -60,7 +62,7 @@ model_init(
 		aiProcess_ValidateDataStructure |
 		aiProcess_RemoveRedundantMaterials
 	);
-	hard_assert_not_null(scene);
+	hard_assert_not_null(scene, fprintf(stderr, "Failed to load model: %s\n", aiGetErrorString()));
 
 	assert_not_null(scene->mRootNode);
 	assert_eq(scene->mNumCameras, 0);
@@ -97,7 +99,12 @@ model_init(
 			material->diffuse[0], material->diffuse[1], material->diffuse[2]);
 
 		status = aiGetMaterialColor(sceneMaterial, AI_MATKEY_COLOR_AMBIENT, &color);
-		assert_eq(status, AI_SUCCESS);
+		if(status != AI_SUCCESS)
+		{
+			color.r = 0.0f;
+			color.g = 0.0f;
+			color.b = 0.0f;
+		}
 		glm_vec3_copy((void*) &color, material->ambient);
 
 		printf("        - ambient: (%.3f, %.3f, %.3f)\n",
@@ -194,6 +201,10 @@ model_init(
 			glm_vec3_copy((void*) &sceneMesh->mVertices[j], mesh->vertices[j]);
 			glm_vec3_copy((void*) &sceneMesh->mNormals[j], mesh->normals[j]);
 			glm_vec2_copy((void*) &sceneMesh->mTextureCoords[0][j], mesh->coords[j]);
+
+			mesh->vertices[j][0] *= scale;
+			mesh->vertices[j][1] *= scale;
+			mesh->vertices[j][2] *= scale;
 		}
 
 		mesh->index_count = sceneMesh->mNumFaces * 3;

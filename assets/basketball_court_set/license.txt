@@ -1,0 +1,11 @@
+Model Information:
+* title:	Basketball Court Set
+* source:	https://sketchfab.com/3d-models/basketball-court-set-b7d8605b13b7493ab0cf87ac87e6ca69
+* author:	nermin (https://sketchfab.com/nermin)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Basketball Court Set" (https://sketchfab.com/3d-models/basketball-court-set-b7d8605b13b7493ab0cf87ac87e6ca69) by nermin (https://sketchfab.com/nermin) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

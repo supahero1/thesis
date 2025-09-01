@@ -754,7 +754,7 @@ vk_init_options(
 	printf("- ssao_noise_size: %u\n", vk->options.ssao_noise_size);
 
 	vk->options.ssao_radius =
-		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 1024.0f, 200.0f);
+		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 1024.0f, 100.0f);
 	printf("- ssao_radius: %.2f\n", vk->options.ssao_radius);
 
 	vk->options.ssao_bias =
@@ -762,11 +762,11 @@ vk_init_options(
 	printf("- ssao_bias: %.3f\n", vk->options.ssao_bias);
 
 	vk->options.ssao_power =
-		options_get_f32(global_options, "vk_ssao_power", 0.0f, 10.0f, 6.0f);
+		options_get_f32(global_options, "vk_ssao_power", 0.0f, 10.0f, 5.0f);
 	printf("- ssao_power: %.2f\n", vk->options.ssao_power);
 
 	vk->options.ssao_range_check =
-		options_get_f32(global_options, "vk_ssao_range_check", 0.0f, 8.0f, 2.0f);
+		options_get_f32(global_options, "vk_ssao_range_check", 0.0f, 16.0f, 8.0f);
 	printf("- ssao_range_check: %.2f\n", vk->options.ssao_range_check);
 
 	vk->options.ssao_depth_k =
@@ -4274,7 +4274,7 @@ vk_init_scene_pipeline(
 		.depthClampEnable = VK_FALSE,
 		.rasterizerDiscardEnable = VK_FALSE,
 		.polygonMode = VK_POLYGON_MODE_FILL,
-		.cullMode = VK_CULL_MODE_BACK_BIT,
+		.cullMode = VK_CULL_MODE_NONE,
 		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
 		.depthBiasEnable = VK_FALSE,
 		.depthBiasConstantFactor = 0.0f,

@@ -64,7 +64,8 @@ model_t;
 
 extern model_t*
 model_init(
-	const char* path
+	const char* path,
+	float scale
 	);
 
 

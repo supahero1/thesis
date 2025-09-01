@@ -188,7 +188,7 @@ simulation_add_entity(
 			);
 		assert_not_null(simulation->info.models);
 
-		model_t* model = model_init(entity_init.model_path);
+		model_t* model = model_init(entity_init.model_path, entity_init.scale);
 		simulation->info.material_count += model->material_count;
 		simulation->info.models[simulation->info.model_count] = model;
 
@@ -339,26 +339,28 @@ simulation_load_texture(
 	void* data;
 
 	char full_path[256];
-	memcpy(full_path, path->str, path->len);
+	memcpy(full_path, path->str, path->len + 1);
 	char* full_path_end = full_path + path->len;
 
 	stbi_set_flip_vertically_on_load(1);
 
 	if(!is_cube_map)
 	{
-		data = stbi_load(path->str, &width, &height, NULL, 4);
-		hard_assert_not_null(data, stbi_print_failure());
-
 		texture->layers = 1;
 	}
 	else
 	{
 		memcpy(full_path_end, "/px.png", 8);
-		data = stbi_load(full_path, &width, &height, NULL, 4);
-		hard_assert_not_null(data, stbi_print_failure());
-
 		texture->layers = 6;
 	}
+
+	data = stbi_load(full_path, &width, &height, NULL, 4);
+	hard_assert_not_null(data,
+		{
+			stbi_print_failure();
+			fprintf(stderr, "Failed to load texture: '%s'\n", full_path);
+		}
+		);
 
 	texture->width = width;
 	texture->height = height;

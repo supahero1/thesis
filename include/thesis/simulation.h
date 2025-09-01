@@ -68,6 +68,7 @@ typedef struct simulation_entity_init
 	const char* model_path;
 	vec3 translation;
 	vec3 rotation;
+	float scale;
 	bool dynamic;
 }
 simulation_entity_init_t;
