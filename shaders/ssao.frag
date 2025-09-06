@@ -16,14 +16,14 @@
 
 #version 450
 
-layout(constant_id = 0) const int ssao_kernel_size = 30;
+layout(constant_id = 0) const int ssao_kernel_size = 12;
 layout(constant_id = 1) const int ssao_noise_size = 4;
-layout(constant_id = 2) const float ssao_radius = 200.0;
+layout(constant_id = 2) const float ssao_radius = 96.0;
 layout(constant_id = 3) const float ssao_bias = 0.1;
 layout(constant_id = 4) const float ssao_power = 6.0;
-layout(constant_id = 5) const float ssao_range_check = 2.0;
-layout(constant_id = 6) const float ssao_depth_k = 0.007;
-layout(constant_id = 7) const float ssao_depth_gamma = 1.5;
+layout(constant_id = 5) const float ssao_range_check = 4.0;
+layout(constant_id = 6) const float ssao_depth_k = 0.06;
+layout(constant_id = 7) const float ssao_depth_gamma = 16.0;
 layout(constant_id = 8) const bool ssao_debug = false;
 
 layout(set = 0, binding = 0) uniform sampler2D inViewPosition;
@@ -65,7 +65,7 @@ main()
 	float d = abs(fragPos.z);
 	float depthFactor = 1.0 - exp(-ssao_depth_k * d);
 	depthFactor = pow(depthFactor, ssao_depth_gamma);
-	int current_kernel_size = max(4, int(float(ssao_kernel_size) * depthFactor));
+	int current_kernel_size = max(ssao_kernel_size / 3, int(float(ssao_kernel_size) * depthFactor));
 
 	float occlusion = 0.0;
 	for(int i = 0; i < current_kernel_size; ++i)

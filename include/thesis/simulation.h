@@ -18,6 +18,7 @@
 
 #include <thesis/event.h>
 #include <thesis/model.h>
+#include <thesis/stats.h>
 
 
 typedef struct simulation* simulation_t;
@@ -131,6 +132,12 @@ simulation_get_event_table(
 	);
 
 
+extern stats_t
+simulation_get_stats(
+	simulation_t simulation
+	);
+
+
 extern void
 simulation_add_entity(
 	simulation_t simulation,
@@ -208,6 +215,5 @@ simulation_stop(
 
 extern void
 simulation_update(
-	simulation_t simulation,
-	float delta
+	simulation_t simulation
 	);

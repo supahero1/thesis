@@ -16,7 +16,9 @@
 
 #include <thesis/stb.h>
 #include <thesis/hash.h>
+#include <thesis/time.h>
 #include <thesis/debug.h>
+#include <thesis/collider.h>
 #include <thesis/alloc_ext.h>
 #include <thesis/simulation.h>
 
@@ -43,6 +45,9 @@ simulation_entity_t;
 
 struct simulation
 {
+	sync_mtx_t mutex;
+	uint64_t last_update;
+
 	simulation_camera_t camera;
 	simulation_light_t light;
 
@@ -51,8 +56,11 @@ struct simulation
 
 	str_t skybox_path;
 
-	simulation_entity_t* entities;
+	simulation_entity_t** entities;
 	uint32_t entity_count;
+
+	stats_t stats;
+	collider_t collider;
 
 	atomic_flag stopped;
 
@@ -90,6 +98,9 @@ simulation_init(
 	simulation_t simulation = alloc_calloc(sizeof(*simulation));
 	assert_not_null(simulation);
 
+	sync_mtx_init(&simulation->mutex);
+	simulation->last_update = time_get();
+
 	camera.fov = glm_rad(camera.fov);
 	camera.angle[0] = glm_rad(camera.angle[0]);
 	camera.angle[1] = glm_rad(camera.angle[1]);
@@ -101,6 +112,9 @@ simulation_init(
 	simulation->model_table = hash_table_init(8, NULL, (void*) simulation_model_table_value_free_fn);
 
 	simulation->skybox_path = str_init_copy_cstr(skybox_path);
+
+	simulation->stats = stats_init();
+	simulation->collider = collider_init(simulation->stats);
 
 	atomic_flag_clear(&simulation->stopped);
 
@@ -125,8 +139,14 @@ simulation_free(
 
 	event_target_free(&simulation->event_table.free_target);
 
-	alloc_free(simulation->entities,
-		sizeof(*simulation->entities) * simulation->entity_count);
+	collider_free(simulation->collider);
+	stats_free(simulation->stats);
+
+	for(uint32_t i = 0; i < simulation->entity_count; ++i)
+	{
+		alloc_free(simulation->entities[i], sizeof(*simulation->entities[i]));
+	}
+	alloc_free(simulation->entities, sizeof(*simulation->entities) * simulation->entity_count);
 
 	str_free(simulation->skybox_path);
 
@@ -136,9 +156,9 @@ simulation_free(
 	{
 		model_free(simulation->info.models[i]);
 	}
+	alloc_free(simulation->info.models, sizeof(*simulation->info.models) * simulation->info.model_count);
 
-	alloc_free(simulation->info.models,
-		sizeof(*simulation->info.models) * simulation->info.model_count);
+	sync_mtx_free(&simulation->mutex);
 
 	alloc_free(simulation, sizeof(*simulation));
 
@@ -157,6 +177,100 @@ simulation_get_event_table(
 }
 
 
+stats_t
+simulation_get_stats(
+	simulation_t simulation
+	)
+{
+	assert_not_null(simulation);
+
+	return simulation->stats;
+}
+
+
+private void
+simulation_add_triangle_collider_entity(
+	simulation_t simulation,
+	vec3 v0,
+	vec3 v1,
+	vec3 v2
+	)
+{
+	assert_not_null(simulation);
+
+	rect_extent_3d_t extent;
+	extent.min_x = MACRO_MIN(v0[0], MACRO_MIN(v1[0], v2[0]));
+	extent.min_y = MACRO_MIN(v0[1], MACRO_MIN(v1[1], v2[1]));
+	extent.min_z = MACRO_MIN(v0[2], MACRO_MIN(v1[2], v2[2]));
+	extent.max_x = MACRO_MAX(v0[0], MACRO_MAX(v1[0], v2[0]));
+	extent.max_y = MACRO_MAX(v0[1], MACRO_MAX(v1[1], v2[1]));
+	extent.max_z = MACRO_MAX(v0[2], MACRO_MAX(v1[2], v2[2]));
+
+	collider_entity_t collider_entity =
+	{
+		.rect_extent = extent,
+		.type = COLLIDER_ENTITY_TYPE_TRIANGLE,
+		.external = NULL // TODO
+	};
+	collider_add(simulation->collider, &collider_entity);
+}
+
+
+private void
+simulation_add_mesh_collider_entity(
+	simulation_t simulation,
+	model_t* model
+	)
+{
+	assert_not_null(simulation);
+	assert_not_null(model);
+
+	for(uint32_t i = 0; i < model->mesh_count; ++i)
+	{
+		mesh_t* mesh = &model->meshes[i];
+
+		uint32_t* index = &mesh->indexes[0];
+		uint32_t* index_end = index + mesh->index_count;
+
+		while(index != index_end)
+		{
+			simulation_add_triangle_collider_entity(
+				simulation,
+				mesh->vertices[index[0]],
+				mesh->vertices[index[1]],
+				mesh->vertices[index[2]]
+				);
+			index += 3;
+		}
+	}
+}
+
+
+private void
+simulation_add_collider_entity(
+	simulation_t simulation,
+	simulation_entity_t* entity
+	)
+{
+	assert_not_null(simulation);
+	assert_not_null(entity);
+
+	if(!entity->dynamic)
+	{
+		simulation_add_mesh_collider_entity(simulation, simulation->info.models[entity->model_idx]);
+		return;
+	}
+
+	collider_entity_t collider_entity =
+	{
+		.rect_extent = {},
+		.type = COLLIDER_ENTITY_TYPE_SPHERE,
+		.external = NULL // TODO
+	};
+	collider_add(simulation->collider, &collider_entity);
+}
+
+
 void
 simulation_add_entity(
 	simulation_t simulation,
@@ -172,7 +286,10 @@ simulation_add_entity(
 		);
 	assert_not_null(simulation->entities);
 
-	simulation_entity_t* entity = &simulation->entities[simulation->entity_count++];
+	simulation_entity_t* entity = alloc_malloc(sizeof(*entity));
+	assert_not_null(entity);
+
+	simulation->entities[simulation->entity_count++] = entity;
 
 	simulation_texture_info_t* info = hash_table_get(
 		simulation->model_table,
@@ -205,6 +322,8 @@ simulation_add_entity(
 	glm_vec3_copy(entity_init.translation, entity->translation);
 	glm_vec3_copy(entity_init.rotation, entity->rotation);
 	entity->dynamic = entity_init.dynamic;
+
+	simulation_add_collider_entity(simulation, entity);
 }
 
 
@@ -229,7 +348,7 @@ simulation_get_entity_data(
 	for(uint32_t i = 0; i < simulation->entity_count; ++i)
 	{
 		simulation_entity_data_t* cur_data = &data[i];
-		simulation_entity_t* entity = &simulation->entities[i];
+		simulation_entity_t* entity = simulation->entities[i];
 
 		cur_data->model_idx = entity->model_idx;
 
@@ -574,11 +693,18 @@ simulation_stop(
 
 void
 simulation_update(
-	simulation_t simulation,
-	float delta
+	simulation_t simulation
 	)
 {
 	assert_not_null(simulation);
 
-	(void) delta;
+	sync_mtx_lock(&simulation->mutex);
+
+	uint64_t now = time_get();
+	float delta = (float)(now - simulation->last_update) / time_ms_to_ns(1) / 16.66667f;
+	simulation->last_update = now;
+
+	collider_update(simulation->collider, delta);
+
+	sync_mtx_unlock(&simulation->mutex);
 }

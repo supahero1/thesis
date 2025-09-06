@@ -16,6 +16,7 @@
 
 #include <thesis/vk.h>
 #include <thesis/file.h>
+#include <thesis/time.h>
 #include <thesis/debug.h>
 #include <thesis/atomic.h>
 #include <thesis/shared.h>
@@ -29,6 +30,8 @@
 #include <signal.h>
 #include <string.h>
 
+#define VK_STATS_SIZE 64
+#define VK_QUERY_SIZE 32
 #define VK_MAX_IMAGES 8
 #define VK_MAX_FRAMES 2
 #define VK_MAX_INSTANCES 128
@@ -249,12 +252,12 @@ typedef struct frame
 
 		vk_frame_image_t position_ms;
 		vk_frame_image_t normal_ms;
+		vk_frame_image_t map_ms;
 
 		vk_frame_image_t position;
 		vk_frame_image_t normal;
 		VkDescriptorSet set;
 
-		vk_frame_image_t map_ms;
 		vk_frame_image_t map;
 
 		vk_image_t depth;
@@ -293,11 +296,37 @@ typedef struct frame
 }
 vk_frame_t;
 
+typedef struct vk_timing
+{
+	VkCommandBuffer command_buffer;
+	VkQueryPool pool;
+	VkSemaphore semaphore;
+	vk_buffer_t buffer;
+	uint64_t* results;
+	uint32_t* index_map;
+	uint32_t count;
+	uint32_t current;
+	bool first_reset;
+}
+vk_timing_t;
+
+typedef enum vk_barrier_timing_idx
+{
+	VK_BARRIER_TIMING_IDX_SHADOW,
+	VK_BARRIER_TIMING_IDX_SCENE,
+	VK_BARRIER_TIMING_IDX_SSAO,
+	VK_BARRIER_TIMING_IDX_SSAO_BLUR,
+	VK_BARRIER_TIMING_IDX_OUTPUT,
+	MACRO_ENUM_BITS(VK_BARRIER_TIMING_IDX)
+}
+vk_barrier_timing_idx_t;
+
 struct barrier
 {
 	VkSemaphore semaphore;
 	VkFence fence;
 	VkCommandBuffer command_buffer;
+	vk_timing_t timing;
 };
 
 typedef enum vk_preview
@@ -327,6 +356,7 @@ typedef struct vk_command
 {
 	VkCommandBuffer buffer;
 	VkFence fence;
+	bool waited;
 
 	vk_buffer_t staging_buffer;
 }
@@ -366,6 +396,7 @@ vk_descriptor_set_layout_t;
 struct vk
 {
 	simulation_t simulation;
+	stats_t stats;
 
 	struct
 	{
@@ -451,6 +482,8 @@ struct vk
 	VkSampleCountFlagBits samples;
 	float anisotropy;
 	VkPhysicalDeviceLimits limits;
+	float timestamp_period;
+	bool timing_enabled;
 
 	VkPhysicalDevice physical_device;
 	VkDevice device;
@@ -600,7 +633,7 @@ private const char* vk_instance_extensions[] =
 private const char* vk_instance_layers[] =
 {
 #ifndef NDEBUG
-	"VK_LAYER_KHRONOS_validation"
+	"VK_LAYER_KHRONOS_validation",
 #endif
 };
 
@@ -612,7 +645,7 @@ private const char* vk_device_extensions[] =
 private const char* vk_device_layers[] =
 {
 #ifndef NDEBUG
-	"VK_LAYER_KHRONOS_validation"
+	"VK_LAYER_KHRONOS_validation",
 #endif
 };
 
@@ -746,7 +779,7 @@ vk_init_options(
 	printf("- enable_ssao: %d\n", vk->options.enable_ssao);
 
 	vk->options.ssao_kernel_size =
-		options_get_i64(global_options, "vk_ssao_kernel_size", 1, 256, 30);
+		options_get_i64(global_options, "vk_ssao_kernel_size", 1, 256, 12);
 	printf("- ssao_kernel_size: %u\n", vk->options.ssao_kernel_size);
 
 	vk->options.ssao_noise_size =
@@ -754,7 +787,7 @@ vk_init_options(
 	printf("- ssao_noise_size: %u\n", vk->options.ssao_noise_size);
 
 	vk->options.ssao_radius =
-		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 1024.0f, 100.0f);
+		options_get_f32(global_options, "vk_ssao_radius", 0.0f, 1024.0f, 96.0f);
 	printf("- ssao_radius: %.2f\n", vk->options.ssao_radius);
 
 	vk->options.ssao_bias =
@@ -762,19 +795,19 @@ vk_init_options(
 	printf("- ssao_bias: %.3f\n", vk->options.ssao_bias);
 
 	vk->options.ssao_power =
-		options_get_f32(global_options, "vk_ssao_power", 0.0f, 10.0f, 5.0f);
+		options_get_f32(global_options, "vk_ssao_power", 0.0f, 16.0f, 6.0f);
 	printf("- ssao_power: %.2f\n", vk->options.ssao_power);
 
 	vk->options.ssao_range_check =
-		options_get_f32(global_options, "vk_ssao_range_check", 0.0f, 16.0f, 8.0f);
+		options_get_f32(global_options, "vk_ssao_range_check", 0.0f, 16.0f, 4.0f);
 	printf("- ssao_range_check: %.2f\n", vk->options.ssao_range_check);
 
 	vk->options.ssao_depth_k =
-		options_get_f32(global_options, "vk_ssao_depth_k", 0.0f, 1.0f, 0.007f);
+		options_get_f32(global_options, "vk_ssao_depth_k", 0.0f, 1.0f, 0.06f);
 	printf("- ssao_depth_k: %.4f\n", vk->options.ssao_depth_k);
 
 	vk->options.ssao_depth_gamma =
-		options_get_f32(global_options, "vk_ssao_depth_gamma", 0.0f, 8.0f, 1.5f);
+		options_get_f32(global_options, "vk_ssao_depth_gamma", 0.0f, 64.0f, 16.0f);
 	printf("- ssao_depth_gamma: %.2f\n", vk->options.ssao_depth_gamma);
 
 	vk->options.ssao_debug =
@@ -782,11 +815,11 @@ vk_init_options(
 	printf("- ssao_debug: %d\n", vk->options.ssao_debug);
 
 	vk->options.ssao_scale =
-		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 0.7f);
+		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 0.5f);
 	printf("- ssao_scale: %.2f\n", vk->options.ssao_scale);
 
 	vk->options.ssao_blur_radius =
-		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 8.0f);
+		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 5.0f);
 	printf("- ssao_blur_radius: %.2f\n", vk->options.ssao_blur_radius);
 
 	vk->options.ssao_blur_falloff =
@@ -796,6 +829,42 @@ vk_init_options(
 	vk->options.ssao_blur_depth_tolerance =
 		options_get_f32(global_options, "vk_ssao_blur_depth_tolerance", 0.0f, 1024.0f, 256.0f);
 	printf("- ssao_blur_depth_tolerance: %.2f\n", vk->options.ssao_blur_depth_tolerance);
+}
+
+
+private void
+vk_init_stats(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk->stats = simulation_get_stats(vk->simulation);
+
+	stats_add(vk->stats, "vk_barrier_timing_shadow", VK_STATS_SIZE);
+	stats_add(vk->stats, "vk_barrier_timing_scene", VK_STATS_SIZE);
+	stats_add(vk->stats, "vk_barrier_timing_ssao", VK_STATS_SIZE);
+	stats_add(vk->stats, "vk_barrier_timing_ssao_blur", VK_STATS_SIZE);
+	stats_add(vk->stats, "vk_barrier_timing_output", VK_STATS_SIZE);
+	stats_add(vk->stats, "vk_command_record_time", VK_STATS_SIZE);
+	stats_add(vk->stats, "vk_frame_time", VK_STATS_SIZE);
+}
+
+
+private void
+vk_free_stats(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	stats_del(vk->stats, "vk_frame_time");
+	stats_del(vk->stats, "vk_command_record_time");
+	stats_del(vk->stats, "vk_barrier_timing_output");
+	stats_del(vk->stats, "vk_barrier_timing_ssao_blur");
+	stats_del(vk->stats, "vk_barrier_timing_ssao");
+	stats_del(vk->stats, "vk_barrier_timing_scene");
+	stats_del(vk->stats, "vk_barrier_timing_shadow");
 }
 
 
@@ -1126,6 +1195,8 @@ typedef struct vk_device_score
 	VkSampleCountFlagBits samples;
 	float anisotropy;
 	VkPhysicalDeviceLimits limits;
+	float timestamp_period;
+	bool timing_enabled;
 }
 vk_device_score_t;
 
@@ -1498,6 +1569,9 @@ vk_get_device_properties(
 	device_score->score += properties.limits.maxImageDimension2D;
 	device_score->limits = properties.limits;
 
+	device_score->timestamp_period = properties.limits.timestampPeriod;
+	device_score->timing_enabled = properties.limits.timestampComputeAndGraphics == VK_TRUE;
+
 	return true;
 }
 
@@ -1683,13 +1757,22 @@ vk_init_device(
 		vk_device_score_t this_device_score = vk_get_device_score(vk, *physical_device);
 
 		printf(
-			"\n= %s:\n\tscore: %u\n\tqueue_id: %u\n\tformat: %u\n\tsamples: %u\n\tanisotropy: %.1f\n",
+			"\n= %s:\n"
+			"\tscore: %u\n"
+			"\tqueue_id: %u\n"
+			"\tformat: %u\n"
+			"\tsamples: %u\n"
+			"\tanisotropy: %.1f\n"
+			"\ttimestamp_period: %.3f\n"
+			"\ttiming_enabled: %d\n",
 			this_device_score.name,
 			this_device_score.score,
 			this_device_score.queue_id,
 			this_device_score.format,
 			this_device_score.samples,
-			this_device_score.anisotropy
+			this_device_score.anisotropy,
+			this_device_score.timestamp_period,
+			this_device_score.timing_enabled
 			);
 		cstr_free(this_device_score.name);
 
@@ -1708,6 +1791,8 @@ vk_init_device(
 	vk->samples = MACRO_MIN(vk->options.max_msaa_samples, best_device_score.samples);
 	vk->anisotropy = MACRO_MIN(vk->options.max_anisotropy, best_device_score.anisotropy);
 	vk->limits = best_device_score.limits;
+	vk->timestamp_period = best_device_score.timestamp_period;
+	vk->timing_enabled = best_device_score.timing_enabled;
 
 	vk->physical_device = best_device;
 
@@ -1862,6 +1947,8 @@ vk_init_commands(
 		result = vk->table.vkCreateFence(vk->device, &fence_info, NULL, &command->fence);
 		hard_assert_eq(result, VK_SUCCESS);
 
+		command->waited = false;
+
 		++command_buffer;
 		++command;
 	}
@@ -1899,6 +1986,30 @@ vk_free_commands(
 }
 
 
+private void
+vk_wait_command(
+	vk_t vk,
+	vk_command_t* command
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(command);
+
+	if(command->waited)
+	{
+		return;
+	}
+
+	VkResult result = vk->table.vkWaitForFences(vk->device, 1, &command->fence, VK_TRUE, UINT64_MAX);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	result = vk->table.vkResetFences(vk->device, 1, &command->fence);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	command->waited = true;
+}
+
+
 private vk_command_t*
 vk_get_command(
 	vk_t vk
@@ -1914,13 +2025,12 @@ vk_get_command(
 	vk_command_t* command = vk->command;
 	++vk->command;
 
-	VkResult result = vk->table.vkWaitForFences(vk->device, 1, &command->fence, VK_TRUE, UINT64_MAX);
-	hard_assert_eq(result, VK_SUCCESS);
+	if(!command->waited)
+	{
+		vk_wait_command(vk, command);
+	}
 
-	result = vk->table.vkResetFences(vk->device, 1, &command->fence);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	result = vk->table.vkResetCommandBuffer(command->buffer, 0);
+	VkResult result = vk->table.vkResetCommandBuffer(command->buffer, 0);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	VkCommandBufferBeginInfo command_buffer_info =
@@ -1965,6 +2075,8 @@ vk_run_command(
 
 	result = vk->table.vkQueueSubmit(vk->queue, 1, &submit_info, command->fence);
 	hard_assert_eq(result, VK_SUCCESS);
+
+	command->waited = false;
 }
 
 
@@ -2542,7 +2654,7 @@ vk_init_staging_buffer(
 	assert_not_null(vk);
 	assert_not_null(command);
 
-	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 	vk_init_buffer(vk, size, usage, flags, &command->staging_buffer);
 }
@@ -2722,8 +2834,7 @@ vk_copy_to_buffer(
 	vk_init_staging_buffer(vk, command, size);
 
 	void* mapped_data;
-	VkResult result = vk->table.vkMapMemory(vk->device,
-		command->staging_buffer.memory, 0, size, 0, &mapped_data);
+	VkResult result = vk->table.vkMapMemory(vk->device, command->staging_buffer.memory, 0, size, 0, &mapped_data);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	memcpy(mapped_data, data, size);
@@ -2737,10 +2848,53 @@ vk_copy_to_buffer(
 		.size = size
 	};
 
-	vk->table.vkCmdCopyBuffer(command->buffer,
-		command->staging_buffer.buffer, buffer->buffer, 1, &buffer_copy);
+	vk->table.vkCmdCopyBuffer(command->buffer, command->staging_buffer.buffer, buffer->buffer, 1, &buffer_copy);
 
 	vk_run_command(vk, command);
+}
+
+
+private void
+vk_read_from_buffer(
+	vk_t vk,
+	vk_buffer_t* buffer,
+	void* data,
+	VkDeviceSize size
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(buffer);
+	assert_ptr(data, size);
+
+	if(!size)
+	{
+		return;
+	}
+
+	vk_command_t* command = vk_get_command(vk);
+
+	vk_free_staging_buffer(vk, command);
+	vk_init_staging_buffer(vk, command, size);
+
+	VkBufferCopy buffer_copy =
+	{
+		.srcOffset = 0,
+		.dstOffset = 0,
+		.size = size
+	};
+
+	vk->table.vkCmdCopyBuffer(command->buffer, buffer->buffer, command->staging_buffer.buffer, 1, &buffer_copy);
+
+	vk_run_command(vk, command);
+	vk_wait_command(vk, command);
+
+	void* mapped_data;
+	VkResult result = vk->table.vkMapMemory(vk->device, command->staging_buffer.memory, 0, size, 0, &mapped_data);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	memcpy(data, mapped_data, size);
+
+	vk->table.vkUnmapMemory(vk->device, command->staging_buffer.memory);
 }
 
 
@@ -3224,6 +3378,212 @@ vk_free_frame_image(
 	assert_not_null(frame_image);
 
 	vk_free_image(vk, &frame_image->image);
+}
+
+
+private void
+vk_init_timing(
+	vk_t vk,
+	vk_timing_t* timing,
+	VkCommandBuffer command_buffer,
+	uint32_t count
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(timing);
+
+	if(!vk->timing_enabled)
+	{
+		return;
+	}
+
+	timing->command_buffer = command_buffer;
+	timing->count = count;
+
+	VkQueryPoolCreateInfo query_pool_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+		.queryType = VK_QUERY_TYPE_TIMESTAMP,
+		.queryCount = timing->count * 2
+	};
+
+	VkResult result = vk->table.vkCreateQueryPool(vk->device, &query_pool_info, NULL, &timing->pool);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	VkSemaphoreCreateInfo semaphore_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0
+	};
+
+	result = vk->table.vkCreateSemaphore(vk->device, &semaphore_info, NULL, &timing->semaphore);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	vk_init_buffer(vk, sizeof(uint64_t) * count * 2, usage, flags, &timing->buffer);
+
+	timing->results = alloc_malloc(sizeof(*timing->results) * timing->count * 2);
+	assert_not_null(timing->results);
+
+	timing->index_map = alloc_malloc(sizeof(*timing->index_map) * timing->count);
+	assert_not_null(timing->index_map);
+
+	timing->current = 0;
+	timing->first_reset = true;
+}
+
+
+private void
+vk_free_timing(
+	vk_t vk,
+	vk_timing_t* timing
+	)
+{
+	assert_not_null(vk);
+
+	if(!vk->timing_enabled)
+	{
+		return;
+	}
+
+	alloc_free(timing->index_map, sizeof(*timing->index_map) * timing->count);
+	alloc_free(timing->results, sizeof(*timing->results) * timing->count * 2);
+
+	vk_free_buffer(vk, &timing->buffer);
+
+	vk->table.vkDestroySemaphore(vk->device, timing->semaphore, NULL);
+	vk->table.vkDestroyQueryPool(vk->device, timing->pool, NULL);
+}
+
+
+private void
+vk_timing_start(
+	vk_t vk,
+	vk_timing_t* timing,
+	uint32_t index
+	)
+{
+	assert_not_null(vk);
+
+	if(!vk->timing_enabled)
+	{
+		return;
+	}
+
+	assert_lt(index, timing->count);
+
+	uint32_t query_index = timing->current;
+	assert_lt(query_index, timing->count * 2 - 1);
+
+	vk->table.vkCmdWriteTimestamp(timing->command_buffer,
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timing->pool, query_index);
+
+	timing->index_map[index] = query_index;
+}
+
+
+private void
+vk_timing_end(
+	vk_t vk,
+	vk_timing_t* timing,
+	uint32_t index
+	)
+{
+	assert_not_null(vk);
+
+	if(!vk->timing_enabled)
+	{
+		return;
+	}
+
+	assert_lt(index, timing->count);
+
+	uint32_t end_query_index = timing->index_map[index] + 1;
+
+	vk->table.vkCmdWriteTimestamp(timing->command_buffer,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timing->pool, end_query_index);
+
+	timing->current = end_query_index + 1;
+}
+
+
+private void
+vk_timing_query(
+	vk_t vk,
+	vk_timing_t* timing
+	)
+{
+	assert_not_null(vk);
+
+	if(!vk->timing_enabled)
+	{
+		return;
+	}
+
+	vk->table.vkCmdCopyQueryPoolResults(timing->command_buffer,
+		timing->pool, 0, timing->count * 2, timing->buffer.buffer, 0,
+		sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+}
+
+
+private void
+vk_timing_load(
+	vk_t vk,
+	vk_timing_t* timing
+	)
+{
+	assert_not_null(vk);
+
+	if(!vk->timing_enabled)
+	{
+		return;
+	}
+
+	vk_read_from_buffer(vk, &timing->buffer, timing->results, sizeof(*timing->results) * timing->count * 2);
+}
+
+
+private uint64_t
+vk_timing_get(
+	vk_t vk,
+	vk_timing_t* timing,
+	uint32_t index
+	)
+{
+	assert_not_null(vk);
+
+	if(!vk->timing_enabled)
+	{
+		return 0;
+	}
+
+	assert_lt(index, timing->count);
+
+	uint32_t start_query_index = timing->index_map[index];
+	uint32_t end_query_index = start_query_index + 1;
+
+	return (timing->results[end_query_index] - timing->results[start_query_index]) * vk->timestamp_period;
+}
+
+
+private void
+vk_timing_reset(
+	vk_t vk,
+	vk_timing_t* timing
+	)
+{
+	assert_not_null(vk);
+
+	if(!vk->timing_enabled || (!timing->current && !timing->first_reset))
+	{
+		return;
+	}
+
+	vk->table.vkCmdResetQueryPool(timing->command_buffer, timing->pool, 0, timing->count * 2);
+	timing->current = 0;
+	timing->first_reset = false;
 }
 
 
@@ -6739,6 +7099,8 @@ vk_init_frames(
 
 		barrier->command_buffer = *command_buffer;
 
+		vk_init_timing(vk, &barrier->timing, barrier->command_buffer, VK_BARRIER_TIMING_IDX__COUNT);
+
 		++barrier;
 		++command_buffer;
 	}
@@ -6762,6 +7124,8 @@ vk_free_frames(
 
 	while(barrier < barrier_end)
 	{
+		vk_free_timing(vk, &barrier->timing);
+
 		*command_buffer = barrier->command_buffer;
 
 		vk->table.vkDestroyFence(vk->device, barrier->fence, NULL);
@@ -7755,13 +8119,38 @@ vk_draw(
 {
 	assert_not_null(vk);
 
-	VkResult result = vk->table.vkWaitForFences(
-		vk->device, 1, &vk->barrier->fence, VK_TRUE, UINT64_MAX);
+	VkResult result = vk->table.vkWaitForFences(vk->device, 1, &vk->barrier->fence, VK_TRUE, UINT64_MAX);
 	hard_assert_eq(result, VK_SUCCESS);
 
+	uint64_t frame_time = 0;
+	if(vk->barrier->timing.current)
+	{
+		vk_timing_load(vk, &vk->barrier->timing);
+
+		uint64_t shadow_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
+		stats_log(vk->stats, "vk_barrier_timing_shadow", shadow_time);
+		frame_time += shadow_time;
+
+		uint64_t scene_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
+		stats_log(vk->stats, "vk_barrier_timing_scene", scene_time);
+		frame_time += scene_time;
+
+		uint64_t ssao_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
+		stats_log(vk->stats, "vk_barrier_timing_ssao", ssao_time);
+		frame_time += ssao_time;
+
+		uint64_t ssao_blur_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+		stats_log(vk->stats, "vk_barrier_timing_ssao_blur", ssao_blur_time);
+		frame_time += ssao_blur_time;
+
+		uint64_t output_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+		stats_log(vk->stats, "vk_barrier_timing_output", output_time);
+		frame_time += output_time;
+	}
+
 	uint32_t image_idx;
-	result = vk->table.vkAcquireNextImageKHR(vk->device,
-		vk->swapchain, UINT64_MAX, vk->barrier->semaphore, VK_NULL_HANDLE, &image_idx);
+	result = vk->table.vkAcquireNextImageKHR(vk->device, vk->swapchain,
+		UINT64_MAX, vk->barrier->semaphore, VK_NULL_HANDLE, &image_idx);
 	if(result == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		vk_recreate_swapchain(vk);
@@ -7777,8 +8166,7 @@ vk_draw(
 
 	if(frame->barrier)
 	{
-		result = vk->table.vkWaitForFences(vk->device,
-			1, &frame->barrier->fence, VK_TRUE, UINT64_MAX);
+		result = vk->table.vkWaitForFences(vk->device, 1, &frame->barrier->fence, VK_TRUE, UINT64_MAX);
 		hard_assert_eq(result, VK_SUCCESS);
 	}
 	frame->barrier = vk->barrier;
@@ -7787,6 +8175,9 @@ vk_draw(
 	hard_assert_eq(result, VK_SUCCESS);
 
 
+
+	uint64_t start_time = time_get();
+	simulation_update(vk->simulation);
 
 	result = vk->table.vkResetCommandBuffer(vk->barrier->command_buffer, 0);
 	hard_assert_eq(result, VK_SUCCESS);
@@ -7799,8 +8190,7 @@ vk_draw(
 		.pInheritanceInfo = NULL
 	};
 
-	result = vk->table.vkBeginCommandBuffer(
-		vk->barrier->command_buffer, &command_buffer_info);
+	result = vk->table.vkBeginCommandBuffer(vk->barrier->command_buffer, &command_buffer_info);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	simulation_camera_t camera = simulation_get_camera(vk->simulation);
@@ -7865,11 +8255,29 @@ vk_draw(
 	}
 	VK_FOR_EACH_MODEL_END(entities_per_model, model);
 
+	vk_timing_reset(vk, &vk->barrier->timing);
+
+	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
 	vk_draw_shadow(vk, frame, &camera, &transform, entity_data);
+	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
+
+	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
 	vk_draw_scene(vk, frame, &camera, &transform, entity_data);
+	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
+
+	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
 	vk_draw_ssao(vk, frame, &camera, &transform, entity_data);
+	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
+
+	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
 	vk_draw_ssao_blur(vk, frame, &camera, &transform, entity_data);
+	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+
+	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
 	vk_draw_output(vk, frame, &camera, &transform, entity_data);
+	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+
+	vk_timing_query(vk, &vk->barrier->timing);
 
 	VK_FOR_EACH_MODEL(entities_per_model)
 	{
@@ -7933,6 +8341,12 @@ vk_draw(
 		hard_assert_eq(result, VK_SUCCESS);
 	}
 
+	uint64_t end_time = time_get();
+	stats_log(vk->stats, "vk_command_record_time", end_time - start_time);
+
+	frame_time += end_time - start_time;
+	stats_log(vk->stats, "vk_frame_time", frame_time);
+
 	if(++vk->barrier >= vk->barriers + MACRO_ARRAY_LEN(vk->barriers))
 	{
 		vk->barrier = vk->barriers;
@@ -7995,6 +8409,7 @@ vk_init_vk(
 
 	srand48(time(NULL));
 
+	vk_init_stats(vk);
 	vk_init_instance(vk);
 	vk_init_surface(vk);
 	vk_init_device(vk);
@@ -8033,6 +8448,7 @@ vk_free_vk(
 	vk_free_device(vk);
 	vk_free_surface(vk);
 	vk_free_instance(vk);
+	vk_free_stats(vk);
 }
 
 
@@ -8382,6 +8798,12 @@ vk_free(
 {
 	assert_not_null(vk);
 
+	if(!vk->options.window_enable)
+	{
+		alloc_free(vk, sizeof(*vk));
+		return;
+	}
+
 	window_manager_stop_running(vk->window.manager);
 	thread_join(vk->window.thread);
 
@@ -8405,8 +8827,7 @@ vk_init(
 
 	if(!vk->options.window_enable)
 	{
-		alloc_free(vk, sizeof(*vk));
-		return NULL;
+		return vk;
 	}
 
 	vk->simulation = simulation;

@@ -16,7 +16,7 @@
 
 #version 450
 
-layout(constant_id = 0) const float ssao_blur_radius = 8.0;
+layout(constant_id = 0) const float ssao_blur_radius = 5.0;
 layout(constant_id = 1) const float ssao_blur_falloff = 1.9;
 layout(constant_id = 2) const float ssao_blur_depth_tolerance = 256.0;
 
