@@ -33,9 +33,29 @@ collider_entity_type_t;
 
 typedef struct collider_entity
 {
-	rect_extent_3d_t rect_extent;
 	collider_entity_type_t type;
+
+	rect_extent_3d_t rect_extent;
 	rect_extent_3d_t* external;
+
+	union
+	{
+		struct
+		{
+			float r;
+			uint32_t collision_count;
+			rect_extent_3d_t new_extent;
+			triplet_t a;
+			triplet_t v;
+		};
+
+		struct
+		{
+			triplet_t v0;
+			triplet_t v1;
+			triplet_t v2;
+		};
+	};
 }
 collider_entity_t;
 

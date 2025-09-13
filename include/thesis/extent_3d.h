@@ -128,6 +128,53 @@ typedef struct rect_extent_3d
 rect_extent_3d_t;
 
 
+extern float
+triplet_dot(
+	triplet_t a,
+	triplet_t b
+	);
+
+
+extern float
+triplet_length(
+	triplet_t v
+	);
+
+
+extern triplet_t
+triplet_normalize(
+	triplet_t v
+	);
+
+
+extern triplet_t
+triplet_scale(
+	triplet_t v,
+	float s
+	);
+
+
+extern triplet_t
+triplet_add(
+	triplet_t a,
+	triplet_t b
+	);
+
+
+extern triplet_t
+triplet_sub(
+	triplet_t a,
+	triplet_t b
+	);
+
+
+extern triplet_t
+triplet_cross(
+	triplet_t a,
+	triplet_t b
+	);
+
+
 extern bool
 rect_extent_3d_intersects(
 	rect_extent_3d_t a,

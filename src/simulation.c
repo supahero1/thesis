@@ -26,6 +26,8 @@
 
 #include <stdatomic.h>
 
+#define SIMULATION_STATS_SIZE 64
+
 
 typedef struct simulation_texture_info
 {
@@ -116,6 +118,8 @@ simulation_init(
 	simulation->stats = stats_init();
 	simulation->collider = collider_init(simulation->stats);
 
+	stats_add(simulation->stats, "simulation_update", SIMULATION_STATS_SIZE);
+
 	atomic_flag_clear(&simulation->stopped);
 
 	event_target_init(&simulation->event_table.free_target);
@@ -138,6 +142,8 @@ simulation_free(
 	event_target_fire(&simulation->event_table.free_target, &event_data);
 
 	event_target_free(&simulation->event_table.free_target);
+
+	stats_del(simulation->stats, "simulation_update");
 
 	collider_free(simulation->collider);
 	stats_free(simulation->stats);
@@ -208,9 +214,14 @@ simulation_add_triangle_collider_entity(
 
 	collider_entity_t collider_entity =
 	{
-		.rect_extent = extent,
 		.type = COLLIDER_ENTITY_TYPE_TRIANGLE,
-		.external = NULL // TODO
+
+		.rect_extent = extent,
+		.external = NULL, // TODO
+
+		.v0 = {{ v0[0], v0[1], v0[2] }},
+		.v1 = {{ v1[0], v1[1], v1[2] }},
+		.v2 = {{ v2[0], v2[1], v2[2] }}
 	};
 	collider_add(simulation->collider, &collider_entity);
 }
@@ -261,11 +272,39 @@ simulation_add_collider_entity(
 		return;
 	}
 
+	vec3 center = { 0.0f, 0.0f, 0.0f };
+	vec3 last_vertex = { 0.0f, 0.0f, 0.0f };
+
+	model_t* model = simulation->info.models[entity->model_idx];
+	for(uint32_t i = 0; i < model->mesh_count; ++i)
+	{
+		mesh_t* mesh = &model->meshes[i];
+
+		for(uint32_t v = 0; v < mesh->vertex_count; ++v)
+		{
+			glm_vec3_add(center, mesh->vertices[v], center);
+			glm_vec3_copy(mesh->vertices[v], last_vertex);
+		}
+	}
+
+	glm_vec3_scale(center, 1.0f / (float) model->mesh_count, center);
+
+	float radius = glm_vec3_distance(center, last_vertex);
+
 	collider_entity_t collider_entity =
 	{
-		.rect_extent = {},
 		.type = COLLIDER_ENTITY_TYPE_SPHERE,
-		.external = NULL // TODO
+
+		.rect_extent =
+		{
+			.min = {{ center[0] - radius, center[1] - radius, center[2] - radius }},
+			.max = {{ center[0] + radius, center[1] + radius, center[2] + radius }}
+		},
+		.external = NULL, // TODO
+
+		.a = {{ 0.0f, 0.0f, 0.0f }},
+		.v = {{ 0.0f, 0.0f, 0.0f }},
+		.r = radius
 	};
 	collider_add(simulation->collider, &collider_entity);
 }
@@ -705,6 +744,8 @@ simulation_update(
 	simulation->last_update = now;
 
 	collider_update(simulation->collider, delta);
+
+	stats_log(simulation->stats, "simulation_update", time_get() - now);
 
 	sync_mtx_unlock(&simulation->mutex);
 }

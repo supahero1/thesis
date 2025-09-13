@@ -58,9 +58,6 @@ bin/shaders/%.frag.spv: shaders/%.frag | bin/shaders/ thesis/shaders/
 	glslc -O -fshader-stage=frag $< -o $@
 	$(CP) $@ thesis/shaders/
 
-bin/shaders/ssao_blur_h.frag.spv: shaders/ssao_blur.frag
-bin/shaders/ssao_blur_v.frag.spv: shaders/ssao_blur.frag
-
 .PHONY: shaders
 shaders: $(BIN_SHADERS)
 

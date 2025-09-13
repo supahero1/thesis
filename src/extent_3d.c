@@ -16,6 +16,106 @@
 
 #include <thesis/extent_3d.h>
 
+#include <math.h>
+
+
+float
+triplet_dot(
+	triplet_t a,
+	triplet_t b
+	)
+{
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+
+float
+triplet_length(
+	triplet_t v
+	)
+{
+	return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+
+triplet_t
+triplet_normalize(
+	triplet_t v
+	)
+{
+	float len = triplet_length(v);
+	if(len > 0.0f)
+	{
+		return triplet_scale(v, 1.0f / len);
+	}
+
+	return (triplet_t){{ 0.0f, 1.0f, 0.0f }};
+}
+
+
+triplet_t
+triplet_scale(
+	triplet_t v,
+	float s
+	)
+{
+	return
+	(triplet_t)
+	{
+		.x = v.x * s,
+		.y = v.y * s,
+		.z = v.z * s
+	};
+}
+
+
+triplet_t
+triplet_add(
+	triplet_t a,
+	triplet_t b
+	)
+{
+	return
+	(triplet_t)
+	{
+		.x = a.x + b.x,
+		.y = a.y + b.y,
+		.z = a.z + b.z
+	};
+}
+
+
+triplet_t
+triplet_sub(
+	triplet_t a,
+	triplet_t b
+	)
+{
+	return
+	(triplet_t)
+	{
+		.x = a.x - b.x,
+		.y = a.y - b.y,
+		.z = a.z - b.z
+	};
+}
+
+
+triplet_t
+triplet_cross(
+	triplet_t a,
+	triplet_t b
+	)
+{
+	return
+	(triplet_t)
+	{
+		.x = a.y * b.z - a.z * b.y,
+		.y = a.z * b.x - a.x * b.z,
+		.z = a.x * b.y - a.y * b.x
+	};
+}
+
 
 bool
 rect_extent_3d_intersects(
