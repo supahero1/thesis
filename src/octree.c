@@ -1,3 +1,4 @@
+/* skip */
 /*
  *   Copyright 2025 Franciszek Balcerak
  *
@@ -63,7 +64,7 @@ octree_init(
 	ot->reinsertions_used = 0;
 	ot->reinsertions_size = 0;
 
-	assert_neq(ot->nodes, NULL);
+	assert_not_null(ot->nodes);
 
 	ot->nodes[0].head = 0;
 	ot->nodes[0].count = 0;
@@ -275,7 +276,7 @@ octree_insert(
 		ot->insertions = alloc_remalloc(ot->insertions,
 			sizeof(*ot->insertions) * ot->insertions_size,
 			sizeof(*ot->insertions) * new_size);
-		assert_neq(ot->insertions, NULL);
+		assert_not_null(ot->insertions);
 
 		ot->insertions_size = new_size;
 	}
@@ -300,7 +301,7 @@ octree_remove(
 		ot->removals = alloc_remalloc(ot->removals,
 			sizeof(*ot->removals) * ot->removals_size,
 			sizeof(*ot->removals) * new_size);
-		assert_neq(ot->removals, NULL);
+		assert_not_null(ot->removals);
 
 		ot->removals_size = new_size;
 	}
@@ -440,7 +441,7 @@ octree_normalize(
 						node_entities = alloc_remalloc(node_entities,
 							sizeof(*node_entities) * node_entities_size,
 							sizeof(*node_entities) * new_size);
-						assert_neq(node_entities, NULL);
+						assert_not_null(node_entities);
 
 						node_entities_size = new_size;
 					}
@@ -572,7 +573,7 @@ octree_normalize(
 					entities = alloc_remalloc(entities,
 						sizeof(*entities) * entities_size,
 						sizeof(*entities) * new_size);
-					assert_neq(entities, NULL);
+					assert_not_null(entities);
 
 					entities_size = new_size;
 				}
@@ -625,7 +626,7 @@ octree_normalize(
 						node_entities = alloc_remalloc(node_entities,
 							sizeof(*node_entities) * node_entities_size,
 							sizeof(*node_entities) * new_size);
-						assert_neq(node_entities, NULL);
+						assert_not_null(node_entities);
 
 						node_entities_size = new_size;
 					}
@@ -633,9 +634,6 @@ octree_normalize(
 					node_entity_idx = node_entities_used++;
 					node_entity = node_entities + node_entity_idx;
 				}
-
-				node_entity_idx = node_entities_used++;
-				node_entity = node_entities + node_entity_idx;
 
 				node_entity->next = node->head;
 				node_entity->entity = entity_idx;
@@ -701,16 +699,16 @@ octree_normalize(
 		}
 
 		new_nodes = alloc_malloc(sizeof(*new_nodes) * new_nodes_size);
-		assert_neq(new_nodes, NULL);
+		assert_not_null(new_nodes);
 
 		new_node_entities = alloc_malloc(sizeof(*new_node_entities) * new_node_entities_size);
-		assert_neq(new_node_entities, NULL);
+		assert_not_null(new_node_entities);
 
 		new_entities = alloc_malloc(sizeof(*new_entities) * new_entities_size);
-		assert_neq(new_entities, NULL);
+		assert_not_null(new_entities);
 
 		uint32_t* entity_map = alloc_calloc(sizeof(*entity_map) * entities_size);
-		assert_neq(entity_map, NULL);
+		assert_not_null(entity_map);
 
 
 		typedef struct octree_node_reorder_info
@@ -802,6 +800,17 @@ octree_normalize(
 
 						node->position_flags |= child->position_flags;
 
+						if(!node->count)
+						{
+							node->count = child->count;
+							node->head = child->head;
+
+							child->next = free_node;
+							free_node = child_idx;
+
+							continue;
+						}
+
 						uint32_t node_entity_idx = child->head;
 						while(node_entity_idx)
 						{
@@ -868,7 +877,7 @@ octree_normalize(
 							nodes = alloc_remalloc(nodes,
 								sizeof(*nodes) * nodes_size,
 								sizeof(*nodes) * new_size);
-							assert_neq(nodes, NULL);
+							assert_not_null(nodes);
 
 							nodes_size = new_size;
 
@@ -880,7 +889,7 @@ octree_normalize(
 								new_nodes = alloc_remalloc(new_nodes,
 									sizeof(*nodes) * new_nodes_size,
 									sizeof(*nodes) * new_size);
-								assert_neq(new_nodes, NULL);
+								assert_not_null(new_nodes);
 
 								new_nodes_size = new_size;
 
@@ -911,14 +920,14 @@ octree_normalize(
 
 					static const uint32_t position_flags_mask[8] =
 					{
-						0b101010, /* TRF (top-right-front) */
-						0b101001, /* TRB (top-right-back) */
-						0b110010, /* TLF (top-left-front) */
-						0b110001, /* TLB (top-left-back) */
-						0b001110, /* BRF (bottom-right-front) */
-						0b001101, /* BRB (bottom-right-back) */
-						0b010110,  /* BLF (bottom-left-front) */
-						0b010101, /* BLB (bottom-left-back) */
+						0b101010,
+						0b101001,
+						0b100110,
+						0b100101,
+						0b011010,
+						0b011001,
+						0b010110,
+						0b010101,
 					};
 
 					child->position_flags = position_flags & position_flags_mask[i];
@@ -1010,7 +1019,7 @@ octree_normalize(
 								node_entities = alloc_remalloc(node_entities,
 									sizeof(*node_entities) * node_entities_size,
 									sizeof(*node_entities) * new_size);
-								assert_neq(node_entities, NULL);
+								assert_not_null(node_entities);
 
 								node_entities_size = new_size;
 
@@ -1022,7 +1031,7 @@ octree_normalize(
 									new_node_entities = alloc_remalloc(new_node_entities,
 										sizeof(*new_node_entities) * new_node_entities_size,
 										sizeof(*new_node_entities) * new_size);
-									assert_neq(new_node_entities, NULL);
+									assert_not_null(new_node_entities);
 
 									new_node_entities_size = new_size;
 								}
@@ -1311,8 +1320,8 @@ octree_update(
 			octree_descend((
 				(rect_extent_3d_t)
 				{
-				{{{ info.extent.x, info.extent.x }}},
-				{{{ info.extent.y, info.extent.y }}}
+					.min = {{ info.extent.x, info.extent.y, info.extent.z }},
+					.max = {{ info.extent.x, info.extent.y, info.extent.z }}
 				}
 				));
 			continue;
@@ -1353,7 +1362,7 @@ octree_update(
 							reinsertions = alloc_remalloc(reinsertions,
 								sizeof(*reinsertions) * reinsertions_size,
 								sizeof(*reinsertions) * new_size);
-							assert_neq(reinsertions, NULL);
+							assert_not_null(reinsertions);
 
 							reinsertions_size = new_size;
 						}
@@ -1371,10 +1380,12 @@ octree_update(
 			}
 
 			if(
-				(extent.max_x < node_extent.min_x && !(node->position_flags & 0b0001)) ||
-				(extent.max_y < node_extent.min_y && !(node->position_flags & 0b0010)) ||
-				(node_extent.max_x < extent.min_x && !(node->position_flags & 0b0100)) ||
-				(node_extent.max_y < extent.min_y && !(node->position_flags & 0b1000))
+				(extent.max_x < node_extent.min_x && !(node->position_flags & 0b100000)) ||
+				(extent.max_y < node_extent.min_y && !(node->position_flags & 0b001000)) ||
+				(extent.max_z < node_extent.min_z && !(node->position_flags & 0b000010)) ||
+				(node_extent.max_x < extent.min_x && !(node->position_flags & 0b010000)) ||
+				(node_extent.max_y < extent.min_y && !(node->position_flags & 0b000100)) ||
+				(node_extent.max_z < extent.min_z && !(node->position_flags & 0b000001))
 				)
 			{
 				uint32_t node_removal_idx;
@@ -1387,7 +1398,7 @@ octree_update(
 					node_removals = alloc_remalloc(node_removals,
 						sizeof(*node_removals) * node_removals_size,
 						sizeof(*node_removals) * new_size);
-					assert_neq(node_removals, NULL);
+					assert_not_null(node_removals);
 
 					node_removals_size = new_size;
 				}
@@ -1527,7 +1538,7 @@ octree_collide(
 #if OCTREE_DEDUPE_COLLISIONS == 1
 	uint32_t ht_size = ot->ht_entries_used * 2;
 	uint32_t* ht = alloc_calloc(sizeof(*ht) * ht_size);
-	assert_neq(ht, NULL);
+	assert_not_null(ht);
 
 	octree_ht_entry_t* ht_entries = ot->ht_entries;
 
@@ -1608,7 +1619,7 @@ octree_collide(
 					ht_entries = alloc_remalloc(ht_entries,
 						sizeof(*ht_entries) * ht_entries_size,
 						sizeof(*ht_entries) * new_size);
-					assert_neq(ht_entries, NULL);
+					assert_not_null(ht_entries);
 
 					ht_entries_size = new_size;
 				}
@@ -1642,7 +1653,7 @@ octree_collide(
 		ht_entries = alloc_remalloc(ht_entries,
 			sizeof(*ht_entries) * ht_entries_size,
 			sizeof(*ht_entries) * new_size);
-		assert_neq(ht_entries, NULL);
+		assert_not_null(ht_entries);
 
 		ht_entries_size = new_size;
 	}

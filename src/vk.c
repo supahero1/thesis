@@ -8176,8 +8176,8 @@ vk_draw(
 
 
 
-	uint64_t start_time = time_get();
 	simulation_update(vk->simulation);
+	uint64_t start_time = time_get();
 
 	result = vk->table.vkResetCommandBuffer(vk->barrier->command_buffer, 0);
 	hard_assert_eq(result, VK_SUCCESS);
@@ -8198,8 +8198,7 @@ vk_draw(
 		vk->simulation, vk->screen_extent.width, vk->screen_extent.height);
 
 	uint32_t sim_entity_count;
-	simulation_entity_data_t* sim_entity_data =
-		simulation_get_entity_data(vk->simulation, &sim_entity_count);
+	simulation_entity_data_t* sim_entity_data = simulation_get_entity_data(vk->simulation, &sim_entity_count);
 
 	simulation_entity_data_t* sim_entity = sim_entity_data;
 	simulation_entity_data_t* sim_entity_end = sim_entity + sim_entity_count;

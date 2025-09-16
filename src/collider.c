@@ -19,13 +19,11 @@
 #include <thesis/collider.h>
 #include <thesis/alloc_ext.h>
 
-#define octree_entity_data collider_entity_t
-#define octree_get_entity_data_rect_extent(entity) (entity).rect_extent
 #include <thesis/octree.h>
 
 #include <stddef.h>
 
-#define COLLIDER_MAP_SIZE 16384.0f
+#define COLLIDER_MAP_SIZE 1000000.0f
 #define COLLIDER_STATS_SIZE 64
 #define COLLIDER_RESTITUTION 0.8f
 #define COLLISION_IMPULSE_FACTOR -(1.0f + COLLIDER_RESTITUTION)
@@ -113,6 +111,7 @@ collider_query_entity(
 	if(collider->query_entities_used >= collider->query_entities_size)
 	{
 		uint32_t new_size = (collider->query_entities_size << 1) | 1;
+
 		collider->query_entities = alloc_remalloc(
 			collider->query_entities,
 			sizeof(*collider->query_entities) * collider->query_entities_size,
@@ -159,6 +158,7 @@ collider_query(
 	if(collider->query_entities_used < collider->query_entities_size / 4)
 	{
 		uint32_t new_size = collider->query_entities_size >> 1;
+
 		collider->query_entities = alloc_remalloc(
 			collider->query_entities,
 			sizeof(*collider->query_entities) * collider->query_entities_size,
@@ -167,22 +167,6 @@ collider_query(
 		assert_not_null(collider->query_entities);
 
 		collider->query_entities_size = new_size;
-	}
-}
-
-
-private octree_status_t
-collider_type_to_status(
-	collider_entity_type_t type
-	)
-{
-	switch(type)
-	{
-
-	case COLLIDER_ENTITY_TYPE_TRIANGLE: return OCTREE_STATUS_NOT_CHANGED;
-	case COLLIDER_ENTITY_TYPE_SPHERE: return OCTREE_STATUS_CHANGED;
-	default: assert_unreachable();
-
 	}
 }
 
@@ -306,23 +290,7 @@ collider_collision_update_entity(
 			float penetration_depth = entity_a->r - triplet_length(penetration);
 			triplet_t correction = triplet_scale(normal, penetration_depth);
 
-			center_a = triplet_sub(center_a, correction);
-			entity_a->new_extent.min = triplet_add(entity_a->new_extent.min,
-				(triplet_t)
-				{{
-					center_a.x - entity_a->r,
-					center_a.y - entity_a->r,
-					center_a.z - entity_a->r
-				}}
-				);
-			entity_a->new_extent.max = triplet_add(entity_a->new_extent.max,
-				(triplet_t)
-				{{
-					center_a.x + entity_a->r,
-					center_a.y + entity_a->r,
-					center_a.z + entity_a->r
-				}}
-				);
+			entity_a->correction = triplet_add(entity_a->correction, correction);
 			++entity_a->collision_count;
 
 			float relative_velocity = triplet_dot(entity_a->v, normal);
@@ -359,42 +327,10 @@ collider_collision_update_entity(
 			float penetration_depth = entity_a->r + entity_b->r - distance;
 			triplet_t correction = triplet_scale(normal, penetration_depth * 0.5f);
 
-			center_a = triplet_sub(center_a, correction);
-			entity_a->new_extent.min = triplet_add(entity_a->new_extent.min,
-				(triplet_t)
-				{{
-					center_a.x - entity_a->r,
-					center_a.y - entity_a->r,
-					center_a.z - entity_a->r
-				}}
-				);
-			entity_a->new_extent.max = triplet_add(entity_a->new_extent.max,
-				(triplet_t)
-				{{
-					center_a.x + entity_a->r,
-					center_a.y + entity_a->r,
-					center_a.z + entity_a->r
-				}}
-				);
+			entity_a->correction = triplet_add(entity_a->correction, correction);
 			++entity_a->collision_count;
 
-			center_b = triplet_add(center_b, correction);
-			entity_b->new_extent.min = triplet_add(entity_b->new_extent.min,
-				(triplet_t)
-				{{
-					center_b.x - entity_b->r,
-					center_b.y - entity_b->r,
-					center_b.z - entity_b->r
-				}}
-				);
-			entity_b->new_extent.max = triplet_add(entity_b->new_extent.max,
-				(triplet_t)
-				{{
-					center_b.x + entity_b->r,
-					center_b.y + entity_b->r,
-					center_b.z + entity_b->r
-				}}
-				);
+			entity_b->correction = triplet_sub(entity_b->correction, correction);
 			++entity_b->collision_count;
 
 			triplet_t velocity_diff = triplet_sub(entity_a->v, entity_b->v);
@@ -436,7 +372,7 @@ collider_collision_update_fn(
 }
 
 
-private void
+private bool
 collider_resolution_update_entity(
 	collider_t collider,
 	uint32_t entity_idx,
@@ -450,24 +386,29 @@ collider_resolution_update_entity(
 
 	if(entity->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
 	{
-		return;
+		return false;
 	}
 
 	if(!entity->collision_count)
 	{
-		return;
+		return false;
 	}
 
-	float mul = 0.5f / entity->collision_count;
 	triplet_t pos =
 	{
-		.x = (entity->new_extent.min.x + entity->new_extent.max.x) * mul,
-		.y = (entity->new_extent.min.y + entity->new_extent.max.y) * mul,
-		.z = (entity->new_extent.min.z + entity->new_extent.max.z) * mul
+		.x = (entity->rect_extent.min.x + entity->rect_extent.max.x) * 0.5f,
+		.y = (entity->rect_extent.min.y + entity->rect_extent.max.y) * 0.5f,
+		.z = (entity->rect_extent.min.z + entity->rect_extent.max.z) * 0.5f
 	};
 
-	entity->a = (triplet_t){{ 0.0f, -9.81f, 0.0f }};
-	entity->v = triplet_add(entity->v, triplet_scale(entity->a, collider->delta));
+	entity->correction = triplet_scale(entity->correction, 1.0f / entity->collision_count);
+	entity->collision_count = 0;
+
+	pos = triplet_add(pos, entity->correction);
+	entity->correction = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+
+	triplet_t a = (triplet_t){{ 0.0f, -9.81f, 0.0f }};
+	entity->v = triplet_add(entity->v, triplet_scale(a, collider->delta));
 	pos = triplet_add(pos, triplet_scale(entity->v, collider->delta));
 
 	entity->rect_extent =
@@ -479,8 +420,10 @@ collider_resolution_update_entity(
 
 	if(entity->external)
 	{
-		*entity->external = entity->rect_extent;
+		*entity->external = pos;
 	}
+
+	return true;
 }
 
 
@@ -495,9 +438,9 @@ collider_resolution_update_fn(
 	assert_not_null(entity);
 
 	collider_t collider = MACRO_CONTAINER_OF(ot, struct collider, octree);
-	collider_resolution_update_entity(collider, entity_idx, entity);
+	bool status = collider_resolution_update_entity(collider, entity_idx, entity);
 
-	return collider_type_to_status(entity->type);
+	return status ? OCTREE_STATUS_CHANGED : OCTREE_STATUS_NOT_CHANGED;
 }
 
 

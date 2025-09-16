@@ -43,7 +43,6 @@ model_init(
 	model_t* model = alloc_malloc(sizeof(*model));
 	assert_not_null(model);
 
-	printf("%s\n", path);
 	const struct aiScene* scene = aiImportFile(
 		path,
 		aiProcess_GenNormals |

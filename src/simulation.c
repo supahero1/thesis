@@ -101,7 +101,6 @@ simulation_init(
 	assert_not_null(simulation);
 
 	sync_mtx_init(&simulation->mutex);
-	simulation->last_update = time_get();
 
 	camera.fov = glm_rad(camera.fov);
 	camera.angle[0] = glm_rad(camera.angle[0]);
@@ -217,7 +216,6 @@ simulation_add_triangle_collider_entity(
 		.type = COLLIDER_ENTITY_TYPE_TRIANGLE,
 
 		.rect_extent = extent,
-		.external = NULL, // TODO
 
 		.v0 = {{ v0[0], v0[1], v0[2] }},
 		.v1 = {{ v1[0], v1[1], v1[2] }},
@@ -276,18 +274,20 @@ simulation_add_collider_entity(
 	vec3 last_vertex = { 0.0f, 0.0f, 0.0f };
 
 	model_t* model = simulation->info.models[entity->model_idx];
+	uint32_t divisor = 0;
 	for(uint32_t i = 0; i < model->mesh_count; ++i)
 	{
 		mesh_t* mesh = &model->meshes[i];
 
 		for(uint32_t v = 0; v < mesh->vertex_count; ++v)
 		{
+			++divisor;
 			glm_vec3_add(center, mesh->vertices[v], center);
 			glm_vec3_copy(mesh->vertices[v], last_vertex);
 		}
 	}
 
-	glm_vec3_scale(center, 1.0f / (float) model->mesh_count, center);
+	glm_vec3_scale(center, 1.0f / divisor, center);
 
 	float radius = glm_vec3_distance(center, last_vertex);
 
@@ -300,11 +300,12 @@ simulation_add_collider_entity(
 			.min = {{ center[0] - radius, center[1] - radius, center[2] - radius }},
 			.max = {{ center[0] + radius, center[1] + radius, center[2] + radius }}
 		},
-		.external = NULL, // TODO
 
-		.a = {{ 0.0f, 0.0f, 0.0f }},
-		.v = {{ 0.0f, 0.0f, 0.0f }},
-		.r = radius
+		.external = (void*) &entity->translation,
+		.correction = {{ 0.0f, 0.0f, 0.0f }},
+		.collision_count = 0,
+		.r = radius,
+		.v = {{ 0.0f, 0.0f, 0.0f }}
 	};
 	collider_add(simulation->collider, &collider_entity);
 }
@@ -379,9 +380,7 @@ simulation_get_entity_data(
 		*data_count = simulation->entity_count;
 	}
 
-	simulation_entity_data_t* data = alloc_malloc(
-		sizeof(*data) * simulation->entity_count
-		);
+	simulation_entity_data_t* data = alloc_malloc(sizeof(*data) * simulation->entity_count);
 	assert_ptr(data, sizeof(*data) * simulation->entity_count);
 
 	for(uint32_t i = 0; i < simulation->entity_count; ++i)
@@ -740,6 +739,13 @@ simulation_update(
 	sync_mtx_lock(&simulation->mutex);
 
 	uint64_t now = time_get();
+	if(!simulation->last_update)
+	{
+		simulation->last_update = now;
+		sync_mtx_unlock(&simulation->mutex);
+		return;
+	}
+
 	float delta = (float)(now - simulation->last_update) / time_ms_to_ns(1) / 16.66667f;
 	simulation->last_update = now;
 

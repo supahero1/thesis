@@ -36,21 +36,21 @@ typedef struct collider_entity
 	collider_entity_type_t type;
 
 	rect_extent_3d_t rect_extent;
-	rect_extent_3d_t* external;
 
 	union
 	{
 		struct
 		{
-			float r;
+			triplet_t* external;
+			triplet_t correction;
 			uint32_t collision_count;
-			rect_extent_3d_t new_extent;
-			triplet_t a;
+			float r;
 			triplet_t v;
 		};
 
 		struct
 		{
+			void* nil;
 			triplet_t v0;
 			triplet_t v1;
 			triplet_t v2;
@@ -58,6 +58,10 @@ typedef struct collider_entity
 	};
 }
 collider_entity_t;
+
+
+#define octree_entity_data collider_entity_t
+#define octree_get_entity_data_rect_extent(entity) (entity).rect_extent
 
 
 extern collider_t

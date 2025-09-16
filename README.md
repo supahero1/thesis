@@ -14,4 +14,6 @@ My engineering thesis.
 
 `assets/basketball_court__low-poly`: [Author](https://sketchfab.com/3d-models/basketball-court-low-poly-3da336056a714ba2a5687766b6373556), [License](https://creativecommons.org/licenses/by/4.0/)
 
+`assets/basketball_and1_xcelerate`: [Author](https://sketchfab.com/3d-models/basketball-and1-xcelerate-fb622d6d508044a4b312f08fec445215), [License](https://creativecommons.org/licenses/by/4.0/)
+
 All other files are licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).

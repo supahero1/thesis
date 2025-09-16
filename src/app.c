@@ -120,6 +120,18 @@ app_init(
 		}
 		);
 
+	simulation_add_entity(
+		app->simulation,
+		(simulation_entity_init_t)
+		{
+			.model_path = "assets/basketball_and1_xcelerate/scene.gltf",
+			.translation = { -1000.0f, 200.0f, -100.0f },
+			.rotation = { 0.0f, 0.0f, 0.0f },
+			.scale = 100.0f,
+			.dynamic = true
+		}
+		);
+
 	app->vk = vk_init(app->simulation);
 	app->xr = xr_init(app->simulation);
 

@@ -27,7 +27,7 @@
 #define OCTREE_DEDUPE_COLLISIONS 1
 
 /* Do not modify unless you know what you are doing. Use octree.min_size. */
-#define OCTREE_MAX_DEPTH 20
+#define OCTREE_MAX_DEPTH 30
 
 /* Do not modify */
 #define OCTREE_DFS_LENGTH (OCTREE_MAX_DEPTH * 7 + 1)

@@ -1,0 +1,11 @@
+Model Information:
+* title:	BASKETBALL AND1 XCELERATE
+* source:	https://sketchfab.com/3d-models/basketball-and1-xcelerate-fb622d6d508044a4b312f08fec445215
+* author:	Mikhail Kadilnikov (https://sketchfab.com/MikhailKadilnikov)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "BASKETBALL AND1 XCELERATE" (https://sketchfab.com/3d-models/basketball-and1-xcelerate-fb622d6d508044a4b312f08fec445215) by Mikhail Kadilnikov (https://sketchfab.com/MikhailKadilnikov) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
