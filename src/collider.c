@@ -359,11 +359,6 @@ collider_ball_resolve(
 	assert_not_null(collider);
 	assert_not_null(entity);
 
-	if(!entity->collision_count)
-	{
-		return false;
-	}
-
 	triplet_t pos =
 	{
 		.x = (entity->rect_extent.min.x + entity->rect_extent.max.x) * 0.5f,
@@ -371,13 +366,16 @@ collider_ball_resolve(
 		.z = (entity->rect_extent.min.z + entity->rect_extent.max.z) * 0.5f
 	};
 
-	entity->correction = triplet_scale(entity->correction, 1.0f / entity->collision_count);
-	entity->collision_count = 0;
+	if(entity->collision_count)
+	{
+		entity->correction = triplet_scale(entity->correction, 1.0f / entity->collision_count);
+		entity->collision_count = 0;
+	}
 
 	pos = triplet_add(pos, entity->correction);
 	entity->correction = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
 
-	triplet_t a = (triplet_t){{ 0.0f, -9.81f, 0.0f }};
+	triplet_t a = (triplet_t){{ 0.0f, -0.1f, 0.0f }};
 	entity->v = triplet_add(entity->v, triplet_scale(a, collider->delta));
 	pos = triplet_add(pos, triplet_scale(entity->v, collider->delta));
 

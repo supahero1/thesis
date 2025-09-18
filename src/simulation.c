@@ -288,8 +288,9 @@ simulation_add_collider_entity(
 	}
 
 	glm_vec3_scale(center, 1.0f / divisor, center);
-
 	float radius = glm_vec3_distance(center, last_vertex);
+	glm_vec3_add(center, entity->translation, center);
+	glm_vec3_zero(entity->translation);
 
 	collider_entity_t collider_entity =
 	{
