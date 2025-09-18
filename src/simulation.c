@@ -301,10 +301,9 @@ simulation_add_collider_entity(
 			.max = {{ center[0] + radius, center[1] + radius, center[2] + radius }}
 		},
 
+		.collision_count = 0,
 		.external = (void*) &entity->translation,
 		.correction = {{ 0.0f, 0.0f, 0.0f }},
-		.collision_count = 0,
-		.r = radius,
 		.v = {{ 0.0f, 0.0f, 0.0f }}
 	};
 	collider_add(simulation->collider, &collider_entity);

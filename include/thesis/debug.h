@@ -178,3 +178,4 @@ assert_failed(										\
 #define assert_ctor assert_attr(constructor)
 #define assert_dtor assert_attr(destructor)
 #define assert_used assert_attr(used)
+#define assert_packed assert_attr(packed)

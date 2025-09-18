@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <thesis/debug.h>
 #include <thesis/macro.h>
 #include <thesis/stats.h>
 #include <thesis/extent_3d.h>
@@ -39,18 +40,16 @@ typedef struct collider_entity
 
 	union
 	{
-		struct
+		struct assert_packed
 		{
+			uint32_t collision_count;
 			triplet_t* external;
 			triplet_t correction;
-			uint32_t collision_count;
-			float r;
 			triplet_t v;
 		};
 
 		struct
 		{
-			void* nil;
 			triplet_t v0;
 			triplet_t v1;
 			triplet_t v2;

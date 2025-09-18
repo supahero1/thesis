@@ -15,7 +15,6 @@
  */
 
 #include <thesis/time.h>
-#include <thesis/debug.h>
 #include <thesis/collider.h>
 #include <thesis/alloc_ext.h>
 
@@ -35,6 +34,9 @@ struct collider
 	octree_t octree;
 	float delta;
 
+	collider_entity_t* balls;
+	uint32_t balls_count;
+
 	collider_entity_t** query_entities;
 	uint32_t query_entities_used;
 	uint32_t query_entities_size;
@@ -51,8 +53,8 @@ collider_init(
 
 	collider->stats = stats;
 	stats_add(collider->stats, "collider_normalize", COLLIDER_STATS_SIZE);
-	stats_add(collider->stats, "collider_collision_update", COLLIDER_STATS_SIZE);
-	stats_add(collider->stats, "collider_resolution_update", COLLIDER_STATS_SIZE);
+	stats_add(collider->stats, "collider_collide", COLLIDER_STATS_SIZE);
+	stats_add(collider->stats, "collider_resolve", COLLIDER_STATS_SIZE);
 
 	collider->octree.half_extent =
 	(half_extent_3d_t)
@@ -76,8 +78,12 @@ collider_free(
 {
 	assert_not_null(collider);
 
-	stats_del(collider->stats, "collider_resolution_update");
-	stats_del(collider->stats, "collider_collision_update");
+	alloc_free(collider->query_entities, sizeof(*collider->query_entities) * collider->query_entities_size);
+
+	alloc_free(collider->balls, sizeof(*collider->balls) * collider->balls_count);
+
+	stats_del(collider->stats, "collider_resolve");
+	stats_del(collider->stats, "collider_collide");
 	stats_del(collider->stats, "collider_normalize");
 
 	octree_free(&collider->octree);
@@ -95,7 +101,20 @@ collider_add(
 	assert_not_null(collider);
 	assert_not_null(entity);
 
-	octree_insert(&collider->octree, entity);
+	if(entity->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
+	{
+		octree_insert(&collider->octree, entity);
+		return;
+	}
+
+	collider->balls = alloc_remalloc(
+		collider->balls,
+		sizeof(*collider->balls) * collider->balls_count,
+		sizeof(*collider->balls) * (collider->balls_count + 1)
+		);
+	assert_not_null(collider->balls);
+
+	collider->balls[collider->balls_count++] = *entity;
 }
 
 
@@ -238,23 +257,18 @@ collider_closest_point_on_triangle(
 
 
 private void
-collider_collision_update_entity(
-	collider_t collider,
-	uint32_t entity_idx,
-	collider_entity_t* entity_a
+collider_ball_collide_entity(
+	collider_entity_t* entity_a,
+	collider_entity_t* entity_b
 	)
 {
-	assert_not_null(collider);
 	assert_not_null(entity_a);
+	assert_not_null(entity_b);
 
-	(void) entity_idx;
-
-	if(entity_a->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
+	if(entity_a == entity_b)
 	{
 		return;
 	}
-
-	collider_query(collider, entity_a->rect_extent);
 
 	triplet_t center_a =
 	{
@@ -262,132 +276,88 @@ collider_collision_update_entity(
 		.y = (entity_a->rect_extent.min.y + entity_a->rect_extent.max.y) * 0.5f,
 		.z = (entity_a->rect_extent.min.z + entity_a->rect_extent.max.z) * 0.5f
 	};
+	float radius_a = (entity_a->rect_extent.max.x - entity_a->rect_extent.min.x) * 0.5f;
 
-	for(uint32_t i = 0; i < collider->query_entities_used; ++i)
+	if(entity_b->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
 	{
-		collider_entity_t* entity_b = collider->query_entities[i];
-		if(entity_a == entity_b)
+		triplet_t closest_point = collider_closest_point_on_triangle(
+			center_a, entity_b->v0, entity_b->v1, entity_b->v2);
+
+		triplet_t penetration = triplet_sub(center_a, closest_point);
+		if(triplet_length(penetration) >= radius_a)
 		{
-			continue;
+			return;
 		}
 
-		switch(entity_b->type)
+		triplet_t normal = triplet_normalize(penetration);
+
+		float penetration_depth = radius_a - triplet_length(penetration);
+		triplet_t correction = triplet_scale(normal, penetration_depth);
+
+		entity_a->correction = triplet_add(entity_a->correction, correction);
+		++entity_a->collision_count;
+
+		float relative_velocity = triplet_dot(entity_a->v, normal);
+		if(relative_velocity >= 0.0f)
 		{
-
-		case COLLIDER_ENTITY_TYPE_TRIANGLE:
-		{
-			triplet_t closest_point = collider_closest_point_on_triangle(
-				center_a, entity_b->v0, entity_b->v1, entity_b->v2);
-
-			triplet_t penetration = triplet_sub(center_a, closest_point);
-			if(triplet_length(penetration) >= entity_a->r)
-			{
-				break;
-			}
-
-			triplet_t normal = triplet_normalize(penetration);
-
-			float penetration_depth = entity_a->r - triplet_length(penetration);
-			triplet_t correction = triplet_scale(normal, penetration_depth);
-
-			entity_a->correction = triplet_add(entity_a->correction, correction);
-			++entity_a->collision_count;
-
-			float relative_velocity = triplet_dot(entity_a->v, normal);
-			if(relative_velocity >= 0.0f)
-			{
-				break;
-			}
-
-			triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
-			entity_a->v = triplet_add(entity_a->v, impulse);
-
-			break;
+			return;
 		}
 
-		case COLLIDER_ENTITY_TYPE_SPHERE:
+		triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
+		entity_a->v = triplet_add(entity_a->v, impulse);
+	}
+	else /* COLLIDER_ENTITY_TYPE_SPHERE */
+	{
+		triplet_t center_b =
 		{
-			triplet_t center_b =
-			{
-				.x = (entity_b->rect_extent.min.x + entity_b->rect_extent.max.x) * 0.5f,
-				.y = (entity_b->rect_extent.min.y + entity_b->rect_extent.max.y) * 0.5f,
-				.z = (entity_b->rect_extent.min.z + entity_b->rect_extent.max.z) * 0.5f
-			};
+			.x = (entity_b->rect_extent.min.x + entity_b->rect_extent.max.x) * 0.5f,
+			.y = (entity_b->rect_extent.min.y + entity_b->rect_extent.max.y) * 0.5f,
+			.z = (entity_b->rect_extent.min.z + entity_b->rect_extent.max.z) * 0.5f
+		};
+		float radius_b = (entity_b->rect_extent.max.x - entity_b->rect_extent.min.x) * 0.5f;
 
-			triplet_t penetration = triplet_sub(center_a, center_b);
+		triplet_t penetration = triplet_sub(center_a, center_b);
 
-			float distance = triplet_length(penetration);
-			if(distance >= entity_a->r + entity_b->r)
-			{
-				break;
-			}
-
-			triplet_t normal = triplet_normalize(penetration);
-
-			float penetration_depth = entity_a->r + entity_b->r - distance;
-			triplet_t correction = triplet_scale(normal, penetration_depth * 0.5f);
-
-			entity_a->correction = triplet_add(entity_a->correction, correction);
-			++entity_a->collision_count;
-
-			entity_b->correction = triplet_sub(entity_b->correction, correction);
-			++entity_b->collision_count;
-
-			triplet_t velocity_diff = triplet_sub(entity_a->v, entity_b->v);
-			float relative_velocity = triplet_dot(velocity_diff, normal);
-			if(relative_velocity >= 0.0f)
-			{
-				break;
-			}
-
-			triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
-
-			entity_a->v = triplet_add(entity_a->v, impulse);
-			entity_b->v = triplet_sub(entity_b->v, impulse);
-
-			break;
+		float distance = triplet_length(penetration);
+		if(distance >= radius_a + radius_b)
+		{
+			return;
 		}
 
-		default: assert_unreachable();
+		triplet_t normal = triplet_normalize(penetration);
 
+		float penetration_depth = radius_a + radius_b - distance;
+		triplet_t correction = triplet_scale(normal, penetration_depth * 0.5f);
+
+		entity_a->correction = triplet_add(entity_a->correction, correction);
+		++entity_a->collision_count;
+
+		entity_b->correction = triplet_sub(entity_b->correction, correction);
+		++entity_b->collision_count;
+
+		triplet_t velocity_diff = triplet_sub(entity_a->v, entity_b->v);
+		float relative_velocity = triplet_dot(velocity_diff, normal);
+		if(relative_velocity >= 0.0f)
+		{
+			return;
 		}
+
+		triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
+
+		entity_a->v = triplet_add(entity_a->v, impulse);
+		entity_b->v = triplet_sub(entity_b->v, impulse);
 	}
 }
 
 
-private octree_status_t
-collider_collision_update_fn(
-	octree_t* ot,
-	uint32_t entity_idx,
-	collider_entity_t* entity
-	)
-{
-	assert_not_null(ot);
-	assert_not_null(entity);
-
-	collider_t collider = MACRO_CONTAINER_OF(ot, struct collider, octree);
-	collider_collision_update_entity(collider, entity_idx, entity);
-
-	return OCTREE_STATUS_NOT_CHANGED;
-}
-
-
 private bool
-collider_resolution_update_entity(
+collider_ball_resolve(
 	collider_t collider,
-	uint32_t entity_idx,
 	collider_entity_t* entity
 	)
 {
 	assert_not_null(collider);
 	assert_not_null(entity);
-
-	(void) entity_idx;
-
-	if(entity->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
-	{
-		return false;
-	}
 
 	if(!entity->collision_count)
 	{
@@ -411,11 +381,12 @@ collider_resolution_update_entity(
 	entity->v = triplet_add(entity->v, triplet_scale(a, collider->delta));
 	pos = triplet_add(pos, triplet_scale(entity->v, collider->delta));
 
+	float r = (entity->rect_extent.max.x - entity->rect_extent.min.x) * 0.5f;
 	entity->rect_extent =
 	(rect_extent_3d_t)
 	{
-		.min = {{ pos.x - entity->r, pos.y - entity->r, pos.z - entity->r }},
-		.max = {{ pos.x + entity->r, pos.y + entity->r, pos.z + entity->r }}
+		.min = {{ pos.x - r, pos.y - r, pos.z - r }},
+		.max = {{ pos.x + r, pos.y + r, pos.z + r }}
 	};
 
 	if(entity->external)
@@ -427,20 +398,56 @@ collider_resolution_update_entity(
 }
 
 
-private octree_status_t
-collider_resolution_update_fn(
-	octree_t* ot,
-	uint32_t entity_idx,
-	collider_entity_t* entity
+private void
+collider_collide(
+	collider_t collider
 	)
 {
-	assert_not_null(ot);
-	assert_not_null(entity);
+	assert_not_null(collider);
 
-	collider_t collider = MACRO_CONTAINER_OF(ot, struct collider, octree);
-	bool status = collider_resolution_update_entity(collider, entity_idx, entity);
+	collider_entity_t* ball = collider->balls;
+	collider_entity_t* ball_end = ball + collider->balls_count;
 
-	return status ? OCTREE_STATUS_CHANGED : OCTREE_STATUS_NOT_CHANGED;
+	while(ball != ball_end)
+	{
+		collider_query(collider, ball->rect_extent);
+
+		for(uint32_t i = 0; i < collider->query_entities_used; ++i)
+		{
+			collider_ball_collide_entity(ball, collider->query_entities[i]);
+		}
+
+		collider_entity_t* other_ball = ball;
+		collider_entity_t* other_ball_end = other_ball + collider->balls_count;
+
+		while(other_ball != other_ball_end)
+		{
+			collider_ball_collide_entity(ball, other_ball);
+
+			++other_ball;
+		}
+
+		++ball;
+	}
+}
+
+
+private void
+collider_resolve(
+	collider_t collider
+	)
+{
+	assert_not_null(collider);
+
+	collider_entity_t* ball = collider->balls;
+	collider_entity_t* ball_end = ball + collider->balls_count;
+
+	while(ball != ball_end)
+	{
+		collider_ball_resolve(collider, ball);
+
+		++ball;
+	}
 }
 
 
@@ -457,10 +464,10 @@ collider_update(
 	stats_log(collider->stats, "collider_normalize", time_get() - start);
 
 	start = time_get();
-	octree_update(&collider->octree, collider_collision_update_fn);
-	stats_log(collider->stats, "collider_collision_update", time_get() - start);
+	collider_collide(collider);
+	stats_log(collider->stats, "collider_collide", time_get() - start);
 
 	start = time_get();
-	octree_update(&collider->octree, collider_resolution_update_fn);
-	stats_log(collider->stats, "collider_resolution_update", time_get() - start);
+	collider_resolve(collider);
+	stats_log(collider->stats, "collider_resolve", time_get() - start);
 }
