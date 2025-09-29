@@ -196,6 +196,7 @@ simulation_get_stats(
 private void
 simulation_add_triangle_collider_entity(
 	simulation_t simulation,
+	vec3 translation,
 	vec3 v0,
 	vec3 v1,
 	vec3 v2
@@ -204,12 +205,15 @@ simulation_add_triangle_collider_entity(
 	assert_not_null(simulation);
 
 	rect_extent_3d_t extent;
-	extent.min_x = MACRO_MIN(v0[0], MACRO_MIN(v1[0], v2[0]));
-	extent.min_y = MACRO_MIN(v0[1], MACRO_MIN(v1[1], v2[1]));
-	extent.min_z = MACRO_MIN(v0[2], MACRO_MIN(v1[2], v2[2]));
-	extent.max_x = MACRO_MAX(v0[0], MACRO_MAX(v1[0], v2[0]));
-	extent.max_y = MACRO_MAX(v0[1], MACRO_MAX(v1[1], v2[1]));
-	extent.max_z = MACRO_MAX(v0[2], MACRO_MAX(v1[2], v2[2]));
+	extent.min.x = MACRO_MIN(v0[0], MACRO_MIN(v1[0], v2[0]));
+	extent.min.y = MACRO_MIN(v0[1], MACRO_MIN(v1[1], v2[1]));
+	extent.min.z = MACRO_MIN(v0[2], MACRO_MIN(v1[2], v2[2]));
+	extent.max.x = MACRO_MAX(v0[0], MACRO_MAX(v1[0], v2[0]));
+	extent.max.y = MACRO_MAX(v0[1], MACRO_MAX(v1[1], v2[1]));
+	extent.max.z = MACRO_MAX(v0[2], MACRO_MAX(v1[2], v2[2]));
+
+	extent.min = triplet_add(extent.min, *(triplet_t*) translation);
+	extent.max = triplet_add(extent.max, *(triplet_t*) translation);
 
 	collider_entity_t collider_entity =
 	{
@@ -228,12 +232,13 @@ simulation_add_triangle_collider_entity(
 private void
 simulation_add_mesh_collider_entity(
 	simulation_t simulation,
-	model_t* model
+	simulation_entity_t* entity
 	)
 {
 	assert_not_null(simulation);
-	assert_not_null(model);
+	assert_not_null(entity);
 
+	model_t* model = simulation->info.models[entity->model_idx];
 	for(uint32_t i = 0; i < model->mesh_count; ++i)
 	{
 		mesh_t* mesh = &model->meshes[i];
@@ -245,6 +250,7 @@ simulation_add_mesh_collider_entity(
 		{
 			simulation_add_triangle_collider_entity(
 				simulation,
+				entity->translation,
 				mesh->vertices[index[0]],
 				mesh->vertices[index[1]],
 				mesh->vertices[index[2]]
@@ -252,6 +258,8 @@ simulation_add_mesh_collider_entity(
 			index += 3;
 		}
 	}
+
+	glm_vec3_zero(entity->translation);
 }
 
 
@@ -266,45 +274,65 @@ simulation_add_collider_entity(
 
 	if(!entity->dynamic)
 	{
-		simulation_add_mesh_collider_entity(simulation, simulation->info.models[entity->model_idx]);
+		simulation_add_mesh_collider_entity(simulation, entity);
 		return;
 	}
 
-	vec3 center = { 0.0f, 0.0f, 0.0f };
-	vec3 last_vertex = { 0.0f, 0.0f, 0.0f };
+	rect_extent_3d_t extent =
+	{
+		.min = {{ FLT_MAX, FLT_MAX, FLT_MAX }},
+		.max = {{ -FLT_MAX, -FLT_MAX, -FLT_MAX }}
+	};
 
 	model_t* model = simulation->info.models[entity->model_idx];
-	uint32_t divisor = 0;
 	for(uint32_t i = 0; i < model->mesh_count; ++i)
 	{
 		mesh_t* mesh = &model->meshes[i];
 
 		for(uint32_t v = 0; v < mesh->vertex_count; ++v)
 		{
-			++divisor;
-			glm_vec3_add(center, mesh->vertices[v], center);
-			glm_vec3_copy(mesh->vertices[v], last_vertex);
+			extent.min.x = MACRO_MIN(extent.min.x, mesh->vertices[v][0]);
+			extent.min.y = MACRO_MIN(extent.min.y, mesh->vertices[v][1]);
+			extent.min.z = MACRO_MIN(extent.min.z, mesh->vertices[v][2]);
+			extent.max.x = MACRO_MAX(extent.max.x, mesh->vertices[v][0]);
+			extent.max.y = MACRO_MAX(extent.max.y, mesh->vertices[v][1]);
+			extent.max.z = MACRO_MAX(extent.max.z, mesh->vertices[v][2]);
 		}
 	}
 
-	glm_vec3_scale(center, 1.0f / divisor, center);
-	float radius = glm_vec3_distance(center, last_vertex);
-	glm_vec3_add(center, entity->translation, center);
-	glm_vec3_zero(entity->translation);
+	triplet_t center =
+	{
+		.x = (extent.min.x + extent.max.x) * 0.5f,
+		.y = (extent.min.y + extent.max.y) * 0.5f,
+		.z = (extent.min.z + extent.max.z) * 0.5f
+	};
+
+	float r = (extent.max.x - extent.min.x) * 0.5f;
+	extent =
+	(rect_extent_3d_t)
+	{
+		.min = {{ -r, -r, -r }},
+		.max = {{  r,  r,  r }}
+	};
+
+	extent.min = triplet_add(extent.min, *(triplet_t*) entity->translation);
+	extent.max = triplet_add(extent.max, *(triplet_t*) entity->translation);
+
+	glm_vec3_copy((void*) &center, entity->translation);
+	glm_vec3_negate(entity->translation);
 
 	collider_entity_t collider_entity =
 	{
 		.type = COLLIDER_ENTITY_TYPE_SPHERE,
 
-		.rect_extent =
-		{
-			.min = {{ center[0] - radius, center[1] - radius, center[2] - radius }},
-			.max = {{ center[0] + radius, center[1] + radius, center[2] + radius }}
-		},
+		.rect_extent = extent,
 
-		.collision_count = 0,
 		.external = (void*) &entity->translation,
+		.correction_count = 0,
+		.impulse_count = 0,
+		.center = center,
 		.correction = {{ 0.0f, 0.0f, 0.0f }},
+		.impulse = {{ 0.0f, 0.0f, 0.0f }},
 		.v = {{ 0.0f, 0.0f, 0.0f }}
 	};
 	collider_add(simulation->collider, &collider_entity);

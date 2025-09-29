@@ -6942,8 +6942,7 @@ vk_init_models(
 			++set;
 		}
 
-		vk_init_vertex_buffer(vk, sizeof(vk_model_instance_data_t) *
-			VK_MAX_INSTANCES, &model->instance_buffer);
+		vk_init_vertex_buffer(vk, sizeof(vk_model_instance_data_t) * VK_MAX_INSTANCES, &model->instance_buffer);
 
 		++model;
 	}

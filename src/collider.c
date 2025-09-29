@@ -26,6 +26,7 @@
 #define COLLIDER_STATS_SIZE 64
 #define COLLIDER_RESTITUTION 0.8f
 #define COLLISION_IMPULSE_FACTOR -(1.0f + COLLIDER_RESTITUTION)
+#define COLLIDER_VELOCITY_LIMIT 15.0f
 
 
 struct collider
@@ -295,7 +296,7 @@ collider_ball_collide_entity(
 		triplet_t correction = triplet_scale(normal, penetration_depth);
 
 		entity_a->correction = triplet_add(entity_a->correction, correction);
-		++entity_a->collision_count;
+		++entity_a->correction_count;
 
 		float relative_velocity = triplet_dot(entity_a->v, normal);
 		if(relative_velocity >= 0.0f)
@@ -304,7 +305,8 @@ collider_ball_collide_entity(
 		}
 
 		triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
-		entity_a->v = triplet_add(entity_a->v, impulse);
+		entity_a->impulse = triplet_add(entity_a->impulse, impulse);
+		++entity_a->impulse_count;
 	}
 	else /* COLLIDER_ENTITY_TYPE_SPHERE */
 	{
@@ -330,10 +332,10 @@ collider_ball_collide_entity(
 		triplet_t correction = triplet_scale(normal, penetration_depth * 0.5f);
 
 		entity_a->correction = triplet_add(entity_a->correction, correction);
-		++entity_a->collision_count;
+		++entity_a->correction_count;
 
 		entity_b->correction = triplet_sub(entity_b->correction, correction);
-		++entity_b->collision_count;
+		++entity_b->correction_count;
 
 		triplet_t velocity_diff = triplet_sub(entity_a->v, entity_b->v);
 		float relative_velocity = triplet_dot(velocity_diff, normal);
@@ -342,10 +344,11 @@ collider_ball_collide_entity(
 			return;
 		}
 
-		triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
-
-		entity_a->v = triplet_add(entity_a->v, impulse);
-		entity_b->v = triplet_sub(entity_b->v, impulse);
+		triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity * 0.5f);
+		entity_a->impulse = triplet_add(entity_a->impulse, impulse);
+		entity_b->impulse = triplet_sub(entity_b->impulse, impulse);
+		++entity_a->impulse_count;
+		++entity_b->impulse_count;
 	}
 }
 
@@ -366,17 +369,33 @@ collider_ball_resolve(
 		.z = (entity->rect_extent.min.z + entity->rect_extent.max.z) * 0.5f
 	};
 
-	if(entity->collision_count)
+	if(entity->correction_count)
 	{
-		entity->correction = triplet_scale(entity->correction, 1.0f / entity->collision_count);
-		entity->collision_count = 0;
+		entity->correction = triplet_scale(entity->correction, 1.0f / entity->correction_count);
+		entity->correction_count = 0;
 	}
 
 	pos = triplet_add(pos, entity->correction);
 	entity->correction = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
 
+	if(entity->impulse_count)
+	{
+		entity->impulse = triplet_scale(entity->impulse, 1.0f / entity->impulse_count);
+		entity->impulse_count = 0;
+	}
+
+	entity->v = triplet_add(entity->v, entity->impulse);
+	entity->impulse = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+
 	triplet_t a = (triplet_t){{ 0.0f, -0.1f, 0.0f }};
 	entity->v = triplet_add(entity->v, triplet_scale(a, collider->delta));
+
+	float speed = triplet_length(entity->v);
+	if(speed > COLLIDER_VELOCITY_LIMIT)
+	{
+		entity->v = triplet_scale(entity->v, COLLIDER_VELOCITY_LIMIT / speed);
+	}
+
 	pos = triplet_add(pos, triplet_scale(entity->v, collider->delta));
 
 	float r = (entity->rect_extent.max.x - entity->rect_extent.min.x) * 0.5f;
@@ -389,7 +408,7 @@ collider_ball_resolve(
 
 	if(entity->external)
 	{
-		*entity->external = pos;
+		*entity->external = triplet_sub(pos, entity->center);
 	}
 
 	return true;
@@ -415,10 +434,9 @@ collider_collide(
 			collider_ball_collide_entity(ball, collider->query_entities[i]);
 		}
 
-		collider_entity_t* other_ball = ball;
-		collider_entity_t* other_ball_end = other_ball + collider->balls_count;
+		collider_entity_t* other_ball = ball + 1;
 
-		while(other_ball != other_ball_end)
+		while(other_ball != ball_end)
 		{
 			collider_ball_collide_entity(ball, other_ball);
 

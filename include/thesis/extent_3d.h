@@ -155,6 +155,12 @@ triplet_scale(
 
 
 extern triplet_t
+triplet_negate(
+	triplet_t v
+	);
+
+
+extern triplet_t
 triplet_add(
 	triplet_t a,
 	triplet_t b

@@ -70,6 +70,21 @@ triplet_scale(
 
 
 triplet_t
+triplet_negate(
+	triplet_t v
+	)
+{
+	return
+	(triplet_t)
+	{
+		.x = -v.x,
+		.y = -v.y,
+		.z = -v.z
+	};
+}
+
+
+triplet_t
 triplet_add(
 	triplet_t a,
 	triplet_t b
