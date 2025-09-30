@@ -41,6 +41,7 @@ typedef struct simulation_entity
 	uint32_t model_idx;
 	vec3 translation;
 	vec3 rotation;
+	vec3 center;
 	bool dynamic;
 }
 simulation_entity_t;
@@ -263,7 +264,7 @@ simulation_add_mesh_collider_entity(
 }
 
 
-private void
+private triplet_t
 simulation_add_collider_entity(
 	simulation_t simulation,
 	simulation_entity_t* entity
@@ -275,7 +276,7 @@ simulation_add_collider_entity(
 	if(!entity->dynamic)
 	{
 		simulation_add_mesh_collider_entity(simulation, entity);
-		return;
+		return (triplet_t){0};
 	}
 
 	rect_extent_3d_t extent =
@@ -321,21 +322,34 @@ simulation_add_collider_entity(
 	glm_vec3_copy((void*) &center, entity->translation);
 	glm_vec3_negate(entity->translation);
 
+	triplet_t v = {{ (float) rand() / RAND_MAX - 0.5f,
+		(float) rand() / RAND_MAX - 0.5f,
+		(float) rand() / RAND_MAX - 0.5f }};
+	v = triplet_scale(triplet_normalize(v), 0.5f);
+
+	triplet_t w;
+	glm_vec3_copy((void*) &entity->rotation, (void*) &w);
+	glm_vec3_zero(entity->rotation);
+
 	collider_entity_t collider_entity =
 	{
 		.type = COLLIDER_ENTITY_TYPE_SPHERE,
 
 		.rect_extent = extent,
 
-		.external = (void*) &entity->translation,
-		.correction_count = 0,
-		.impulse_count = 0,
-		.center = center,
-		.correction = {{ 0.0f, 0.0f, 0.0f }},
-		.impulse = {{ 0.0f, 0.0f, 0.0f }},
-		.v = {{ 0.0f, 0.0f, 0.0f }}
+		.pos_external = (void*) &entity->translation,
+		.rotation_external = (void*) &entity->rotation,
+		.pos_diff_count = 0,
+		// .vw_diff_count = 0,
+		.pos_diff = {{ 0.0f, 0.0f, 0.0f }},
+		.v_force = {{ 0.0f, 0.0f, 0.0f }},
+		// .w_diff = {{ 0.0f, 0.0f, 0.0f }},
+		.v = v,
+		.w = w
 	};
 	collider_add(simulation->collider, &collider_entity);
+
+	return center;
 }
 
 
@@ -391,7 +405,8 @@ simulation_add_entity(
 	glm_vec3_copy(entity_init.rotation, entity->rotation);
 	entity->dynamic = entity_init.dynamic;
 
-	simulation_add_collider_entity(simulation, entity);
+	triplet_t center = simulation_add_collider_entity(simulation, entity);
+	glm_vec3_copy((void*) &center, entity->center);
 }
 
 
@@ -418,11 +433,15 @@ simulation_get_entity_data(
 
 		cur_data->model_idx = entity->model_idx;
 
+		vec3 neg_center;
+		glm_vec3_negate_to(entity->center, neg_center);
+
 		glm_mat4_identity(cur_data->transform);
 		glm_translate(cur_data->transform, entity->translation);
-		glm_rotate_x(cur_data->transform, entity->rotation[0], cur_data->transform);
-		glm_rotate_y(cur_data->transform, entity->rotation[1], cur_data->transform);
 		glm_rotate_z(cur_data->transform, entity->rotation[2], cur_data->transform);
+		glm_rotate_y(cur_data->transform, entity->rotation[1], cur_data->transform);
+		glm_rotate_x(cur_data->transform, entity->rotation[0], cur_data->transform);
+		glm_translate(cur_data->transform, neg_center);
 	}
 
 	return data;

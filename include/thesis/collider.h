@@ -42,13 +42,15 @@ typedef struct collider_entity
 	{
 		struct assert_packed
 		{
-			uint32_t correction_count;
-			triplet_t* external;
-			uint32_t impulse_count;
-			triplet_t center;
-			triplet_t correction;
-			triplet_t impulse;
+			uint32_t pos_diff_count;
+			triplet_t* pos_external;
+			triplet_t* rotation_external;
+			uint32_t force_count;
+			triplet_t pos_diff;
+			triplet_t v_force;
 			triplet_t v;
+			triplet_t w;
+			bool hit;
 		};
 
 		struct

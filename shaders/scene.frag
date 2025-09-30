@@ -162,7 +162,7 @@ main()
 	vec3 lighting = consts.ambient.rgb + consts.diffuse.rgb * diffuseFactor;
 	if(enable_specular && diffuseFactor != shadow_value)
 	{
-		lighting += specularFactor * (diffuseFactor - shadow_value) / (1.0 - shadow_value);
+		lighting += max(shadow_value - 1.0, specularFactor) * (diffuseFactor - shadow_value) / (1.0 - shadow_value);
 	}
 
 	vec4 color = texture(inTexture, inCoords);

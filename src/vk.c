@@ -8233,8 +8233,7 @@ vk_draw(
 		simulation_entity_data_t** entity = entities_per_model->entities;
 		simulation_entity_data_t** entity_end = entity + entities_per_model->entities_used;
 
-		uint64_t instance_data_size =
-			sizeof(vk_model_instance_data_t) * entities_per_model->entities_used;
+		uint64_t instance_data_size = sizeof(vk_model_instance_data_t) * entities_per_model->entities_used;
 		vk_model_instance_data_t* instance_data = alloc_malloc(instance_data_size);
 		assert_ptr(instance_data, instance_data_size);
 
