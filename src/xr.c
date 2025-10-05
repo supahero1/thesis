@@ -397,6 +397,13 @@ typedef struct vk_descriptor_set_layout
 }
 vk_descriptor_set_layout_t;
 
+typedef struct xr_pose
+{
+	triplet_t position;
+	triplet_t rotation;
+}
+xr_pose_t;
+
 struct xr
 {
 	simulation_t simulation;
@@ -486,9 +493,12 @@ struct xr
 		struct VolkDeviceTable table;
 		VkQueue queue;
 
+		VkFormat format;
 		VkSampleCountFlagBits samples;
-		VkPhysicalDeviceLimits device_limits;
-		VkPhysicalDeviceMemoryProperties memory_properties;
+		float anisotropy;
+		VkPhysicalDeviceLimits limits;
+		float timestamp_period;
+		bool timing_enabled;
 	}
 	vk;
 };
@@ -627,7 +637,7 @@ xr_init_options(
 	str_free(monado);
 
 	xr->options.max_msaa_samples =
-		options_get_i64(global_options, "vk_max_msaa_samples", 1, 64, 8);
+		options_get_i64(global_options, "vk_max_msaa_samples", 1, 64, 4);
 	printf("- max_msaa_samples: %u\n", xr->options.max_msaa_samples);
 
 	xr->options.sample_shading =
@@ -744,6 +754,7 @@ xr_init_stats(
 	stats_add(xr->stats, "xr_barrier_timing_output", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_command_record_time", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_frame_time", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_delta_time", VK_STATS_SIZE);
 }
 
 
@@ -754,6 +765,7 @@ xr_free_stats(
 {
 	assert_not_null(xr);
 
+	stats_del(xr->stats, "xr_frame_delta_time");
 	stats_del(xr->stats, "xr_frame_time");
 	stats_del(xr->stats, "xr_command_record_time");
 	stats_del(xr->stats, "xr_barrier_timing_output");
@@ -1708,6 +1720,101 @@ xr_free_vk_logical_device(
 
 
 private void
+xr_init_vk_capabilities(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	uint32_t format_count = 0;
+	XrResult xr_result = xrEnumerateSwapchainFormats(xr->session, 0, &format_count, NULL);
+	hard_assert_eq(xr_result, XR_SUCCESS);
+	hard_assert_gt(format_count, 0);
+
+	int64_t formats[format_count];
+	xr_result = xrEnumerateSwapchainFormats(xr->session, format_count, &format_count, formats);
+	hard_assert_eq(xr_result, XR_SUCCESS);
+
+	int64_t* format = formats;
+	int64_t* format_end = format + format_count;
+
+	while(1)
+	{
+		if(
+			*format == VK_FORMAT_R8G8B8A8_SRGB ||
+			*format == VK_FORMAT_B8G8R8A8_SRGB
+			)
+		{
+			xr->vk.format = *format;
+			break;
+		}
+
+		if(++format == format_end)
+		{
+			hard_assert_unreachable();
+		}
+	}
+
+	VkPhysicalDeviceProperties device_properties;
+	vkGetPhysicalDeviceProperties(xr->vk.physical_device, &device_properties);
+
+	VkSampleCountFlags sample_count =
+		device_properties.limits.framebufferColorSampleCounts &
+		device_properties.limits.framebufferDepthSampleCounts;
+
+	VkSampleCountFlagBits max_samples;
+	if(sample_count >= VK_SAMPLE_COUNT_64_BIT)
+	{
+		max_samples = VK_SAMPLE_COUNT_64_BIT;
+	}
+	else if(sample_count >= VK_SAMPLE_COUNT_32_BIT)
+	{
+		max_samples = VK_SAMPLE_COUNT_32_BIT;
+	}
+	else if(sample_count >= VK_SAMPLE_COUNT_16_BIT)
+	{
+		max_samples = VK_SAMPLE_COUNT_16_BIT;
+	}
+	else if(sample_count >= VK_SAMPLE_COUNT_8_BIT)
+	{
+		max_samples = VK_SAMPLE_COUNT_8_BIT;
+	}
+	else if(sample_count >= VK_SAMPLE_COUNT_4_BIT)
+	{
+		max_samples = VK_SAMPLE_COUNT_4_BIT;
+	}
+	else if(sample_count >= VK_SAMPLE_COUNT_2_BIT)
+	{
+		max_samples = VK_SAMPLE_COUNT_2_BIT;
+	}
+	else
+	{
+		hard_assert_unreachable();
+	}
+
+	xr->vk.samples = MACRO_MIN(xr->options.max_msaa_samples, max_samples);
+	xr->vk.anisotropy = MACRO_MIN(xr->options.max_anisotropy, device_properties.limits.maxSamplerAnisotropy);
+	xr->vk.limits = device_properties.limits;
+	xr->vk.timestamp_period = device_properties.limits.timestampPeriod;
+	xr->vk.timing_enabled = device_properties.limits.timestampComputeAndGraphics == VK_TRUE;
+
+	printf(
+		"\nXR VK capabilities:\n"
+		"\tformat: %u\n"
+		"\tsamples: %u\n"
+		"\tanisotropy: %.1f\n"
+		"\ttimestamp_period: %.3f\n"
+		"\ttiming_enabled: %d\n",
+		xr->vk.format,
+		xr->vk.samples,
+		xr->vk.anisotropy,
+		xr->vk.timestamp_period,
+		xr->vk.timing_enabled
+		);
+}
+
+
+private void
 xr_init_xr_session(
 	xr_t xr
 	)
@@ -1976,13 +2083,11 @@ xr_update_hand_tracking(
 private bool
 xr_get_head_pose(
 	xr_t xr,
-	triplet_t* position,
-	triplet_t* rotation
+	xr_pose_t* pose
 	)
 {
 	assert_not_null(xr);
-	assert_not_null(position);
-	assert_not_null(rotation);
+	assert_not_null(pose);
 
 	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
 	XrResult result = xrLocateSpace(xr->space, xr->space, xr->predicted_display_time, &location);
@@ -1997,11 +2102,11 @@ xr_get_head_pose(
 		return false;
 	}
 
-	position->x = location.pose.position.x;
-	position->y = location.pose.position.y;
-	position->z = location.pose.position.z;
+	pose->position.x = location.pose.position.x;
+	pose->position.y = location.pose.position.y;
+	pose->position.z = location.pose.position.z;
 
-	*rotation = xr_quaternion_to_euler(location.pose.orientation);
+	pose->rotation = xr_quaternion_to_euler(location.pose.orientation);
 
 	return true;
 }
@@ -2011,13 +2116,11 @@ private bool
 xr_get_hand_pose(
 	xr_t xr,
 	XrHandTrackerEXT hand_tracker,
-	triplet_t* position,
-	triplet_t* rotation
+	xr_pose_t* pose
 	)
 {
 	assert_not_null(xr);
-	assert_not_null(position);
-	assert_not_null(rotation);
+	assert_not_null(pose);
 
 	if(xr->options.xr_monado)
 	{
@@ -2054,11 +2157,65 @@ xr_get_hand_pose(
 		return false;
 	}
 
-	position->x = palm.pose.position.x;
-	position->y = palm.pose.position.y;
-	position->z = palm.pose.position.z;
+	pose->position.x = palm.pose.position.x;
+	pose->position.y = palm.pose.position.y;
+	pose->position.z = palm.pose.position.z;
 
-	*rotation = xr_quaternion_to_euler(palm.pose.orientation);
+	pose->rotation = xr_quaternion_to_euler(palm.pose.orientation);
+
+	return true;
+}
+
+
+private bool
+xr_get_eye_poses(
+	xr_t xr,
+	xr_pose_t* left_pose,
+	xr_pose_t* right_pose
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(left_pose);
+	assert_not_null(right_pose);
+
+	XrViewState view_state = {XR_TYPE_VIEW_STATE};
+	XrView views[2] =
+	{
+		{XR_TYPE_VIEW},
+		{XR_TYPE_VIEW}
+	};
+
+	XrViewLocateInfo locate_info =
+	{
+		.type = XR_TYPE_VIEW_LOCATE_INFO,
+		.next = NULL,
+		.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+		.displayTime = xr->predicted_display_time,
+		.space = xr->space
+	};
+
+	uint32_t view_count = 0;
+	XrResult result = xrLocateViews(xr->session, &locate_info, &view_state, 2, &view_count, views);
+	if(result != XR_SUCCESS || view_count != 2)
+	{
+		return false;
+	}
+
+	if((view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 ||
+	   (view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0)
+	{
+		return false;
+	}
+
+	left_pose->position.x = views[0].pose.position.x;
+	left_pose->position.y = views[0].pose.position.y;
+	left_pose->position.z = views[0].pose.position.z;
+	left_pose->rotation = xr_quaternion_to_euler(views[0].pose.orientation);
+
+	right_pose->position.x = views[1].pose.position.x;
+	right_pose->position.y = views[1].pose.position.y;
+	right_pose->position.z = views[1].pose.position.z;
+	right_pose->rotation = xr_quaternion_to_euler(views[1].pose.orientation);
 
 	return true;
 }
@@ -2190,6 +2347,8 @@ xr_process_frame(
 {
 	assert_not_null(xr);
 
+	static XrTime previous_display_time = 0;
+
 	if(
 		xr->state != XR_SESSION_STATE_SYNCHRONIZED &&
 		xr->state != XR_SESSION_STATE_VISIBLE &&
@@ -2209,6 +2368,13 @@ xr_process_frame(
 	hard_assert_eq(result, XR_SUCCESS);
 
 	xr->predicted_display_time = frame_state.predictedDisplayTime;
+
+	if(previous_display_time != 0)
+	{
+		stats_log(xr->stats, "xr_frame_delta_time", xr->predicted_display_time - previous_display_time);
+	}
+	previous_display_time = xr->predicted_display_time;
+
 	xr_update_hand_tracking(xr);
 
 	xr_render_frame(xr);
@@ -2306,6 +2472,7 @@ xr_init_xr(
 	xr_init_vk_logical_device(xr);
 	xr_init_xr_views(xr);
 	xr_init_xr_session(xr);
+	xr_init_vk_capabilities(xr);
 	xr_init_xr_hand_tracking(xr);
 	xr_init_xr_thread(xr);
 }
