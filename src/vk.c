@@ -2375,11 +2375,9 @@ vk_init_set_layout(
 	}
 
 
-	vk->set_pools = alloc_remalloc(
-		vk->set_pools,
+	vk->set_pools = alloc_remalloc(vk->set_pools,
 		sizeof(*vk->set_pools) * vk->set_pool_count,
-		sizeof(*vk->set_pools) * (vk->set_pool_count + 1)
-		);
+		sizeof(*vk->set_pools) * (vk->set_pool_count + 1));
 	assert_not_null(vk->set_pools);
 
 	set_pool_ptr = vk->set_pools + vk->set_pool_count++;
@@ -3664,8 +3662,7 @@ vk_init_pipeline_cache(
 		}
 	}
 
-	VkResult result = vk->table.vkCreatePipelineCache(
-		vk->device, &pipeline_cache_info, NULL, &pipeline_cache);
+	VkResult result = vk->table.vkCreatePipelineCache(vk->device, &pipeline_cache_info, NULL, &pipeline_cache);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	file_free(file);
@@ -3943,7 +3940,7 @@ vk_init_shadow_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/shadow.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/shadow.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		}
@@ -4143,7 +4140,7 @@ vk_init_shadow_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	static const char* pipeline_cache_path = "cache/vk_shadow_pipeline.bin";
+	static const char* pipeline_cache_path = "cache/vk/shadow_pipeline.bin";
 	VkPipelineCache pipeline_cache = vk_init_pipeline_cache(vk, pipeline_cache_path);
 
 	result = vk->table.vkCreateGraphicsPipelines(vk->device,
@@ -4505,7 +4502,7 @@ vk_init_scene_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/scene.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/scene.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -4514,7 +4511,7 @@ vk_init_scene_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = vk_create_shader(vk, "shaders/scene.frag.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/scene.frag.spv"),
 			.pName = "main",
 			.pSpecializationInfo = &frag_specialization_info
 		}
@@ -4750,7 +4747,7 @@ vk_init_scene_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	static const char* pipeline_cache_path = "cache/vk_scene_pipeline.bin";
+	static const char* pipeline_cache_path = "cache/vk/scene_pipeline.bin";
 	VkPipelineCache pipeline_cache = vk_init_pipeline_cache(vk, pipeline_cache_path);
 
 	result = vk->table.vkCreateGraphicsPipelines(vk->device,
@@ -5040,7 +5037,7 @@ vk_init_ssao_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/fullscreen.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/fullscreen.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -5049,7 +5046,7 @@ vk_init_ssao_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = vk_create_shader(vk, "shaders/ssao.frag.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/ssao.frag.spv"),
 			.pName = "main",
 			.pSpecializationInfo = &frag_specialization_info
 		}
@@ -5206,7 +5203,7 @@ vk_init_ssao_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	static const char* pipeline_cache_path = "cache/vk_ssao_pipeline.bin";
+	static const char* pipeline_cache_path = "cache/vk/ssao_pipeline.bin";
 	VkPipelineCache pipeline_cache = vk_init_pipeline_cache(vk, pipeline_cache_path);
 
 	result = vk->table.vkCreateGraphicsPipelines(vk->device,
@@ -5581,7 +5578,7 @@ vk_init_ssao_blur_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/fullscreen.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/fullscreen.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -5590,7 +5587,7 @@ vk_init_ssao_blur_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = vk_create_shader(vk, "shaders/ssao_blur.frag.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/ssao_blur.frag.spv"),
 			.pName = "main",
 			.pSpecializationInfo = &frag_specialization_info
 		}
@@ -5745,7 +5742,7 @@ vk_init_ssao_blur_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	const char* pipeline_cache_path = "cache/vk_ssao_blur_pipeline.bin";
+	const char* pipeline_cache_path = "cache/vk/ssao_blur_pipeline.bin";
 	VkPipelineCache pipeline_cache = vk_init_pipeline_cache(vk, pipeline_cache_path);
 
 	result = vk->table.vkCreateGraphicsPipelines(
@@ -5951,7 +5948,7 @@ vk_init_skybox_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/skybox.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/skybox.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -5960,7 +5957,7 @@ vk_init_skybox_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = vk_create_shader(vk, "shaders/skybox.frag.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/skybox.frag.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		}
@@ -6142,7 +6139,7 @@ vk_init_skybox_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	static const char* pipeline_cache_path = "cache/vk_skybox_pipeline.bin";
+	static const char* pipeline_cache_path = "cache/vk/skybox_pipeline.bin";
 	VkPipelineCache pipeline_cache = vk_init_pipeline_cache(vk, pipeline_cache_path);
 
 	result = vk->table.vkCreateGraphicsPipelines(vk->device,
@@ -6253,7 +6250,7 @@ vk_init_compose_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/fullscreen.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/fullscreen.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -6262,7 +6259,7 @@ vk_init_compose_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.module = vk_create_shader(vk, "shaders/compose.frag.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/compose.frag.spv"),
 			.pName = "main",
 			.pSpecializationInfo = &frag_specialization_info
 		}
@@ -6417,7 +6414,7 @@ vk_init_compose_pipeline(
 		.basePipelineIndex = -1
 	};
 
-	static const char* pipeline_cache_path = "cache/vk_compose_pipeline.bin";
+	static const char* pipeline_cache_path = "cache/vk/compose_pipeline.bin";
 	VkPipelineCache pipeline_cache = vk_init_pipeline_cache(vk, pipeline_cache_path);
 
 	result = vk->table.vkCreateGraphicsPipelines(vk->device,
@@ -6485,7 +6482,7 @@ vk_init_preview_pipeline(
 			.pNext = NULL,
 			.flags = 0,
 			.stage = VK_SHADER_STAGE_VERTEX_BIT,
-			.module = vk_create_shader(vk, "shaders/fullscreen.vert.spv"),
+			.module = vk_create_shader(vk, "shaders/vk/fullscreen.vert.spv"),
 			.pName = "main",
 			.pSpecializationInfo = NULL
 		},
@@ -6686,10 +6683,10 @@ vk_init_preview_pipelines(
 {
 	assert_not_null(vk);
 
-	vk_init_preview_pipeline(vk, "shaders/preview_depth.frag.spv", "cache/vk_preview_depth_pipeline.bin",
+	vk_init_preview_pipeline(vk, "shaders/vk/preview_depth.frag.spv", "cache/vk/preview_depth_pipeline.bin",
 		&vk->output.preview.depth.pipeline_layout, &vk->output.preview.depth.pipeline);
 
-	vk_init_preview_pipeline(vk, "shaders/preview_image.frag.spv", "cache/vk_preview_image_pipeline.bin",
+	vk_init_preview_pipeline(vk, "shaders/vk/preview_image.frag.spv", "cache/vk/preview_image_pipeline.bin",
 		&vk->output.preview.image.pipeline_layout, &vk->output.preview.image.pipeline);
 }
 
