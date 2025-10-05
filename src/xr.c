@@ -18,6 +18,7 @@
 #include <thesis/file.h>
 #include <thesis/debug.h>
 #include <thesis/atomic.h>
+#include <thesis/extent.h>
 #include <thesis/shared.h>
 #include <thesis/options.h>
 #include <thesis/threads.h>
@@ -499,6 +500,17 @@ struct xr
 		VkPhysicalDeviceLimits limits;
 		float timestamp_period;
 		bool timing_enabled;
+
+		XrSwapchain swapchain;
+		ipair_t swapchain_extent;
+
+		XrSwapchainImageVulkanKHR* images;
+		VkImageView* image_views;
+		uint32_t image_count;
+
+		vk_extent_t screen_extent;
+		vk_extent_t shadow_extent;
+		vk_extent_t ssao_extent;
 	}
 	vk;
 };
@@ -1815,6 +1827,166 @@ xr_init_vk_capabilities(
 
 
 private void
+xr_init_extent(
+	xr_t xr,
+	vk_extent_t* extent,
+	uint32_t width,
+	uint32_t height
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(extent);
+
+	extent->width = width;
+	extent->height = height;
+
+	extent->extent =
+	(VkExtent2D)
+	{
+		.width = width,
+		.height = height
+	};
+
+	extent->viewport =
+	(VkViewport)
+	{
+		.x = 0.0f,
+		.y = 0.0f,
+		.width = width,
+		.height = height,
+		.minDepth = 0.0f,
+		.maxDepth = 1.0f
+	};
+
+	extent->scissor =
+	(VkRect2D)
+	{
+		.offset = { 0, 0 },
+		.extent = extent->extent
+	};
+}
+
+
+private void
+xr_init_xr_swapchain(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr->vk.swapchain_extent.w = xr->view_configs[0].recommendedImageRectWidth;
+	xr->vk.swapchain_extent.h = xr->view_configs[0].recommendedImageRectHeight;
+
+	XrSwapchainCreateInfo swapchain_info =
+	{
+		.type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
+		.next = NULL,
+		.createFlags = 0,
+		.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
+		.format = xr->vk.format,
+		.sampleCount = 1,
+		.width = xr->vk.swapchain_extent.w,
+		.height = xr->vk.swapchain_extent.h,
+		.faceCount = 1,
+		.arraySize = xr->view_count,
+		.mipCount = 1
+	};
+
+	XrResult result = xrCreateSwapchain(xr->session, &swapchain_info, &xr->vk.swapchain);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	result = xrEnumerateSwapchainImages(xr->vk.swapchain, 0, &xr->vk.image_count, NULL);
+	hard_assert_eq(result, XR_SUCCESS);
+	hard_assert_gt(xr->vk.image_count, 0);
+
+	xr->vk.images = alloc_malloc(sizeof(*xr->vk.images) * xr->vk.image_count);
+	assert_ptr(xr->vk.images, sizeof(*xr->vk.images) * xr->vk.image_count);
+
+	for(uint32_t i = 0; i < xr->vk.image_count; ++i)
+	{
+		xr->vk.images[i] = (XrSwapchainImageVulkanKHR){XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR};
+	}
+
+	result = xrEnumerateSwapchainImages(xr->vk.swapchain,
+		xr->vk.image_count, &xr->vk.image_count, (void*) xr->vk.images);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	xr->vk.image_views = alloc_malloc(sizeof(*xr->vk.image_views) * xr->vk.image_count);
+	assert_ptr(xr->vk.image_views, sizeof(*xr->vk.image_views) * xr->vk.image_count);
+
+	for(uint32_t i = 0; i < xr->vk.image_count; ++i)
+	{
+		VkImageViewCreateInfo view_info =
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.image = xr->vk.images[i].image,
+			.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+			.format = xr->vk.format,
+			.components =
+			{
+				.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.a = VK_COMPONENT_SWIZZLE_IDENTITY
+			},
+			.subresourceRange =
+			{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = xr->view_count
+			}
+		};
+
+		VkResult vk_result = xr->vk.table.vkCreateImageView(xr->vk.device, &view_info, NULL, &xr->vk.image_views[i]);
+		hard_assert_eq(vk_result, VK_SUCCESS);
+	}
+
+	printf(
+		"\nXR VK swapchain:\n"
+		"\twidth: %u\n"
+		"\theight: %u\n"
+		"\tarray_size: %u\n"
+		"\timage_count: %u\n",
+		xr->vk.swapchain_extent.w,
+		xr->vk.swapchain_extent.h,
+		xr->view_count,
+		xr->vk.image_count
+		);
+
+	uint32_t width = xr->vk.swapchain_extent.w;
+	uint32_t height = xr->vk.swapchain_extent.h;
+
+	xr_init_extent(xr, &xr->vk.screen_extent, width, height);
+	xr_init_extent(xr, &xr->vk.shadow_extent, xr->options.shadow_map_size, xr->options.shadow_map_size);
+	xr_init_extent(xr, &xr->vk.ssao_extent, width * xr->options.ssao_scale, height * xr->options.ssao_scale);
+}
+
+
+private void
+xr_free_xr_swapchain(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	for(uint32_t i = 0; i < xr->vk.image_count; ++i)
+	{
+		xr->vk.table.vkDestroyImageView(xr->vk.device, xr->vk.image_views[i], NULL);
+	}
+	alloc_free(xr->vk.image_views, sizeof(*xr->vk.image_views) * xr->vk.image_count);
+
+	alloc_free(xr->vk.images, sizeof(*xr->vk.images) * xr->vk.image_count);
+
+	XrResult result = xrDestroySwapchain(xr->vk.swapchain);
+	hard_assert_eq(result, XR_SUCCESS);
+}
+
+
+private void
 xr_init_xr_session(
 	xr_t xr
 	)
@@ -2473,6 +2645,7 @@ xr_init_xr(
 	xr_init_xr_views(xr);
 	xr_init_xr_session(xr);
 	xr_init_vk_capabilities(xr);
+	xr_init_xr_swapchain(xr);
 	xr_init_xr_hand_tracking(xr);
 	xr_init_xr_thread(xr);
 }
@@ -2487,6 +2660,7 @@ xr_free_xr(
 
 	xr_free_xr_thread(xr);
 	xr_free_xr_hand_tracking(xr);
+	xr_free_xr_swapchain(xr);
 	xr_free_xr_session(xr);
 	xr_free_xr_views(xr);
 	xr_free_vk_logical_device(xr);
