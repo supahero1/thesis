@@ -2065,30 +2065,19 @@ xr_get_hand_pose(
 
 
 private void
-xr_session_thread_fn(
+xr_poll_events(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
-	sigset_t set;
-	sigemptyset(&set);
-	sigaddset(&set, SIGINT);
-	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
-
-	struct sigaction sa;
-	sa.sa_handler = xr_signal_handler;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = SA_RESTART;
-	sigaction(SIGINT, &sa, NULL);
-
-	while(atomic_load_explicit(&is_running, memory_order_acquire))
+	while(true)
 	{
 		XrEventDataBuffer event_buffer = {XR_TYPE_EVENT_DATA_BUFFER};
 		XrResult result = xrPollEvent(xr->instance, &event_buffer);
 		if(result == XR_EVENT_UNAVAILABLE)
 		{
-			continue;
+			return;
 		}
 
 		switch(result)
@@ -2136,6 +2125,12 @@ xr_session_thread_fn(
 						break;
 					}
 
+					case XR_SESSION_STATE_SYNCHRONIZED:
+					{
+						puts("XR session synchronized");
+						break;
+					}
+
 					case XR_SESSION_STATE_STOPPING:
 					{
 						puts("XR session stopping");
@@ -2173,6 +2168,87 @@ xr_session_thread_fn(
 				break;
 			}
 		}
+	}
+}
+
+
+private void
+xr_render_frame(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	// TODO
+}
+
+
+private void
+xr_process_frame(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	if(
+		xr->state != XR_SESSION_STATE_SYNCHRONIZED &&
+		xr->state != XR_SESSION_STATE_VISIBLE &&
+		xr->state != XR_SESSION_STATE_FOCUSED
+		)
+	{
+		return;
+	}
+
+	XrFrameWaitInfo wait_info = {XR_TYPE_FRAME_WAIT_INFO};
+	XrFrameState frame_state = {XR_TYPE_FRAME_STATE};
+	XrResult result = xrWaitFrame(xr->session, &wait_info, &frame_state);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	XrFrameBeginInfo begin_info = {XR_TYPE_FRAME_BEGIN_INFO};
+	result = xrBeginFrame(xr->session, &begin_info);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	xr->predicted_display_time = frame_state.predictedDisplayTime;
+	xr_update_hand_tracking(xr);
+
+	xr_render_frame(xr);
+
+	XrFrameEndInfo end_info =
+	{
+		.type = XR_TYPE_FRAME_END_INFO,
+		.displayTime = frame_state.predictedDisplayTime,
+		.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
+		.layerCount = 0,
+		.layers = NULL
+	};
+
+	result = xrEndFrame(xr->session, &end_info);
+	hard_assert_eq(result, XR_SUCCESS);
+}
+
+
+private void
+xr_session_thread_fn(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGINT);
+	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+
+	struct sigaction sa;
+	sa.sa_handler = xr_signal_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+	sigaction(SIGINT, &sa, NULL);
+
+	while(atomic_load_explicit(&is_running, memory_order_acquire))
+	{
+		xr_poll_events(xr);
+		xr_process_frame(xr);
 	}
 
 	simulation_stop(xr->simulation);
