@@ -711,7 +711,7 @@ vk_init_options(
 	puts("\nVK options:");
 
 	vk->options.window_enable =
-		options_get_boolean(global_options, "window_enable", true);
+		options_get_boolean(global_options, "window_enable", false);
 	printf("- window_enable: %d\n", vk->options.window_enable);
 
 	vk->options.window_fullscreen =
@@ -8824,6 +8824,7 @@ vk_init(
 
 	if(!vk->options.window_enable)
 	{
+		alloc_free(vk, sizeof(*vk));
 		return vk;
 	}
 

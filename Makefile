@@ -77,7 +77,7 @@ app: shaders
 	$(CP) bin/thesis_app thesis/
 
 	pid_file=/run/user/1000/monado.pid; \
-	if [[ ! -e "$$pid_file" ]] || ! kill -0 "$$(cat $$pid_file 2>/dev/null)" 2>/dev/null; then \
+	if [[ -e "$$pid_file" ]] && kill -0 "$$(cat $$pid_file 2>/dev/null)" 2>/dev/null; then \
 		$(CP) /etc/openxr/1/monado_runtime.json ~/.config/openxr/1/active_runtime.json; \
 		xr_runtime=monado; \
 	else \

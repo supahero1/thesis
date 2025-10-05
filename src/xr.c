@@ -22,6 +22,7 @@
 #include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
+#include <thesis/extent_3d.h>
 
 #include <volk.h>
 
@@ -29,8 +30,12 @@
 #define XR_USE_GRAPHICS_API_VULKAN
 #include <openxr/openxr_platform.h>
 
+#include <signal.h>
 #include <string.h>
+#include <math.h>
 
+#define VK_STATS_SIZE 64
+#define VK_QUERY_SIZE 32
 #define VK_MAX_IMAGES 8
 #define VK_MAX_FRAMES 2
 #define VK_MAX_INSTANCES 128
@@ -251,12 +256,12 @@ typedef struct frame
 
 		vk_frame_image_t position_ms;
 		vk_frame_image_t normal_ms;
+		vk_frame_image_t map_ms;
 
 		vk_frame_image_t position;
 		vk_frame_image_t normal;
 		VkDescriptorSet set;
 
-		vk_frame_image_t map_ms;
 		vk_frame_image_t map;
 
 		vk_image_t depth;
@@ -295,11 +300,37 @@ typedef struct frame
 }
 vk_frame_t;
 
+typedef struct vk_timing
+{
+	VkCommandBuffer command_buffer;
+	VkQueryPool pool;
+	VkSemaphore semaphore;
+	vk_buffer_t buffer;
+	uint64_t* results;
+	uint32_t* index_map;
+	uint32_t count;
+	uint32_t current;
+	bool first_reset;
+}
+vk_timing_t;
+
+typedef enum vk_barrier_timing_idx
+{
+	VK_BARRIER_TIMING_IDX_SHADOW,
+	VK_BARRIER_TIMING_IDX_SCENE,
+	VK_BARRIER_TIMING_IDX_SSAO,
+	VK_BARRIER_TIMING_IDX_SSAO_BLUR,
+	VK_BARRIER_TIMING_IDX_OUTPUT,
+	MACRO_ENUM_BITS(VK_BARRIER_TIMING_IDX)
+}
+vk_barrier_timing_idx_t;
+
 struct barrier
 {
 	VkSemaphore semaphore;
 	VkFence fence;
 	VkCommandBuffer command_buffer;
+	vk_timing_t timing;
 };
 
 typedef enum vk_preview
@@ -329,6 +360,7 @@ typedef struct vk_command
 {
 	VkCommandBuffer buffer;
 	VkFence fence;
+	bool waited;
 
 	vk_buffer_t staging_buffer;
 }
@@ -368,10 +400,13 @@ vk_descriptor_set_layout_t;
 struct xr
 {
 	simulation_t simulation;
+	stats_t stats;
 
 	struct
 	{
 		bool xr_enable;
+		str_t xr_runtime;
+		bool xr_monado;
 
 		uint32_t max_msaa_samples;
 		bool sample_shading;
@@ -411,6 +446,25 @@ struct xr
 	XrInstance instance;
 	XrSystemId system;
 	XrSession session;
+	XrSessionState state;
+	XrSpace space;
+
+	XrViewConfigurationView* view_configs;
+	uint32_t view_count;
+
+	XrHandTrackerEXT hand_tracker_left;
+	XrHandTrackerEXT hand_tracker_right;
+
+	PFN_xrLocateHandJointsEXT xrLocateHandJointsEXT;
+
+	XrHandJointLocationEXT hand_joints_left[XR_HAND_JOINT_COUNT_EXT];
+	XrHandJointLocationEXT hand_joints_right[XR_HAND_JOINT_COUNT_EXT];
+	bool hand_joints_left_active;
+	bool hand_joints_right_active;
+
+	XrTime predicted_display_time;
+
+	thread_t thread;
 
 	struct
 	{
@@ -536,6 +590,20 @@ private VkPipelineColorBlendAttachmentState xr_vk_blending_attachment =
 };
 
 
+private _Atomic bool is_running;
+
+
+private void
+xr_signal_handler(
+	int signum
+	)
+{
+	(void) signum;
+
+	atomic_store_explicit(&is_running, false, memory_order_release);
+}
+
+
 private void
 xr_init_options(
 	xr_t xr
@@ -546,8 +614,17 @@ xr_init_options(
 	puts("\nXR options:");
 
 	xr->options.xr_enable =
-		options_get_boolean(global_options, "xr_enable", false);
+		options_get_boolean(global_options, "xr_enable", true);
 	printf("- xr_enable: %d\n", xr->options.xr_enable);
+
+	xr->options.xr_runtime =
+		options_get_str(global_options, "xr_runtime", "monado");
+	printf("- xr_runtime: %s\n", (char*) xr->options.xr_runtime->str);
+
+	str_t monado = str_init_move_cstr("monado");
+	xr->options.xr_monado = str_cmp(xr->options.xr_runtime, monado);
+	str_reset(monado);
+	str_free(monado);
 
 	xr->options.max_msaa_samples =
 		options_get_i64(global_options, "vk_max_msaa_samples", 1, 64, 8);
@@ -651,6 +728,42 @@ xr_init_options(
 }
 
 
+private void
+xr_init_stats(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr->stats = simulation_get_stats(xr->simulation);
+
+	stats_add(xr->stats, "xr_barrier_timing_shadow", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_barrier_timing_scene", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_barrier_timing_ssao", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_barrier_timing_ssao_blur", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_barrier_timing_output", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_record_time", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_time", VK_STATS_SIZE);
+}
+
+
+private void
+xr_free_stats(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	stats_del(xr->stats, "xr_frame_time");
+	stats_del(xr->stats, "xr_command_record_time");
+	stats_del(xr->stats, "xr_barrier_timing_output");
+	stats_del(xr->stats, "xr_barrier_timing_ssao_blur");
+	stats_del(xr->stats, "xr_barrier_timing_ssao");
+	stats_del(xr->stats, "xr_barrier_timing_scene");
+	stats_del(xr->stats, "xr_barrier_timing_shadow");
+}
+
+
 #ifndef NDEBUG
 
 private XRAPI_ATTR XrBool32 XRAPI_CALL
@@ -742,7 +855,7 @@ xr_xr_get_instance_extensions(
 		available_instance_extension_count, &available_instance_extension_count, available_instance_extensions);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	puts("\nXR instance extensions:");
+	puts("\nXR available instance extensions:");
 
 	for(
 		available_instance_extension = available_instance_extensions;
@@ -757,6 +870,11 @@ xr_xr_get_instance_extensions(
 
 	const char* const* instance_extension = xr_xr_instance_extensions;
 	const char* const* instance_extension_end = instance_extension + MACRO_ARRAY_LEN(xr_xr_instance_extensions);
+
+	if(xr->options.xr_monado)
+	{
+		--instance_extension_end;
+	}
 
 	while(instance_extension < instance_extension_end)
 	{
@@ -811,7 +929,7 @@ xr_xr_get_instance_layers(
 		&available_instance_layer_count, available_instance_layers);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	puts("\nXR instance layers:");
+	puts("\nXR available instance layers:");
 
 	for(
 		available_instance_layer = available_instance_layers;
@@ -949,16 +1067,20 @@ xr_init_xr_instance(
 		.supportsHandTracking = false
 	};
 
-	XrSystemProperties system_properties =
+	XrSystemProperties system_properties = {XR_TYPE_SYSTEM_PROPERTIES};
+
+	if(!xr->options.xr_monado)
 	{
-		.type = XR_TYPE_SYSTEM_PROPERTIES,
-		.next = &hand_tracking_properties
-	};
+		system_properties.next = &hand_tracking_properties;
+	}
 
 	result = xrGetSystemProperties(xr->instance, xr->system, &system_properties);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	hard_assert_true(hand_tracking_properties.supportsHandTracking);
+	if(!xr->options.xr_monado)
+	{
+		hard_assert_true(hand_tracking_properties.supportsHandTracking);
+	}
 
 	printf("\nXR system: %s\n", system_properties.systemName);
 	printf("XR system vendor: %u\n", system_properties.vendorId);
@@ -1025,7 +1147,7 @@ xr_vk_get_instance_extensions(
 		&available_instance_extension_count, available_instance_extensions);
 	hard_assert_eq(result, VK_SUCCESS);
 
-	puts("\nVK instance extensions:");
+	puts("\nVK available instance extensions:");
 
 	for(
 		available_instance_extension = available_instance_extensions;
@@ -1093,7 +1215,7 @@ xr_vk_get_instance_layers(
 	result = vkEnumerateInstanceLayerProperties(&available_instance_layer_count, available_instance_layers);
 	hard_assert_eq(result, VK_SUCCESS);
 
-	puts("\nVK instance layers:");
+	puts("\nVK available instance layers:");
 
 	for(
 		available_instance_layer = available_instance_layers;
@@ -1222,8 +1344,7 @@ xr_init_vk_instance(
 		.vulkanAllocator = NULL
 	};
 
-	PFN_xrCreateVulkanInstanceKHR xrCreateVulkanInstanceKHR =
-		xr_xr_load_func(xr, "xrCreateVulkanInstanceKHR");
+	PFN_xrCreateVulkanInstanceKHR xrCreateVulkanInstanceKHR = xr_xr_load_func(xr, "xrCreateVulkanInstanceKHR");
 
 	result = xrCreateVulkanInstanceKHR(xr->instance, &xr_instance_info, &xr->vk.instance, &vk_result);
 	hard_assert_eq(result, XR_SUCCESS);
@@ -1280,13 +1401,11 @@ xr_init_vk_physical_device(
 	PFN_xrGetVulkanGraphicsDevice2KHR xrGetVulkanGraphicsDevice2KHR =
 		xr_xr_load_func(xr, "xrGetVulkanGraphicsDevice2KHR");
 
-	XrResult xr_result = xrGetVulkanGraphicsDevice2KHR(
-		xr->instance, &xr_vk_device_info, &xr->vk.physical_device);
+	XrResult xr_result = xrGetVulkanGraphicsDevice2KHR(xr->instance, &xr_vk_device_info, &xr->vk.physical_device);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	uint32_t vk_queue_family_count = 0;
-	vkGetPhysicalDeviceQueueFamilyProperties(
-		xr->vk.physical_device, &vk_queue_family_count, NULL);
+	vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &vk_queue_family_count, NULL);
 	assert_gt(vk_queue_family_count, 0);
 
 	VkQueueFamilyProperties vk_queue_family_properties[vk_queue_family_count];
@@ -1296,8 +1415,7 @@ xr_init_vk_physical_device(
 	assert_gt(vk_queue_family_count, 0);
 
 	VkQueueFamilyProperties* vk_queue_family_property = vk_queue_family_properties;
-	VkQueueFamilyProperties* vk_queue_family_property_end =
-		vk_queue_family_property + vk_queue_family_count;
+	VkQueueFamilyProperties* vk_queue_family_property_end = vk_queue_family_property + vk_queue_family_count;
 
 	while(vk_queue_family_property < vk_queue_family_property_end)
 	{
@@ -1334,94 +1452,94 @@ xr_vk_get_device_extensions(
 	assert_not_null(xr);
 	assert_not_null(extension);
 
-	uint32_t vk_device_extension_count = 0;
-	vkEnumerateDeviceExtensionProperties(
-		xr->vk.physical_device, NULL, &vk_device_extension_count, NULL);
+	uint32_t available_device_extension_count = 0;
+	vkEnumerateDeviceExtensionProperties(xr->vk.physical_device, NULL, &available_device_extension_count, NULL);
 
-	VkExtensionProperties vk_device_extensions[vk_device_extension_count];
+	VkExtensionProperties available_device_extensions[available_device_extension_count];
 
-	VkExtensionProperties* vk_device_extension = vk_device_extensions;
-	VkExtensionProperties* vk_device_extension_end =
-		vk_device_extension + vk_device_extension_count;
+	VkExtensionProperties* available_device_extension = available_device_extensions;
+	VkExtensionProperties* available_device_extension_end =
+		available_device_extension + available_device_extension_count;
 
 	vkEnumerateDeviceExtensionProperties(xr->vk.physical_device,
-		NULL, &vk_device_extension_count, vk_device_extensions);
+		NULL, &available_device_extension_count, available_device_extensions);
 
-	puts("VK device extensions:");
+	puts("\nXR VK available device extensions:");
 
 	for(
-		vk_device_extension = vk_device_extensions;
-		vk_device_extension < vk_device_extension_end;
-		vk_device_extension++
+		available_device_extension = available_device_extensions;
+		available_device_extension < available_device_extension_end;
+		available_device_extension++
 		)
 	{
-		printf("- %s\n", vk_device_extension->extensionName);
+		printf("- %s\n", available_device_extension->extensionName);
 	}
 
 	puts("");
 
-	const char* const* xr_vk_device_extension = xr_vk_device_extensions;
-	const char* const* xr_vk_device_extension_end =
-		xr_vk_device_extension + MACRO_ARRAY_LEN(xr_vk_device_extensions);
+	const char* const* device_extension = xr_vk_device_extensions;
+	const char* const* device_extension_end = device_extension + MACRO_ARRAY_LEN(xr_vk_device_extensions);
 
-	while(xr_vk_device_extension < xr_vk_device_extension_end)
+	while(device_extension < device_extension_end)
 	{
 		bool found = false;
-		const char* extension_name = *(xr_vk_device_extension++);
+		const char* extension_name = *(device_extension++);
 
-		vk_device_extension = vk_device_extensions;
-		while(vk_device_extension < vk_device_extension_end)
+		available_device_extension = available_device_extensions;
+		while(available_device_extension < available_device_extension_end)
 		{
-			if(strcmp(extension_name, vk_device_extension->extensionName) == 0)
+			if(strcmp(extension_name, available_device_extension->extensionName) == 0)
 			{
 				found = true;
 				break;
 			}
 
-			vk_device_extension++;
+			available_device_extension++;
 		}
 
-		assert_true(found, fprintf(stderr, "VK device extension %s not found\n", extension_name));
-		*(extension++) = strdup(extension_name);
+		hard_assert_true(found, fprintf(stderr, "XR VK device extension %s not found\n", extension_name));
+		printf("+ %s\n", extension_name);
+		*(extension++) = cstr_init(extension_name);
 	}
 
-	uint32_t xr_vk_device_extension_count = 0;
+	uint32_t device_extension_count = 0;
 
 	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensionsKHR =
 		xr_xr_load_func(xr, "xrGetVulkanDeviceExtensionsKHR");
 
-	XrResult xr_result = xrGetVulkanDeviceExtensionsKHR(xr->instance,
-		xr->system, 0, &xr_vk_device_extension_count, NULL);
+	XrResult xr_result = xrGetVulkanDeviceExtensionsKHR(
+		xr->instance, xr->system, 0, &device_extension_count, NULL);
 	assert_eq(xr_result, XR_SUCCESS);
 
-	char xr_vk_device_extensions[xr_vk_device_extension_count + 1];
-	xr_vk_device_extensions[xr_vk_device_extension_count] = '\0';
+	char device_extensions_str[device_extension_count + 1];
+	device_extensions_str[device_extension_count] = '\0';
 
 	xr_result = xrGetVulkanDeviceExtensionsKHR(xr->instance, xr->system,
-		xr_vk_device_extension_count, &xr_vk_device_extension_count, xr_vk_device_extensions);
+		device_extension_count, &device_extension_count, device_extensions_str);
 	assert_eq(xr_result, XR_SUCCESS);
 
 	char* strtok_r_state = NULL;
-	const char* extension_name = strtok_r(xr_vk_device_extensions, " ", &strtok_r_state);
+	const char* extension_name = strtok_r(device_extensions_str, " ", &strtok_r_state);
 
 	while(extension_name)
 	{
 		bool found = false;
 
-		vk_device_extension = vk_device_extensions;
-		while(vk_device_extension < vk_device_extension_end)
+		available_device_extension = available_device_extensions;
+		while(available_device_extension < available_device_extension_end)
 		{
-			if(strcmp(extension_name, vk_device_extension->extensionName) == 0)
+			if(strcmp(extension_name, available_device_extension->extensionName) == 0)
 			{
 				found = true;
 				break;
 			}
 
-			vk_device_extension++;
+			available_device_extension++;
 		}
 
-		assert_true(found, fprintf(stderr, "XR VK device extension %s not found\n", extension_name));
-		*(extension++) = strdup(extension_name);
+		hard_assert_true(found, fprintf(stderr, "XR VK device extension %s not found\n", extension_name));
+		printf("+ %s\n", extension_name);
+		*(extension++) = cstr_init(extension_name);
 
 		extension_name = strtok_r(NULL, " ", &strtok_r_state);
 	}
@@ -1439,54 +1557,52 @@ xr_vk_get_device_layers(
 	assert_not_null(xr);
 	assert_not_null(layer);
 
-	uint32_t vk_device_layer_count = 0;
-	vkEnumerateDeviceLayerProperties(
-		xr->vk.physical_device, &vk_device_layer_count, NULL);
+	uint32_t available_device_layer_count = 0;
+	vkEnumerateDeviceLayerProperties(xr->vk.physical_device, &available_device_layer_count, NULL);
 
-	VkLayerProperties vk_device_layers[vk_device_layer_count];
+	VkLayerProperties available_device_layers[available_device_layer_count];
 
-	VkLayerProperties* vk_device_layer = vk_device_layers;
-	VkLayerProperties* vk_device_layer_end = vk_device_layer + vk_device_layer_count;
+	VkLayerProperties* available_device_layer = available_device_layers;
+	VkLayerProperties* available_device_layer_end = available_device_layer + available_device_layer_count;
 
-	vkEnumerateDeviceLayerProperties(xr->vk.physical_device,
-		&vk_device_layer_count, vk_device_layers);
+	vkEnumerateDeviceLayerProperties(xr->vk.physical_device, &available_device_layer_count, available_device_layers);
 
-	puts("VK device layers:");
+	puts("\nXR VK available device layers:");
 
 	for(
-		vk_device_layer = vk_device_layers;
-		vk_device_layer < vk_device_layer_end;
-		vk_device_layer++
+		available_device_layer = available_device_layers;
+		available_device_layer < available_device_layer_end;
+		available_device_layer++
 		)
 	{
-		printf("- %s\n", vk_device_layer->layerName);
+		printf("- %s\n", available_device_layer->layerName);
 	}
 
 	puts("");
 
-	const char* const* xr_vk_device_layer = xr_vk_device_layers;
-	const char* const* xr_vk_device_layer_end =
-		xr_vk_device_layer + MACRO_ARRAY_LEN(xr_vk_device_layers);
+	const char* const* device_layer = xr_vk_device_layers;
+	const char* const* device_layer_end = device_layer + MACRO_ARRAY_LEN(xr_vk_device_layers);
 
-	while(xr_vk_device_layer < xr_vk_device_layer_end)
+	while(device_layer < device_layer_end)
 	{
 		bool found = false;
-		const char* layer_name = *(xr_vk_device_layer++);
+		const char* layer_name = *(device_layer++);
 
-		vk_device_layer = vk_device_layers;
-		while(vk_device_layer < vk_device_layer_end)
+		available_device_layer = available_device_layers;
+		while(available_device_layer < available_device_layer_end)
 		{
-			if(strcmp(layer_name, vk_device_layer->layerName) == 0)
+			if(strcmp(layer_name, available_device_layer->layerName) == 0)
 			{
 				found = true;
 				break;
 			}
 
-			vk_device_layer++;
+			available_device_layer++;
 		}
 
-		assert_true(found, fprintf(stderr, "VK device layer %s not found\n", layer_name));
-		*(layer++) = strdup(layer_name);
+		hard_assert_true(found, fprintf(stderr, "XR VK device layer %s not found\n", layer_name));
+		printf("+ %s\n", layer_name);
+		*(layer++) = cstr_init(layer_name);
 	}
 
 	return layer;
@@ -1501,16 +1617,12 @@ xr_init_vk_logical_device(
 	assert_not_null(xr);
 
 	const char* vk_device_extensions[64];
-	const char** vk_device_extension =
-		xr_vk_get_device_extensions(xr, vk_device_extensions);
-	assert_lt(vk_device_extension,
-		vk_device_extensions + MACRO_ARRAY_LEN(vk_device_extensions));
+	const char** vk_device_extension = xr_vk_get_device_extensions(xr, vk_device_extensions);
+	assert_lt(vk_device_extension, vk_device_extensions + MACRO_ARRAY_LEN(vk_device_extensions));
 
 	const char* vk_device_layers[64];
-	const char** vk_device_layer =
-		xr_vk_get_device_layers(xr, vk_device_layers);
-	assert_lt(vk_device_layer,
-		vk_device_layers + MACRO_ARRAY_LEN(vk_device_layers));
+	const char** vk_device_layer = xr_vk_get_device_layers(xr, vk_device_layers);
+	assert_lt(vk_device_layer, vk_device_layers + MACRO_ARRAY_LEN(vk_device_layers));
 
 	float vk_queue_priority = 1.0f;
 
@@ -1566,12 +1678,10 @@ xr_init_vk_logical_device(
 		.vulkanAllocator = NULL
 	};
 
-	PFN_xrCreateVulkanDeviceKHR xrCreateVulkanDeviceKHR =
-		xr_xr_load_func(xr, "xrCreateVulkanDeviceKHR");
+	PFN_xrCreateVulkanDeviceKHR xrCreateVulkanDeviceKHR = xr_xr_load_func(xr, "xrCreateVulkanDeviceKHR");
 
 	VkResult vk_result;
-	XrResult xr_result = xrCreateVulkanDeviceKHR(
-		xr->instance, &xr_vk_device_info, &xr->vk.device, &vk_result);
+	XrResult xr_result = xrCreateVulkanDeviceKHR(xr->instance, &xr_vk_device_info, &xr->vk.device, &vk_result);
 	assert_eq(xr_result, XR_SUCCESS);
 	assert_eq(vk_result, VK_SUCCESS);
 
@@ -1580,11 +1690,9 @@ xr_init_vk_logical_device(
 
 	volkLoadDeviceTable(&xr->vk.table, xr->vk.device);
 
-	xr->vk.table.vkGetDeviceQueue(xr->vk.device,
-		xr->vk.queue_id, 0, &xr->vk.queue);
+	xr->vk.table.vkGetDeviceQueue(xr->vk.device, xr->vk.queue_id, 0, &xr->vk.queue);
 
-	// vkGetPhysicalDeviceMemoryProperties(
-	// 	xr->vk.physical_device, &xr->vk.memory_properties);
+	// vkGetPhysicalDeviceMemoryProperties(xr->vk.physical_device, &xr->vk.memory_properties);
 }
 
 
@@ -1625,8 +1733,22 @@ xr_init_xr_session(
 		.systemId = xr->system
 	};
 
-	XrResult xr_result = xrCreateSession(
-		xr->instance, &xr_session_info, &xr->session);
+	XrResult xr_result = xrCreateSession(xr->instance, &xr_session_info, &xr->session);
+	assert_eq(xr_result, XR_SUCCESS);
+
+	XrReferenceSpaceCreateInfo xr_space_info =
+	{
+		.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO,
+		.next = NULL,
+		.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE,
+		.poseInReferenceSpace =
+		{
+			.orientation = {0.0f, 0.0f, 0.0f, 1.0f},
+			.position = {0.0f, 0.0f, 0.0f}
+		}
+	};
+
+	xr_result = xrCreateReferenceSpace(xr->session, &xr_space_info, &xr->space);
 	assert_eq(xr_result, XR_SUCCESS);
 }
 
@@ -1644,17 +1766,472 @@ xr_free_xr_session(
 
 
 private void
+xr_init_xr_views(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	XrViewConfigurationType view_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+
+	uint32_t view_count = 0;
+	XrResult result = xrEnumerateViewConfigurationViews(xr->instance, xr->system, view_type, 0, &view_count, NULL);
+	hard_assert_eq(result, XR_SUCCESS);
+	hard_assert_gt(view_count, 0);
+
+	printf("\nXR view count: %u\n", view_count);
+
+	xr->view_count = view_count;
+	xr->view_configs = alloc_calloc(sizeof(*xr->view_configs) * view_count);
+	assert_ptr(xr->view_configs, sizeof(*xr->view_configs) * view_count);
+
+	for(uint32_t i = 0; i < view_count; ++i)
+	{
+		xr->view_configs[i] = (XrViewConfigurationView){XR_TYPE_VIEW_CONFIGURATION_VIEW};
+	}
+
+	result = xrEnumerateViewConfigurationViews(xr->instance, xr->system, view_type, view_count, &view_count, xr->view_configs);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	for(uint32_t i = 0; i < view_count; ++i)
+	{
+		printf(
+			"XR view %u:\n"
+			"\trecommendedImageRectWidth: %u\n"
+			"\tmaxImageRectWidth: %u\n"
+			"\trecommendedImageRectHeight: %u\n"
+			"\tmaxImageRectHeight: %u\n"
+			"\trecommendedSwapchainSampleCount: %u\n"
+			"\tmaxSwapchainSampleCount: %u\n",
+			i,
+			xr->view_configs[i].recommendedImageRectWidth,
+			xr->view_configs[i].maxImageRectWidth,
+			xr->view_configs[i].recommendedImageRectHeight,
+			xr->view_configs[i].maxImageRectHeight,
+			xr->view_configs[i].recommendedSwapchainSampleCount,
+			xr->view_configs[i].maxSwapchainSampleCount
+			);
+	}
+}
+
+
+private void
+xr_free_xr_views(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	alloc_free(xr->view_configs, sizeof(*xr->view_configs) * xr->view_count);
+}
+
+
+private void
+xr_init_xr_hand_tracking(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	if(xr->options.xr_monado)
+	{
+		xr->hand_tracker_left = XR_NULL_HANDLE;
+		xr->hand_tracker_right = XR_NULL_HANDLE;
+		xr->xrLocateHandJointsEXT = NULL;
+		xr->hand_joints_left_active = false;
+		xr->hand_joints_right_active = false;
+		return;
+	}
+
+	xr->xrLocateHandJointsEXT = xr_xr_load_func(xr, "xrLocateHandJointsEXT");
+	PFN_xrCreateHandTrackerEXT xrCreateHandTrackerEXT = xr_xr_load_func(xr, "xrCreateHandTrackerEXT");
+
+	XrHandTrackerCreateInfoEXT hand_tracker_info =
+	{
+		.type = XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT,
+		.next = NULL,
+		.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT
+	};
+
+	hand_tracker_info.hand = XR_HAND_LEFT_EXT;
+	XrResult result = xrCreateHandTrackerEXT(xr->session, &hand_tracker_info, &xr->hand_tracker_left);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	hand_tracker_info.hand = XR_HAND_RIGHT_EXT;
+	result = xrCreateHandTrackerEXT(xr->session, &hand_tracker_info, &xr->hand_tracker_right);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	xr->hand_joints_left_active = false;
+	xr->hand_joints_right_active = false;
+}
+
+
+private void
+xr_free_xr_hand_tracking(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	if(xr->options.xr_monado)
+	{
+		return;
+	}
+
+	PFN_xrDestroyHandTrackerEXT xrDestroyHandTrackerEXT = xr_xr_load_func(xr, "xrDestroyHandTrackerEXT");
+
+	XrResult result = xrDestroyHandTrackerEXT(xr->hand_tracker_left);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	result = xrDestroyHandTrackerEXT(xr->hand_tracker_right);
+	hard_assert_eq(result, XR_SUCCESS);
+}
+
+
+private triplet_t
+xr_quaternion_to_euler(
+	XrQuaternionf q
+	)
+{
+	triplet_t euler;
+
+	float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
+	float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+	euler.x = atan2f(sinr_cosp, cosr_cosp);
+
+	float sinp = 2.0f * (q.w * q.y - q.z * q.x);
+	if(fabsf(sinp) >= 1.0f)
+	{
+		euler.y = copysignf(M_PI / 2.0f, sinp);
+	}
+	else
+	{
+		euler.y = asinf(sinp);
+	}
+
+	float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
+	float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+	euler.z = atan2f(siny_cosp, cosy_cosp);
+
+	return euler;
+}
+
+
+private void
+xr_update_hand_tracking(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	if(xr->options.xr_monado)
+	{
+		return;
+	}
+
+	{
+		XrHandJointLocationsEXT locations =
+		{
+			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
+			.next = NULL,
+			.jointCount = XR_HAND_JOINT_COUNT_EXT,
+			.jointLocations = xr->hand_joints_left
+		};
+
+		XrHandJointsLocateInfoEXT locate_info =
+		{
+			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
+			.next = NULL,
+			.baseSpace = xr->space,
+			.time = xr->predicted_display_time
+		};
+
+		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_left, &locate_info, &locations);
+		xr->hand_joints_left_active = (result == XR_SUCCESS && locations.isActive);
+	}
+
+	{
+		XrHandJointLocationsEXT locations =
+		{
+			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
+			.next = NULL,
+			.jointCount = XR_HAND_JOINT_COUNT_EXT,
+			.jointLocations = xr->hand_joints_right
+		};
+
+		XrHandJointsLocateInfoEXT locate_info =
+		{
+			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
+			.next = NULL,
+			.baseSpace = xr->space,
+			.time = xr->predicted_display_time
+		};
+
+		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_right, &locate_info, &locations);
+		xr->hand_joints_right_active = (result == XR_SUCCESS && locations.isActive);
+	}
+}
+
+
+private bool
+xr_get_head_pose(
+	xr_t xr,
+	triplet_t* position,
+	triplet_t* rotation
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(position);
+	assert_not_null(rotation);
+
+	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
+	XrResult result = xrLocateSpace(xr->space, xr->space, xr->predicted_display_time, &location);
+	if(result != XR_SUCCESS)
+	{
+		return false;
+	}
+
+	if((location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0 ||
+	   (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) == 0)
+	{
+		return false;
+	}
+
+	position->x = location.pose.position.x;
+	position->y = location.pose.position.y;
+	position->z = location.pose.position.z;
+
+	*rotation = xr_quaternion_to_euler(location.pose.orientation);
+
+	return true;
+}
+
+
+private bool
+xr_get_hand_pose(
+	xr_t xr,
+	XrHandTrackerEXT hand_tracker,
+	triplet_t* position,
+	triplet_t* rotation
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(position);
+	assert_not_null(rotation);
+
+	if(xr->options.xr_monado)
+	{
+		return false;
+	}
+
+	XrHandJointLocationEXT* joints;
+	bool active;
+
+	if(hand_tracker == xr->hand_tracker_left)
+	{
+		joints = xr->hand_joints_left;
+		active = xr->hand_joints_left_active;
+	}
+	else if(hand_tracker == xr->hand_tracker_right)
+	{
+		joints = xr->hand_joints_right;
+		active = xr->hand_joints_right_active;
+	}
+	else
+	{
+		return false;
+	}
+
+	if(!active)
+	{
+		return false;
+	}
+
+	XrHandJointLocationEXT palm = joints[XR_HAND_JOINT_PALM_EXT];
+	if((palm.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0 ||
+	   (palm.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) == 0)
+	{
+		return false;
+	}
+
+	position->x = palm.pose.position.x;
+	position->y = palm.pose.position.y;
+	position->z = palm.pose.position.z;
+
+	*rotation = xr_quaternion_to_euler(palm.pose.orientation);
+
+	return true;
+}
+
+
+private void
+xr_session_thread_fn(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGINT);
+	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+
+	struct sigaction sa;
+	sa.sa_handler = xr_signal_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+	sigaction(SIGINT, &sa, NULL);
+
+	while(atomic_load_explicit(&is_running, memory_order_acquire))
+	{
+		XrEventDataBuffer event_buffer = {XR_TYPE_EVENT_DATA_BUFFER};
+		XrResult result = xrPollEvent(xr->instance, &event_buffer);
+		if(result == XR_EVENT_UNAVAILABLE)
+		{
+			continue;
+		}
+
+		switch(result)
+		{
+			case XR_SUCCESS: break;
+
+			case XR_ERROR_INSTANCE_LOST:
+			case XR_ERROR_SESSION_LOST:
+			case XR_ERROR_RUNTIME_FAILURE:
+			case XR_ERROR_VALIDATION_FAILURE:
+			{
+				printf("XR error %d, shutting down\n", result);
+				atomic_store_explicit(&is_running, false, memory_order_release);
+				return;
+			}
+
+			default: hard_assert_unreachable();
+		}
+
+		switch(event_buffer.type)
+		{
+			case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED:
+			{
+				XrEventDataSessionStateChanged* state_changed =
+					(XrEventDataSessionStateChanged*) &event_buffer;
+
+				xr->state = state_changed->state;
+
+				switch(xr->state)
+				{
+					case XR_SESSION_STATE_READY:
+					{
+						puts("XR session ready");
+
+						XrSessionBeginInfo begin_info =
+						{
+							.type = XR_TYPE_SESSION_BEGIN_INFO,
+							.next = NULL,
+							.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO
+						};
+
+						result = xrBeginSession(xr->session, &begin_info);
+						hard_assert_eq(result, XR_SUCCESS);
+
+						break;
+					}
+
+					case XR_SESSION_STATE_STOPPING:
+					{
+						puts("XR session stopping");
+
+						result = xrEndSession(xr->session);
+						hard_assert_eq(result, XR_SUCCESS);
+
+						break;
+					}
+
+					case XR_SESSION_STATE_EXITING:
+					case XR_SESSION_STATE_LOSS_PENDING:
+					{
+						puts("XR session exiting or loss pending");
+						atomic_store_explicit(&is_running, false, memory_order_release);
+						break;
+					}
+
+					default:
+						break;
+				}
+
+				break;
+			}
+
+			case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
+			{
+				atomic_store_explicit(&is_running, false, memory_order_release);
+				break;
+			}
+
+			default:
+			{
+				printf("XR unknown event type %d\n", event_buffer.type);
+				break;
+			}
+		}
+	}
+
+	simulation_stop(xr->simulation);
+}
+
+
+private void
+xr_init_xr_thread(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGINT);
+	pthread_sigmask(SIG_BLOCK, &set, NULL);
+
+	atomic_store_explicit(&is_running, true, memory_order_release);
+
+	thread_data_t data =
+	{
+		.fn = (void*) xr_session_thread_fn,
+		.data = xr
+	};
+	thread_init(&xr->thread, data);
+}
+
+
+private void
+xr_free_xr_thread(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	atomic_store_explicit(&is_running, false, memory_order_release);
+
+	thread_cancel_sync(xr->thread);
+	thread_free(&xr->thread);
+}
+
+
+private void
 xr_init_xr(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
+	xr_init_stats(xr);
 	xr_init_xr_instance(xr);
 	xr_init_vk_instance(xr);
 	xr_init_vk_physical_device(xr);
 	xr_init_vk_logical_device(xr);
+	xr_init_xr_views(xr);
 	xr_init_xr_session(xr);
+	xr_init_xr_hand_tracking(xr);
+	xr_init_xr_thread(xr);
 }
 
 
@@ -1665,11 +2242,15 @@ xr_free_xr(
 {
 	assert_not_null(xr);
 
+	xr_free_xr_thread(xr);
+	xr_free_xr_hand_tracking(xr);
 	xr_free_xr_session(xr);
+	xr_free_xr_views(xr);
 	xr_free_vk_logical_device(xr);
 	xr_free_vk_physical_device(xr);
 	xr_free_vk_instance(xr);
 	xr_free_xr_instance(xr);
+	xr_free_stats(xr);
 }
 
 
