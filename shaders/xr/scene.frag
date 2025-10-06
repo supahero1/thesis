@@ -16,6 +16,8 @@
 
 #version 450
 
+#extension GL_EXT_multiview : require
+
 layout(early_fragment_tests) in;
 
 layout(constant_id = 0) const bool enable_depth_shadows = true;
@@ -36,7 +38,7 @@ layout(push_constant) uniform Constants
 consts;
 
 layout(set = 1, binding = 0) uniform sampler2D inTexture;
-layout(set = 2, binding = 0) uniform sampler2DShadow inShadow;
+layout(set = 2, binding = 0) uniform sampler2DArrayShadow inShadow;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -104,14 +106,14 @@ getShadow(
 		return 1.0;
 	}
 
-	vec2 texelSize = 1.0 / textureSize(inShadow, 0);
+	vec2 texelSize = 1.0 / textureSize(inShadow, 0).xy;
 	float shadow = 0.0;
 	int i = 0;
 
 	for(; i < INITIAL_SAMPLE_COUNT; ++i)
 	{
 		vec2 offset = poissonDisk[i] * texelSize;
-		shadow += texture(inShadow, vec3(projCoord.xy + offset, projCoord.z));
+		shadow += texture(inShadow, vec4(projCoord.xy + offset, gl_ViewIndex, projCoord.z));
 	}
 
 	float average = shadow / float(i);
@@ -120,7 +122,7 @@ getShadow(
 		for(; i < POISSON_DISK_SAMPLES; ++i)
 		{
 			vec2 offset = poissonDisk[i] * texelSize;
-			shadow += texture(inShadow, vec3(projCoord.xy + offset, projCoord.z));
+			shadow += texture(inShadow, vec4(projCoord.xy + offset, gl_ViewIndex, projCoord.z));
 		}
 	}
 

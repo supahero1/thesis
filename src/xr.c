@@ -4137,10 +4137,22 @@ xr_init_shadow_render_pass(
 		}
 	};
 
+	VkRenderPassMultiviewCreateInfo multiview_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO,
+		.pNext = NULL,
+		.subpassCount = 1,
+		.pViewMasks = (uint32_t[]){ 0b11 },
+		.dependencyCount = 0,
+		.pViewOffsets = NULL,
+		.correlationMaskCount = 1,
+		.pCorrelationMasks = (uint32_t[]){ 0b11 }
+	};
+
 	VkRenderPassCreateInfo render_pass_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-		.pNext = NULL,
+		.pNext = &multiview_info,
 		.flags = 0,
 		.attachmentCount = MACRO_ARRAY_LEN(attachments),
 		.pAttachments = attachments,
@@ -5162,10 +5174,22 @@ xr_init_ssao_render_pass(
 		}
 	};
 
+	VkRenderPassMultiviewCreateInfo multiview_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO,
+		.pNext = NULL,
+		.subpassCount = 1,
+		.pViewMasks = (uint32_t[]){ 0b11 },
+		.dependencyCount = 0,
+		.pViewOffsets = NULL,
+		.correlationMaskCount = 1,
+		.pCorrelationMasks = (uint32_t[]){ 0b11 }
+	};
+
 	VkRenderPassCreateInfo render_pass_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-		.pNext = NULL,
+		.pNext = &multiview_info,
 		.flags = 0,
 		.attachmentCount = MACRO_ARRAY_LEN(attachments),
 		.pAttachments = attachments,
@@ -5745,10 +5769,22 @@ xr_init_ssao_blur_render_pass(
 		}
 	};
 
+	VkRenderPassMultiviewCreateInfo multiview_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO,
+		.pNext = NULL,
+		.subpassCount = 1,
+		.pViewMasks = (uint32_t[]){ 0b11 },
+		.dependencyCount = 0,
+		.pViewOffsets = NULL,
+		.correlationMaskCount = 1,
+		.pCorrelationMasks = (uint32_t[]){ 0b11 }
+	};
+
 	VkRenderPassCreateInfo render_pass_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-		.pNext = NULL,
+		.pNext = &multiview_info,
 		.flags = 0,
 		.attachmentCount = MACRO_ARRAY_LEN(attachments),
 		.pAttachments = attachments,
@@ -7373,7 +7409,7 @@ xr_init_shadow_framebuffer(
 
 	vk_image_t* image = &frame->shadow.map.image;
 	image->type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_DEPTH_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT;
+		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
 	image->width = xr->options.shadow_map_size;
 	image->height = xr->options.shadow_map_size;
 	xr_init_frame_image(xr, &frame->shadow.map);
@@ -7536,7 +7572,7 @@ xr_init_ssao_framebuffer(
 	(vk_image_t)
 	{
 		.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT |
-			VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT,
+			VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT,
 		.format = VK_FORMAT_R8_UNORM,
 		.width = xr->vk.ssao_extent.width,
 		.height = xr->vk.ssao_extent.height
@@ -7596,7 +7632,7 @@ xr_init_ssao_blur_framebuffer(
 	(vk_image_t)
 	{
 		.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT |
-			VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT,
+			VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT,
 		.format = VK_FORMAT_R8_UNORM,
 		.width = xr->vk.ssao_extent.width,
 		.height = xr->vk.ssao_extent.height
@@ -8508,22 +8544,17 @@ xr_draw(
 	hard_assert_eq(result, VK_SUCCESS);
 
 
-	VkPipelineStageFlags wait_stages[] =
-	{
-		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-	};
-
 	VkSubmitInfo submit_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.pNext = NULL,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &xr->vk.barrier->semaphore,
-		.pWaitDstStageMask = wait_stages,
+		.waitSemaphoreCount = 0,
+		.pWaitSemaphores = NULL,
+		.pWaitDstStageMask = NULL,
 		.commandBufferCount = 1,
 		.pCommandBuffers = &xr->vk.barrier->command_buffer,
-		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &frame->semaphore
+		.signalSemaphoreCount = 0,
+		.pSignalSemaphores = NULL
 	};
 
 	result = xr->vk.table.vkQueueSubmit(xr->vk.queue, 1, &submit_info, xr->vk.barrier->fence);
@@ -9060,14 +9091,14 @@ xr_process_frame(
 
 	static XrTime previous_display_time = 0;
 
-	if(
-		xr->state != XR_SESSION_STATE_SYNCHRONIZED &&
-		xr->state != XR_SESSION_STATE_VISIBLE &&
-		xr->state != XR_SESSION_STATE_FOCUSED
-		)
-	{
-		return;
-	}
+	// if(
+	// 	xr->state != XR_SESSION_STATE_SYNCHRONIZED &&
+	// 	xr->state != XR_SESSION_STATE_VISIBLE &&
+	// 	xr->state != XR_SESSION_STATE_FOCUSED
+	// 	)
+	// {
+	// 	return;
+	// }
 
 	XrFrameWaitInfo wait_info = {XR_TYPE_FRAME_WAIT_INFO};
 	XrFrameState frame_state = {XR_TYPE_FRAME_STATE};
@@ -9100,7 +9131,7 @@ xr_process_frame(
 
 	const XrCompositionLayerBaseHeader* const_layers[] =
 	{
-		(const XrCompositionLayerBaseHeader*) &projection_layer
+		(void*) &projection_layer
 	};
 
 	XrView views[2];
@@ -9245,13 +9276,14 @@ xr_init_xr(
 	xr_init_vk_capabilities(xr);
 	xr_init_xr_swapchain(xr);
 	xr_init_xr_hand_tracking(xr);
-	xr_init_xr_thread(xr);
 	xr_init_commands(xr);
 	xr_init_sets(xr);
 	xr_init_pipelines(xr);
 	xr_init_models(xr);
 	xr_init_frames(xr);
 	xr_init_framebuffers(xr);
+
+	xr_init_xr_thread(xr);
 
 	puts("\nXR initialized");
 }
@@ -9264,6 +9296,8 @@ xr_free_xr(
 {
 	assert_not_null(xr);
 
+	xr_free_xr_thread(xr);
+
 	xr_device_wait_idle(xr);
 
 	xr_free_all_staging_buffers(xr);
@@ -9274,7 +9308,6 @@ xr_free_xr(
 	xr_free_pipelines(xr);
 	xr_free_sets(xr);
 	xr_free_commands(xr);
-	xr_free_xr_thread(xr);
 	xr_free_xr_hand_tracking(xr);
 	xr_free_xr_swapchain(xr);
 	xr_free_xr_session(xr);

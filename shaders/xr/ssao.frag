@@ -16,6 +16,8 @@
 
 #version 450
 
+#extension GL_EXT_multiview : require
+
 layout(constant_id = 0) const int ssao_kernel_size = 12;
 layout(constant_id = 1) const int ssao_noise_size = 4;
 layout(constant_id = 2) const float ssao_radius = 96.0;
@@ -26,8 +28,8 @@ layout(constant_id = 6) const float ssao_depth_k = 0.06;
 layout(constant_id = 7) const float ssao_depth_gamma = 16.0;
 layout(constant_id = 8) const bool ssao_debug = false;
 
-layout(set = 0, binding = 0) uniform sampler2D inViewPosition;
-layout(set = 0, binding = 1) uniform sampler2D inViewNormal;
+layout(set = 0, binding = 0) uniform sampler2DArray inViewPosition;
+layout(set = 0, binding = 1) uniform sampler2DArray inViewNormal;
 layout(set = 1, binding = 0) uniform sampler2D inNoise;
 
 layout(set = 2, binding = 0) uniform UBO
@@ -49,8 +51,8 @@ layout(location = 0) out float outOcclusion;
 void
 main()
 {
-	vec4 fragPos = texture(inViewPosition, inCoords);
-	vec3 normal = texture(inViewNormal, inCoords).xyz * 2.0 - 1.0;
+	vec4 fragPos = texture(inViewPosition, vec3(inCoords, gl_ViewIndex));
+	vec3 normal = texture(inViewNormal, vec3(inCoords, gl_ViewIndex)).xyz * 2.0 - 1.0;
 
 	ivec2 texelCoords = ivec2(gl_FragCoord.xy);
 	ivec2 noiseDim = ivec2(ssao_noise_size);
@@ -77,7 +79,7 @@ main()
 		offset /= offset.w;
 		vec2 offsetNDC = offset.xy * 0.5 + 0.5;
 
-		float sampleDepth = texture(inViewPosition, offsetNDC).w;
+		float sampleDepth = texture(inViewPosition, vec3(offsetNDC, gl_ViewIndex)).w;
 		float rangeCheck = smoothstep(0.0, ssao_range_check, ssao_radius / abs(fragPos.z - sampleDepth));
 		occlusion += (sampleDepth < samplePos.z - ssao_bias ? 1.0 : 0.0) * rangeCheck;
 	}

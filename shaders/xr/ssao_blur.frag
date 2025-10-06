@@ -16,13 +16,15 @@
 
 #version 450
 
+#extension GL_EXT_multiview : require
+
 layout(constant_id = 0) const float ssao_blur_radius = 5.0;
 layout(constant_id = 1) const float ssao_blur_falloff = 1.9;
 layout(constant_id = 2) const float ssao_blur_depth_tolerance = 256.0;
 
-layout(set = 0, binding = 0) uniform sampler2D inViewPosition;
-layout(set = 0, binding = 1) uniform sampler2D inViewNormal;
-layout(set = 1, binding = 0) uniform sampler2D inSSAO;
+layout(set = 0, binding = 0) uniform sampler2DArray inViewPosition;
+layout(set = 0, binding = 1) uniform sampler2DArray inViewNormal;
+layout(set = 1, binding = 0) uniform sampler2DArray inSSAO;
 
 layout(location = 0) in vec2 inCoords;
 
@@ -31,11 +33,11 @@ layout(location = 0) out float outOcclusion;
 void
 main()
 {
-	vec2 texSize = vec2(textureSize(inViewPosition, 0));
+	vec2 texSize = vec2(textureSize(inViewPosition, 0).xy);
 	vec2 texel = 1.0 / texSize;
 
-	vec4 centerPos = texture(inViewPosition, inCoords);
-	vec3 centerNormal = texture(inViewNormal, inCoords).xyz * 2.0 - 1.0;
+	vec4 centerPos = texture(inViewPosition, vec3(inCoords, gl_ViewIndex));
+	vec3 centerNormal = texture(inViewNormal, vec3(inCoords, gl_ViewIndex)).xyz * 2.0 - 1.0;
 
 	float sum = 0.0;
 	float wsum = 0.0;
@@ -46,9 +48,9 @@ main()
 		vec2 offset = vec2(x, y) * texel;
 		vec2 sampleUV = inCoords + offset;
 
-		vec4 samplePos = texture(inViewPosition, sampleUV);
-		vec3 sampleNormal = texture(inViewNormal, sampleUV).xyz * 2.0 - 1.0;
-		float sampleSSAO = texture(inSSAO, sampleUV).r;
+		vec4 samplePos = texture(inViewPosition, vec3(sampleUV, gl_ViewIndex));
+		vec3 sampleNormal = texture(inViewNormal, vec3(sampleUV, gl_ViewIndex)).xyz * 2.0 - 1.0;
+		float sampleSSAO = texture(inSSAO, vec3(sampleUV, gl_ViewIndex)).r;
 
 		float gs = exp(-length(vec2(x, y)) / ssao_blur_falloff);
 		float gd = exp(-abs(centerPos.w - samplePos.w) / ssao_blur_depth_tolerance);
