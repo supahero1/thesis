@@ -472,8 +472,7 @@ simulation_get_camera(
 simulation_transform_t
 simulation_get_transform(
 	simulation_t simulation,
-	float width,
-	float height
+	pair_t extent
 	)
 {
 	assert_not_null(simulation);
@@ -482,7 +481,7 @@ simulation_get_transform(
 
 	glm_mat4_zero(transform.projection);
 	float f = 1.0f / tanf(simulation->camera.fov * 0.5f);
-	transform.projection[0][0] = f / (width / height);
+	transform.projection[0][0] = f / (extent.w / extent.h);
 	transform.projection[1][1] = f;
 	transform.projection[2][3] = 1.0f;
 	transform.projection[3][2] = simulation->camera.near;
@@ -495,6 +494,69 @@ simulation_get_transform(
 		-simulation->camera.pos[1], -simulation->camera.pos[2] });
 
 	glm_mat4_inv(transform.view, transform.inverse_view);
+
+	glm_mat4_identity(transform.light_transform);
+
+	vec3 light_up = { 0.0f, -1.0f, 0.0f };
+	mat4 light_view;
+	glm_lookat(simulation->light.pos, simulation->light.target, light_up, light_view);
+
+	mat4 light_proj;
+	glm_ortho(simulation->light.left, simulation->light.right, simulation->light.bottom,
+		simulation->light.top, simulation->light.near, simulation->light.far, light_proj);
+
+	glm_mat4_mul(light_proj, light_view, transform.light_transform);
+
+	glm_vec3_sub(simulation->light.pos, simulation->light.target, transform.light_direction);
+	glm_vec3_normalize(transform.light_direction);
+	transform.light_direction[3] = 0.0f;
+
+	return transform;
+}
+
+
+simulation_vr_transform_t
+simulation_get_vr_transform(
+	simulation_t simulation,
+	pair_t extent,
+	simulation_eye_pose_t left_eye,
+	simulation_eye_pose_t right_eye
+	)
+{
+	assert_not_null(simulation);
+
+	simulation_vr_transform_t transform;
+
+	glm_mat4_zero(transform.projection[0]);
+	float f = 1.0f / tanf(simulation->camera.fov * 0.5f);
+	transform.projection[0][0][0] = f / (extent.w / extent.h);
+	transform.projection[0][1][1] = f;
+	transform.projection[0][2][3] = 1.0f;
+	transform.projection[0][3][2] = simulation->camera.near;
+
+	glm_mat4_inv(transform.projection[0], transform.inverse_projection[0]);
+
+	glm_mat4_identity(transform.view[0]);
+	glm_euler_xyz(left_eye.rotation, transform.view[0]);
+	glm_translate(transform.view[0], (vec3){ -left_eye.position[0],
+		-left_eye.position[1], -left_eye.position[2] });
+
+	glm_mat4_inv(transform.view[0], transform.inverse_view[0]);
+
+	glm_mat4_zero(transform.projection[1]);
+	transform.projection[1][0][0] = f / (extent.w / extent.h);
+	transform.projection[1][1][1] = f;
+	transform.projection[1][2][3] = 1.0f;
+	transform.projection[1][3][2] = simulation->camera.near;
+
+	glm_mat4_inv(transform.projection[1], transform.inverse_projection[1]);
+
+	glm_mat4_identity(transform.view[1]);
+	glm_euler_xyz(right_eye.rotation, transform.view[1]);
+	glm_translate(transform.view[1], (vec3){ -right_eye.position[0],
+		-right_eye.position[1], -right_eye.position[2] });
+
+	glm_mat4_inv(transform.view[1], transform.inverse_view[1]);
 
 	glm_mat4_identity(transform.light_transform);
 

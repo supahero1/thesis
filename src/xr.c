@@ -353,6 +353,7 @@ typedef struct vk_extent
 {
 	uint32_t width;
 	uint32_t height;
+	pair_t pair;
 	VkExtent2D extent;
 	VkViewport viewport;
 	VkRect2D scissor;
@@ -1983,6 +1984,13 @@ xr_init_extent(
 
 	extent->width = width;
 	extent->height = height;
+
+	extent->pair =
+	(pair_t)
+	{
+		.x = width,
+		.y = height
+	};
 
 	extent->extent =
 	(VkExtent2D)
@@ -7778,6 +7786,530 @@ xr_device_wait_idle(
 
 
 private void
+xr_get_eye_poses(
+	xr_t xr,
+	xr_pose_t* left_pose,
+	xr_pose_t* right_pose
+	);
+
+
+#define XR_FOR_EACH_MODEL(entities_per_model, ...)									\
+do																					\
+{																					\
+	vk_entities_per_model_t* entities_per_model = entity_data;						\
+	vk_entities_per_model_t* entities_per_model##_end =								\
+		entities_per_model + xr->vk.model_count;									\
+																					\
+	__VA_OPT__(vk_model_t* __VA_ARGS__ = xr->vk.models;)							\
+																					\
+	while(entities_per_model < entities_per_model##_end)							\
+	{																				\
+		if(entities_per_model->entities_used != 0)									\
+		{																			\
+			hard_assert_le(entities_per_model->entities_used, VK_MAX_INSTANCES);
+
+#define XR_FOR_EACH_MODEL_END(entities_per_model, ...)	\
+		}												\
+														\
+		++entities_per_model;							\
+		__VA_OPT__(++__VA_ARGS__;)						\
+	}													\
+}														\
+while(0)
+
+
+private void
+xr_draw_shadow(
+	xr_t xr,
+	vk_frame_t* frame,
+	simulation_camera_t* camera,
+	simulation_vr_transform_t* vr_transform,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	VkClearValue clear_values[] =
+	{
+		{
+			.depthStencil = { 1.0f, 0 }
+		}
+	};
+
+	VkRenderPassBeginInfo render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = xr->vk.shadow.render_pass,
+		.framebuffer = frame->shadow.framebuffer,
+		.renderArea = xr->vk.shadow_extent.scissor,
+		.clearValueCount = MACRO_ARRAY_LEN(clear_values),
+		.pClearValues = clear_values
+	};
+
+	xr->vk.table.vkCmdBeginRenderPass(xr->vk.barrier->command_buffer,
+		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.shadow.pipeline);
+
+	vk_shadow_vert_constant_data_t shadow_vert_constant_data;
+	glm_mat4_copy(vr_transform->light_transform, shadow_vert_constant_data.transform);
+
+	xr->vk.table.vkCmdPushConstants(xr->vk.barrier->command_buffer,
+		xr->vk.shadow.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
+		0, sizeof(shadow_vert_constant_data), &shadow_vert_constant_data);
+
+	XR_FOR_EACH_MODEL(entities_per_model, model)
+	{
+		xr->vk.table.vkCmdBindVertexBuffers(xr->vk.barrier->command_buffer,
+			1, 1, &model->instance_buffer.buffer, (VkDeviceSize[]){0});
+
+		vk_mesh_t* mesh = model->meshes;
+		vk_mesh_t* mesh_end = mesh + model->mesh_count;
+
+		while(mesh < mesh_end)
+		{
+			xr->vk.table.vkCmdBindVertexBuffers(xr->vk.barrier->command_buffer,
+				0, 1, &mesh->shadow_vertex_buffer.buffer, (VkDeviceSize[]){0});
+
+			xr->vk.table.vkCmdBindIndexBuffer(xr->vk.barrier->command_buffer,
+				mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+			xr->vk.table.vkCmdDrawIndexed(xr->vk.barrier->command_buffer,
+				mesh->index_count, entities_per_model->entities_used, 0, 0, 0);
+
+			++mesh;
+		}
+	}
+	XR_FOR_EACH_MODEL_END(entities_per_model, model);
+
+	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+}
+
+
+private void
+xr_draw_scene(
+	xr_t xr,
+	vk_frame_t* frame,
+	simulation_camera_t* camera,
+	simulation_vr_transform_t* vr_transform,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	VkClearValue clear_values[] =
+	{
+		{
+			.depthStencil = { 0.0f, 0 }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		}
+	};
+
+	VkRenderPassBeginInfo render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = xr->vk.scene.render_pass,
+		.framebuffer = frame->scene.framebuffer,
+		.renderArea = xr->vk.screen_extent.scissor,
+		.clearValueCount = MACRO_ARRAY_LEN(clear_values),
+		.pClearValues = clear_values
+	};
+
+	xr->vk.table.vkCmdBeginRenderPass(xr->vk.barrier->command_buffer,
+		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	xr->vk.table.vkCmdSetViewport(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.screen_extent.viewport);
+	xr->vk.table.vkCmdSetScissor(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.screen_extent.scissor);
+
+	xr_pose_t left_eye_pose;
+	xr_pose_t right_eye_pose;
+	xr_get_eye_poses(xr, &left_eye_pose, &right_eye_pose);
+
+	vk_scene_vert_ubo_data_t scene_vert_ubo_data;
+
+	glm_mat4_copy(vr_transform->projection[0], scene_vert_ubo_data.projection[0]);
+	glm_mat4_copy(vr_transform->projection[1], scene_vert_ubo_data.projection[1]);
+
+	glm_mat4_copy(vr_transform->view[0], scene_vert_ubo_data.view[0]);
+	glm_mat4_copy(vr_transform->view[1], scene_vert_ubo_data.view[1]);
+
+	glm_mat4_copy(vr_transform->light_transform, scene_vert_ubo_data.light_transform);
+	glm_vec4_copy(vr_transform->light_direction, scene_vert_ubo_data.light_direction);
+
+	glm_vec3_copy((vec3){left_eye_pose.position.x, left_eye_pose.position.y, left_eye_pose.position.z},
+		scene_vert_ubo_data.camera_position[0]);
+	scene_vert_ubo_data.camera_position[0][3] = 1.0f;
+
+	glm_vec3_copy((vec3){right_eye_pose.position.x, right_eye_pose.position.y, right_eye_pose.position.z},
+		scene_vert_ubo_data.camera_position[1]);
+	scene_vert_ubo_data.camera_position[1][3] = 1.0f;
+
+	xr_copy_to_buffer(xr, &frame->scene.vert_ubo.buffer,
+		&scene_vert_ubo_data, sizeof(scene_vert_ubo_data));
+
+	vk_scene_frag_constant_data_t scene_frag_constant_data =
+	{
+		.near = camera->near
+	};
+
+	xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.scene.pipeline);
+
+	xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.scene.pipeline_layout,
+		0, 1, &frame->scene.vert_ubo.set, 0, NULL);
+
+	xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.scene.pipeline_layout,
+		2, 1, &frame->shadow.map.set, 0, NULL);
+
+	XR_FOR_EACH_MODEL(entities_per_model, model)
+	{
+		xr->vk.table.vkCmdBindVertexBuffers(xr->vk.barrier->command_buffer,
+			1, 1, &model->instance_buffer.buffer, (VkDeviceSize[]){0});
+
+		vk_mesh_t* mesh = model->meshes;
+		vk_mesh_t* mesh_end = mesh + model->mesh_count;
+
+		while(mesh < mesh_end)
+		{
+			vk_material_t* material = xr->vk.materials + mesh->material_idx;
+
+			glm_vec4_copy(material->constant_data.diffuse, scene_frag_constant_data.diffuse);
+			glm_vec4_copy(material->constant_data.ambient, scene_frag_constant_data.ambient);
+			scene_frag_constant_data.shininess = material->constant_data.shininess;
+			scene_frag_constant_data.shininess_strength = material->constant_data.shininess_strength;
+
+			xr->vk.table.vkCmdPushConstants(xr->vk.barrier->command_buffer,
+				xr->vk.scene.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
+				0, sizeof(scene_frag_constant_data), &scene_frag_constant_data);
+
+			xr->vk.table.vkCmdBindVertexBuffers(xr->vk.barrier->command_buffer,
+				0, 1, &mesh->scene_vertex_buffer.buffer, (VkDeviceSize[]){0});
+
+			xr->vk.table.vkCmdBindIndexBuffer(xr->vk.barrier->command_buffer,
+				mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+			xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+				VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.scene.pipeline_layout,
+				1, 1, &material->set, 0, NULL);
+
+			xr->vk.table.vkCmdDrawIndexed(xr->vk.barrier->command_buffer,
+				mesh->index_count, entities_per_model->entities_used, 0, 0, 0);
+
+			++mesh;
+		}
+	}
+	XR_FOR_EACH_MODEL_END(entities_per_model, model);
+
+	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+}
+
+
+private void
+xr_draw_ssao(
+	xr_t xr,
+	vk_frame_t* frame,
+	simulation_camera_t* camera,
+	simulation_vr_transform_t* vr_transform,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	VkRenderPassBeginInfo render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = xr->vk.ssao.render_pass,
+		.framebuffer = frame->ssao.framebuffer,
+		.renderArea = xr->vk.ssao_extent.scissor,
+		.clearValueCount = 0,
+		.pClearValues = NULL
+	};
+
+	xr->vk.table.vkCmdBeginRenderPass(xr->vk.barrier->command_buffer,
+		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	xr->vk.table.vkCmdSetViewport(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.ssao_extent.viewport);
+	xr->vk.table.vkCmdSetScissor(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.ssao_extent.scissor);
+
+	vk_ssao_frag_ubo_data_t ssao_frag_ubo_data;
+	glm_mat4_copy(vr_transform->projection[0], ssao_frag_ubo_data.projection);
+
+	xr_copy_to_buffer(xr, &frame->ssao.frag_ubo.buffer,
+		&ssao_frag_ubo_data, sizeof(ssao_frag_ubo_data));
+
+	xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.ssao.pipeline);
+
+	VkDescriptorSet sets[] =
+	{
+		frame->scene.set,
+		xr->vk.ssao.noise.set,
+		frame->ssao.frag_ubo.set,
+		xr->vk.ssao.kernel_ubo.set
+	};
+
+	xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.ssao.pipeline_layout,
+		0, MACRO_ARRAY_LEN(sets), sets, 0, NULL);
+
+	xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+}
+
+
+private void
+xr_draw_ssao_blur(
+	xr_t xr,
+	vk_frame_t* frame,
+	simulation_camera_t* camera,
+	simulation_vr_transform_t* vr_transform,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	VkRenderPassBeginInfo render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = xr->vk.ssao_blur.render_pass,
+		.framebuffer = frame->ssao_blur.framebuffer,
+		.renderArea = xr->vk.ssao_extent.scissor,
+		.clearValueCount = 0,
+		.pClearValues = NULL
+	};
+
+	xr->vk.table.vkCmdBeginRenderPass(xr->vk.barrier->command_buffer,
+		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	xr->vk.table.vkCmdSetViewport(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.ssao_extent.viewport);
+	xr->vk.table.vkCmdSetScissor(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.ssao_extent.scissor);
+
+	xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.ssao_blur.pipeline);
+
+	VkDescriptorSet sets[] =
+	{
+		frame->scene.set,
+		frame->ssao.map.set
+	};
+
+	xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.ssao_blur.pipeline_layout,
+		0, MACRO_ARRAY_LEN(sets), sets, 0, NULL);
+
+	xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+}
+
+
+private void
+xr_draw_output(
+	xr_t xr,
+	vk_frame_t* frame,
+	simulation_camera_t* camera,
+	simulation_transform_t* transform,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	VkRenderPassBeginInfo render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = xr->vk.output.render_pass,
+		.framebuffer = frame->output.framebuffer,
+		.renderArea = xr->vk.screen_extent.scissor,
+		.clearValueCount = 0,
+		.pClearValues = NULL
+	};
+
+	xr->vk.table.vkCmdBeginRenderPass(xr->vk.barrier->command_buffer,
+		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	xr->vk.table.vkCmdSetViewport(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.screen_extent.viewport);
+	xr->vk.table.vkCmdSetScissor(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.screen_extent.scissor);
+
+
+	switch(xr->options.preview)
+	{
+
+	case VK_PREVIEW_NONE:
+	{
+		vk_skybox_constant_data_t skybox_constant_data;
+		glm_mat4_copy(transform->projection, skybox_constant_data.transform);
+
+		mat4 view;
+		glm_mat4_copy(transform->view, view);
+		view[3][0] = 0.0f;
+		view[3][1] = 0.0f;
+		view[3][2] = 0.0f;
+		glm_mat4_mul(skybox_constant_data.transform, view, skybox_constant_data.transform);
+
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.skybox.pipeline);
+
+		xr->vk.table.vkCmdPushConstants(xr->vk.barrier->command_buffer,
+			xr->vk.output.skybox.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
+			0, sizeof(skybox_constant_data), &skybox_constant_data);
+
+		xr->vk.table.vkCmdBindVertexBuffers(xr->vk.barrier->command_buffer,
+			0, 1, &xr->vk.output.skybox.vertex_buffer.buffer, (VkDeviceSize[]){0});
+
+		xr->vk.table.vkCmdBindIndexBuffer(xr->vk.barrier->command_buffer,
+			xr->vk.output.skybox.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.skybox.pipeline_layout,
+			0, 1, &xr->vk.output.skybox.sky.set, 0, NULL);
+
+		xr->vk.table.vkCmdDrawIndexed(xr->vk.barrier->command_buffer,
+			MACRO_ARRAY_LEN(xr_vk_skybox_index_data), 1, 0, 0, 0);
+
+
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.compose.pipeline);
+
+		VkDescriptorSet sets[] =
+		{
+			frame->scene.map.set,
+			frame->ssao_blur.map.set
+		};
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.compose.pipeline_layout,
+			0, MACRO_ARRAY_LEN(sets), sets, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SHADOW_MAP:
+	{
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.depth.pipeline);
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.depth.pipeline_layout,
+			0, 1, &frame->shadow.map.set, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SCENE_POSITION_MAP:
+	{
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline);
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline_layout,
+			0, 1, &frame->scene.position.set, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SCENE_NORMAL_MAP:
+	{
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline);
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline_layout,
+			0, 1, &frame->scene.normal.set, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SCENE_MAP:
+	{
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline);
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline_layout,
+			0, 1, &frame->scene.map.set, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SSAO_MAP:
+	{
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline);
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline_layout,
+			0, 1, &frame->ssao.map.set, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	case VK_PREVIEW_SSAO_BLUR_MAP:
+	{
+		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline);
+
+		xr->vk.table.vkCmdBindDescriptorSets(xr->vk.barrier->command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline_layout,
+			0, 1, &frame->ssao_blur.map.set, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
+	default: assert_unreachable();
+
+	}
+
+
+	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+}
+
+
+private void
 xr_init_xr_session(
 	xr_t xr
 	)
@@ -8043,7 +8575,7 @@ xr_update_hand_tracking(
 }
 
 
-private bool
+private void
 xr_get_head_pose(
 	xr_t xr,
 	xr_pose_t* pose
@@ -8054,28 +8586,20 @@ xr_get_head_pose(
 
 	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
 	XrResult result = xrLocateSpace(xr->space, xr->space, xr->predicted_display_time, &location);
-	if(result != XR_SUCCESS)
-	{
-		return false;
-	}
+	hard_assert_eq(result, XR_SUCCESS);
 
-	if((location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0 ||
-	   (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) == 0)
-	{
-		return false;
-	}
+	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
+	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
 
 	pose->position.x = location.pose.position.x;
 	pose->position.y = location.pose.position.y;
 	pose->position.z = location.pose.position.z;
 
 	pose->rotation = xr_quaternion_to_euler(location.pose.orientation);
-
-	return true;
 }
 
 
-private bool
+private void
 xr_get_hand_pose(
 	xr_t xr,
 	XrHandTrackerEXT hand_tracker,
@@ -8087,7 +8611,8 @@ xr_get_hand_pose(
 
 	if(xr->options.xr_monado)
 	{
-		return false;
+		*pose = (xr_pose_t){0};
+		return;
 	}
 
 	XrHandJointLocationEXT* joints;
@@ -8105,32 +8630,24 @@ xr_get_hand_pose(
 	}
 	else
 	{
-		return false;
+		hard_assert_unreachable();
 	}
 
-	if(!active)
-	{
-		return false;
-	}
+	hard_assert_true(active);
 
 	XrHandJointLocationEXT palm = joints[XR_HAND_JOINT_PALM_EXT];
-	if((palm.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0 ||
-	   (palm.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) == 0)
-	{
-		return false;
-	}
+	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
+	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
 
 	pose->position.x = palm.pose.position.x;
 	pose->position.y = palm.pose.position.y;
 	pose->position.z = palm.pose.position.z;
 
 	pose->rotation = xr_quaternion_to_euler(palm.pose.orientation);
-
-	return true;
 }
 
 
-private bool
+private void
 xr_get_eye_poses(
 	xr_t xr,
 	xr_pose_t* left_pose,
@@ -8159,16 +8676,11 @@ xr_get_eye_poses(
 
 	uint32_t view_count = 0;
 	XrResult result = xrLocateViews(xr->session, &locate_info, &view_state, 2, &view_count, views);
-	if(result != XR_SUCCESS || view_count != 2)
-	{
-		return false;
-	}
+	hard_assert_eq(result, XR_SUCCESS);
+	hard_assert_eq(view_count, 2);
 
-	if((view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 ||
-	   (view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0)
-	{
-		return false;
-	}
+	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT, 0);
+	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT, 0);
 
 	left_pose->position.x = views[0].pose.position.x;
 	left_pose->position.y = views[0].pose.position.y;
@@ -8179,8 +8691,6 @@ xr_get_eye_poses(
 	right_pose->position.y = views[1].pose.position.y;
 	right_pose->position.z = views[1].pose.position.z;
 	right_pose->rotation = xr_quaternion_to_euler(views[1].pose.orientation);
-
-	return true;
 }
 
 
@@ -8444,7 +8954,7 @@ xr_init_xr(
 	xr_init_frames(xr);
 	xr_init_framebuffers(xr);
 
-	puts("XR initialized");
+	puts("\nXR initialized");
 }
 
 

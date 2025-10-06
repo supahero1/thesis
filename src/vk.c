@@ -346,6 +346,7 @@ typedef struct vk_extent
 {
 	uint32_t width;
 	uint32_t height;
+	pair_t pair;
 	VkExtent2D extent;
 	VkViewport viewport;
 	VkRect2D scissor;
@@ -1651,6 +1652,13 @@ vk_init_extent(
 
 	extent->width = width;
 	extent->height = height;
+
+	extent->pair =
+	(pair_t)
+	{
+		.x = width,
+		.y = height
+	};
 
 	extent->extent =
 	(VkExtent2D)
@@ -8190,8 +8198,7 @@ vk_draw(
 	hard_assert_eq(result, VK_SUCCESS);
 
 	simulation_camera_t camera = simulation_get_camera(vk->simulation);
-	simulation_transform_t transform = simulation_get_transform(
-		vk->simulation, vk->screen_extent.width, vk->screen_extent.height);
+	simulation_transform_t transform = simulation_get_transform(vk->simulation, vk->screen_extent.pair);
 
 	uint32_t sim_entity_count;
 	simulation_entity_data_t* sim_entity_data = simulation_get_entity_data(vk->simulation, &sim_entity_count);
@@ -8417,7 +8424,7 @@ vk_init_vk(
 
 	vk_init_thread(vk);
 
-	puts("VK initialized");
+	puts("\nVK initialized");
 }
 
 

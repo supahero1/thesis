@@ -19,6 +19,7 @@
 #include <thesis/event.h>
 #include <thesis/model.h>
 #include <thesis/stats.h>
+#include <thesis/extent.h>
 
 
 typedef struct simulation* simulation_t;
@@ -91,6 +92,24 @@ typedef struct simulation_transform
 	vec4 light_direction;
 }
 simulation_transform_t;
+
+typedef struct simulation_eye_pose
+{
+	vec3 position;
+	vec3 rotation;
+}
+simulation_eye_pose_t;
+
+typedef struct simulation_vr_transform
+{
+	mat4 projection[2];
+	mat4 inverse_projection[2];
+	mat4 view[2];
+	mat4 inverse_view[2];
+	mat4 light_transform;
+	vec4 light_direction;
+}
+simulation_vr_transform_t;
 
 typedef struct simulation_texture
 {
@@ -168,8 +187,16 @@ simulation_get_camera(
 extern simulation_transform_t
 simulation_get_transform(
 	simulation_t simulation,
-	float width,
-	float height
+	pair_t extent
+	);
+
+
+extern simulation_vr_transform_t
+simulation_get_vr_transform(
+	simulation_t simulation,
+	pair_t extent,
+	simulation_eye_pose_t left_eye,
+	simulation_eye_pose_t right_eye
 	);
 
 
