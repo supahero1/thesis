@@ -39,7 +39,7 @@ all:
 	Specify RELEASE=2 for a native build (faster than production but not portable)\n"
 
 
-bin/shaders/ thesis/shaders/:
+bin/shaders/ bin/shaders/vk/ bin/shaders/xr/ thesis/shaders/ thesis/shaders/vk/ thesis/shaders/xr/:
 	mkdir -p $@
 
 .PHONY: clean
@@ -47,19 +47,29 @@ clean:
 	$(RM) -r bin/ thesis/
 
 
-SHADERS := $(filter-out $(shell grep -l '^/\* skip \*/' shaders/*),$(wildcard shaders/*))
-BIN_SHADERS=$(SHADERS:shaders/%=bin/shaders/%.spv)
+VK_SHADERS := $(filter-out $(shell grep -l '^/\* skip \*/' shaders/vk/* 2>/dev/null || true),$(wildcard shaders/vk/*))
+XR_SHADERS := $(filter-out $(shell grep -l '^/\* skip \*/' shaders/xr/* 2>/dev/null || true),$(wildcard shaders/xr/*))
+BIN_VK_SHADERS=$(VK_SHADERS:shaders/vk/%=bin/shaders/vk/%.spv)
+BIN_XR_SHADERS=$(XR_SHADERS:shaders/xr/%=bin/shaders/xr/%.spv)
 
-bin/shaders/%.vert.spv: shaders/%.vert | bin/shaders/ thesis/shaders/
+bin/shaders/vk/%.vert.spv: shaders/vk/%.vert | bin/shaders/vk/ thesis/shaders/vk/
 	glslc -O -fshader-stage=vert $< -o $@
-	$(CP) $@ thesis/shaders/
+	$(CP) $@ thesis/shaders/vk/
 
-bin/shaders/%.frag.spv: shaders/%.frag | bin/shaders/ thesis/shaders/
+bin/shaders/vk/%.frag.spv: shaders/vk/%.frag | bin/shaders/vk/ thesis/shaders/vk/
 	glslc -O -fshader-stage=frag $< -o $@
-	$(CP) $@ thesis/shaders/
+	$(CP) $@ thesis/shaders/vk/
+
+bin/shaders/xr/%.vert.spv: shaders/xr/%.vert | bin/shaders/xr/ thesis/shaders/xr/
+	glslc -O -fshader-stage=vert $< -o $@
+	$(CP) $@ thesis/shaders/xr/
+
+bin/shaders/xr/%.frag.spv: shaders/xr/%.frag | bin/shaders/xr/ thesis/shaders/xr/
+	glslc -O -fshader-stage=frag $< -o $@
+	$(CP) $@ thesis/shaders/xr/
 
 .PHONY: shaders
-shaders: $(BIN_SHADERS)
+shaders: $(BIN_VK_SHADERS) $(BIN_XR_SHADERS)
 
 
 .PHONY: app
@@ -70,8 +80,12 @@ app: shaders
 		$(CP) -r assets/ thesis/assets/; \
 	fi
 
-	if [[ ! -d thesis/shaders/ ]]; then \
-		$(CP) -r bin/shaders/ thesis/shaders/; \
+	if [[ ! -d thesis/shaders/vk/ ]]; then \
+		$(CP) -r bin/shaders/vk/ thesis/shaders/vk/; \
+	fi
+
+	if [[ ! -d thesis/shaders/xr/ ]]; then \
+		$(CP) -r bin/shaders/xr/ thesis/shaders/xr/; \
 	fi
 
 	$(CP) bin/thesis_app thesis/

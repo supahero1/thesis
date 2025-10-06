@@ -8416,6 +8416,8 @@ vk_init_vk(
 	vk_init_framebuffers(vk);
 
 	vk_init_thread(vk);
+
+	puts("VK initialized");
 }
 
 

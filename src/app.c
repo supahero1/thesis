@@ -35,6 +35,7 @@ struct app
 	simulation_t simulation;
 	vk_t vk;
 	xr_t xr;
+	event_wait_state_t* stop_wait_state;
 };
 
 
@@ -64,6 +65,16 @@ app_init(
 	if(!dir_exists("cache"))
 	{
 		dir_create("cache");
+	}
+
+	if(!dir_exists("cache/vk"))
+	{
+		dir_create("cache/vk");
+	}
+
+	if(!dir_exists("cache/xr"))
+	{
+		dir_create("cache/xr");
 	}
 
 	sigset_t set;
@@ -105,6 +116,9 @@ app_init(
 		// },
 		"assets/skybox-clouds-in-the-sky-spatial-io"
 		);
+
+	simulation_event_table_t* table = simulation_get_event_table(app->simulation);
+	app->stop_wait_state = event_target_init_wait(&table->stop_target);
 
 	simulation_add_entity(
 		app->simulation,
@@ -165,6 +179,5 @@ app_run(
 {
 	assert_not_null(app);
 
-	simulation_event_table_t* table = simulation_get_event_table(app->simulation);
-	event_target_wait(&table->stop_target);
+	event_target_wait(app->stop_wait_state);
 }

@@ -237,6 +237,13 @@ typedef struct event_wait_data
 }
 event_wait_data_t;
 
+struct event_wait_state
+{
+	event_target_t* target;
+	event_listener_t* listener;
+	event_wait_data_t wait_data;
+};
+
 
 private void
 event_target_wait_fn(
@@ -249,28 +256,45 @@ event_target_wait_fn(
 }
 
 
-void*
-event_target_wait(
+event_wait_state_t*
+event_target_init_wait(
 	event_target_t* target
 	)
 {
-	event_wait_data_t wait_data;
-	sync_mtx_init(&wait_data.mtx);
-	sync_mtx_lock(&wait_data.mtx);
+	event_wait_state_t* state = alloc_malloc(sizeof(*state));
+	assert_not_null(state);
+
+	state->target = target;
+	sync_mtx_init(&state->wait_data.mtx);
+	sync_mtx_lock(&state->wait_data.mtx);
 
 	event_listener_data_t data =
 	{
 		.fn = (void*) event_target_wait_fn,
-		.data = &wait_data
+		.data = &state->wait_data
 	};
-	event_listener_t* listener = event_target_add(target, data);
+	state->listener = event_target_add(target, data);
 
-	sync_mtx_lock(&wait_data.mtx);
+	return state;
+}
 
-	event_target_del(target, listener);
 
-	sync_mtx_unlock(&wait_data.mtx);
-	sync_mtx_free(&wait_data.mtx);
+void*
+event_target_wait(
+	event_wait_state_t* state
+	)
+{
+	assert_not_null(state);
 
-	return wait_data.event_data;
+	sync_mtx_lock(&state->wait_data.mtx);
+
+	event_target_del(state->target, state->listener);
+
+	sync_mtx_unlock(&state->wait_data.mtx);
+	sync_mtx_free(&state->wait_data.mtx);
+
+	void* event_data = state->wait_data.event_data;
+	alloc_free(state, sizeof(*state));
+
+	return event_data;
 }
