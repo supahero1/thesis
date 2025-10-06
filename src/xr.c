@@ -16,6 +16,7 @@
 
 #include <thesis/xr.h>
 #include <thesis/file.h>
+#include <thesis/time.h>
 #include <thesis/debug.h>
 #include <thesis/atomic.h>
 #include <thesis/extent.h>
@@ -47,6 +48,8 @@
 #define VK_WINDOW_HEIGHT 720
 #define VK_WINDOW_SENSITIVITY 0.003f
 #define VK_WINDOW_SPEED 500.0f
+
+#define XR_COORDINATE_SCALE 1.0f
 
 
 typedef enum vk_image_type
@@ -355,6 +358,7 @@ typedef struct vk_extent
 	uint32_t height;
 	pair_t pair;
 	VkExtent2D extent;
+	XrExtent2Di xr_extent;
 	VkViewport viewport;
 	VkRect2D scissor;
 }
@@ -1999,6 +2003,13 @@ xr_init_extent(
 		.height = height
 	};
 
+	extent->xr_extent =
+	(XrExtent2Di)
+	{
+		.width = width,
+		.height = height
+	};
+
 	extent->viewport =
 	(VkViewport)
 	{
@@ -2049,7 +2060,9 @@ xr_init_xr_swapchain(
 
 	result = xrEnumerateSwapchainImages(xr->vk.swapchain, 0, &xr->vk.image_count, NULL);
 	hard_assert_eq(result, XR_SUCCESS);
+
 	hard_assert_gt(xr->vk.image_count, 0);
+	assert_le(xr->vk.image_count, VK_MAX_IMAGES);
 
 	xr->vk.images = alloc_malloc(sizeof(*xr->vk.images) * xr->vk.image_count);
 	assert_ptr(xr->vk.images, sizeof(*xr->vk.images) * xr->vk.image_count);
@@ -7789,7 +7802,8 @@ private void
 xr_get_eye_poses(
 	xr_t xr,
 	xr_pose_t* left_pose,
-	xr_pose_t* right_pose
+	xr_pose_t* right_pose,
+	XrView views[2]
 	);
 
 
@@ -7945,7 +7959,7 @@ xr_draw_scene(
 
 	xr_pose_t left_eye_pose;
 	xr_pose_t right_eye_pose;
-	xr_get_eye_poses(xr, &left_eye_pose, &right_eye_pose);
+	xr_get_eye_poses(xr, &left_eye_pose, &right_eye_pose, NULL);
 
 	vk_scene_vert_ubo_data_t scene_vert_ubo_data;
 
@@ -8310,6 +8324,230 @@ xr_draw_output(
 
 
 private void
+xr_draw(
+	xr_t xr,
+	XrView views[2]
+	)
+{
+	assert_not_null(xr);
+
+	VkResult result = xr->vk.table.vkWaitForFences(xr->vk.device, 1, &xr->vk.barrier->fence, VK_TRUE, UINT64_MAX);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	uint64_t frame_time = 0;
+	if(xr->vk.barrier->timing.current)
+	{
+		xr_timing_load(xr, &xr->vk.barrier->timing);
+
+		uint64_t shadow_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
+		stats_log(xr->stats, "xr_barrier_timing_shadow", shadow_time);
+		frame_time += shadow_time;
+
+		uint64_t scene_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
+		stats_log(xr->stats, "xr_barrier_timing_scene", scene_time);
+		frame_time += scene_time;
+
+		uint64_t ssao_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
+		stats_log(xr->stats, "xr_barrier_timing_ssao", ssao_time);
+		frame_time += ssao_time;
+
+		uint64_t ssao_blur_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+		stats_log(xr->stats, "xr_barrier_timing_ssao_blur", ssao_blur_time);
+		frame_time += ssao_blur_time;
+
+		uint64_t output_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+		stats_log(xr->stats, "xr_barrier_timing_output", output_time);
+		frame_time += output_time;
+	}
+
+	uint32_t image_idx;
+	XrSwapchainImageAcquireInfo acquire_info = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+	XrResult xr_result = xrAcquireSwapchainImage(xr->vk.swapchain, &acquire_info, &image_idx);
+	hard_assert_eq(xr_result, XR_SUCCESS);
+
+	XrSwapchainImageWaitInfo wait_info =
+	{
+		.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
+		.timeout = XR_INFINITE_DURATION
+	};
+	xr_result = xrWaitSwapchainImage(xr->vk.swapchain, &wait_info);
+	hard_assert_eq(xr_result, XR_SUCCESS);
+
+	vk_frame_t* frame = xr->vk.frames + image_idx;
+
+	if(frame->barrier)
+	{
+		result = xr->vk.table.vkWaitForFences(xr->vk.device, 1, &frame->barrier->fence, VK_TRUE, UINT64_MAX);
+		hard_assert_eq(result, VK_SUCCESS);
+	}
+	frame->barrier = xr->vk.barrier;
+
+	result = xr->vk.table.vkResetFences(xr->vk.device, 1, &xr->vk.barrier->fence);
+	hard_assert_eq(result, VK_SUCCESS);
+
+
+
+	simulation_update(xr->simulation);
+	uint64_t start_time = time_get();
+
+	result = xr->vk.table.vkResetCommandBuffer(xr->vk.barrier->command_buffer, 0);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	VkCommandBufferBeginInfo command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pInheritanceInfo = NULL
+	};
+
+	result = xr->vk.table.vkBeginCommandBuffer(xr->vk.barrier->command_buffer, &command_buffer_info);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	simulation_camera_t camera = simulation_get_camera(xr->simulation);
+
+	xr_pose_t left_eye, right_eye;
+	xr_get_eye_poses(xr, &left_eye, &right_eye, views);
+
+	simulation_transform_t transform = simulation_get_transform(xr->simulation, xr->vk.screen_extent.pair);
+	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(xr->simulation,
+		xr->vk.screen_extent.pair, *(simulation_eye_pose_t*) &left_eye, *(simulation_eye_pose_t*) &right_eye);
+
+	uint32_t sim_entity_count;
+	simulation_entity_data_t* sim_entity_data = simulation_get_entity_data(xr->simulation, &sim_entity_count);
+
+	simulation_entity_data_t* sim_entity = sim_entity_data;
+	simulation_entity_data_t* sim_entity_end = sim_entity + sim_entity_count;
+
+	vk_entities_per_model_t* entity_data = alloc_calloc(sizeof(*entity_data) * xr->vk.model_count);
+	assert_ptr(entity_data, sizeof(*entity_data) * xr->vk.model_count);
+
+	while(sim_entity < sim_entity_end)
+	{
+		vk_entities_per_model_t* entities = entity_data + sim_entity->model_idx;
+
+		if(entities->entities_used >= entities->entities_size)
+		{
+			uint32_t new_size = (entities->entities_size << 1) | 1;
+
+			entities->entities = alloc_recalloc(
+				entities->entities,
+				sizeof(*entities->entities) * entities->entities_size,
+				sizeof(*entities->entities) * new_size
+				);
+			assert_ptr(entities->entities, sizeof(*entities->entities) * new_size);
+
+			entities->entities_size = new_size;
+		}
+
+		entities->entities[entities->entities_used++] = sim_entity;
+
+		++sim_entity;
+	}
+
+	XR_FOR_EACH_MODEL(entities_per_model, model)
+	{
+		simulation_entity_data_t** entity = entities_per_model->entities;
+		simulation_entity_data_t** entity_end = entity + entities_per_model->entities_used;
+
+		uint64_t instance_data_size = sizeof(vk_model_instance_data_t) * entities_per_model->entities_used;
+		vk_model_instance_data_t* instance_data = alloc_malloc(instance_data_size);
+		assert_ptr(instance_data, instance_data_size);
+
+		vk_model_instance_data_t* instance = instance_data;
+
+		while(entity < entity_end)
+		{
+			glm_mat4_copy((*entity)->transform, instance->transform);
+
+			++entity;
+			++instance;
+		}
+
+		xr_copy_to_buffer(xr, &model->instance_buffer, instance_data, instance_data_size);
+		alloc_free(instance_data, instance_data_size);
+	}
+	XR_FOR_EACH_MODEL_END(entities_per_model, model);
+
+	xr_timing_reset(xr, &xr->vk.barrier->timing);
+
+	xr_timing_start(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
+	xr_draw_shadow(xr, frame, &camera, &vr_transform, entity_data);
+	xr_timing_end(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
+
+	xr_timing_start(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
+	xr_draw_scene(xr, frame, &camera, &vr_transform, entity_data);
+	xr_timing_end(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
+
+	xr_timing_start(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
+	xr_draw_ssao(xr, frame, &camera, &vr_transform, entity_data);
+	xr_timing_end(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
+
+	xr_timing_start(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+	xr_draw_ssao_blur(xr, frame, &camera, &vr_transform, entity_data);
+	xr_timing_end(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+
+	xr_timing_start(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+	xr_draw_output(xr, frame, &camera, &transform, entity_data);
+	xr_timing_end(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+
+	xr_timing_query(xr, &xr->vk.barrier->timing);
+
+	XR_FOR_EACH_MODEL(entities_per_model)
+	{
+		alloc_free(entities_per_model->entities,
+			sizeof(*entities_per_model->entities) * entities_per_model->entities_size);
+	}
+	XR_FOR_EACH_MODEL_END(entities_per_model);
+
+	alloc_free(entity_data, sizeof(*entity_data) * xr->vk.model_count);
+
+	simulation_free_entity_data(sim_entity_data, sim_entity_count);
+
+	result = xr->vk.table.vkEndCommandBuffer(xr->vk.barrier->command_buffer);
+	hard_assert_eq(result, VK_SUCCESS);
+
+
+	VkPipelineStageFlags wait_stages[] =
+	{
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+	};
+
+	VkSubmitInfo submit_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = NULL,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &xr->vk.barrier->semaphore,
+		.pWaitDstStageMask = wait_stages,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &xr->vk.barrier->command_buffer,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &frame->semaphore
+	};
+
+	result = xr->vk.table.vkQueueSubmit(xr->vk.queue, 1, &submit_info, xr->vk.barrier->fence);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	XrSwapchainImageReleaseInfo release_info = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+	xr_result = xrReleaseSwapchainImage(xr->vk.swapchain, &release_info);
+	hard_assert_eq(xr_result, XR_SUCCESS);
+
+	uint64_t end_time = time_get();
+	stats_log(xr->stats, "xr_command_record_time", end_time - start_time);
+
+	frame_time += end_time - start_time;
+	stats_log(xr->stats, "xr_frame_time", frame_time);
+
+	++xr->vk.barrier;
+	if(xr->vk.barrier >= xr->vk.barriers + VK_MAX_FRAMES)
+	{
+		xr->vk.barrier = xr->vk.barriers;
+	}
+}
+
+
+private void
 xr_init_xr_session(
 	xr_t xr
 	)
@@ -8651,7 +8889,8 @@ private void
 xr_get_eye_poses(
 	xr_t xr,
 	xr_pose_t* left_pose,
-	xr_pose_t* right_pose
+	xr_pose_t* right_pose,
+	XrView views[2]
 	)
 {
 	assert_not_null(xr);
@@ -8659,7 +8898,7 @@ xr_get_eye_poses(
 	assert_not_null(right_pose);
 
 	XrViewState view_state = {XR_TYPE_VIEW_STATE};
-	XrView views[2] =
+	XrView local_views[2] =
 	{
 		{XR_TYPE_VIEW},
 		{XR_TYPE_VIEW}
@@ -8675,22 +8914,31 @@ xr_get_eye_poses(
 	};
 
 	uint32_t view_count = 0;
-	XrResult result = xrLocateViews(xr->session, &locate_info, &view_state, 2, &view_count, views);
+	XrResult result = xrLocateViews(xr->session, &locate_info, &view_state, 2, &view_count, local_views);
 	hard_assert_eq(result, XR_SUCCESS);
 	hard_assert_eq(view_count, 2);
 
 	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT, 0);
 	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT, 0);
 
-	left_pose->position.x = views[0].pose.position.x;
-	left_pose->position.y = views[0].pose.position.y;
-	left_pose->position.z = views[0].pose.position.z;
-	left_pose->rotation = xr_quaternion_to_euler(views[0].pose.orientation);
+	xr_pose_t head_pose;
+	xr_get_head_pose(xr, &head_pose);
 
-	right_pose->position.x = views[1].pose.position.x;
-	right_pose->position.y = views[1].pose.position.y;
-	right_pose->position.z = views[1].pose.position.z;
-	right_pose->rotation = xr_quaternion_to_euler(views[1].pose.orientation);
+	left_pose->position.x = (local_views[0].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
+	left_pose->position.y = (local_views[0].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
+	left_pose->position.z = (local_views[0].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
+	left_pose->rotation = head_pose.rotation;
+
+	right_pose->position.x = (local_views[1].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
+	right_pose->position.y = (local_views[1].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
+	right_pose->position.z = (local_views[1].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
+	right_pose->rotation = head_pose.rotation;
+
+	if(views)
+	{
+		views[0] = local_views[0];
+		views[1] = local_views[1];
+	}
 }
 
 
@@ -8804,17 +9052,6 @@ xr_poll_events(
 
 
 private void
-xr_render_frame(
-	xr_t xr
-	)
-{
-	assert_not_null(xr);
-
-	// TODO
-}
-
-
-private void
 xr_process_frame(
 	xr_t xr
 	)
@@ -8851,15 +9088,77 @@ xr_process_frame(
 
 	xr_update_hand_tracking(xr);
 
-	xr_render_frame(xr);
+	XrCompositionLayerProjection projection_layer =
+	{
+		.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
+		.next = NULL,
+		.layerFlags = 0,
+		.space = xr->space,
+		.viewCount = 0,
+		.views = NULL
+	};
+
+	const XrCompositionLayerBaseHeader* const_layers[] =
+	{
+		(const XrCompositionLayerBaseHeader*) &projection_layer
+	};
+
+	XrView views[2];
+
+	if(frame_state.shouldRender)
+	{
+		xr_pose_t left_eye, right_eye;
+		xr_get_eye_poses(xr, &left_eye, &right_eye, views);
+
+		xr_draw(xr, views);
+
+		XrCompositionLayerProjectionView projection_views[2] =
+		{
+			{
+				.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
+				.next = NULL,
+				.pose = views[0].pose,
+				.fov = views[0].fov,
+				.subImage =
+				{
+					.swapchain = xr->vk.swapchain,
+					.imageRect =
+					{
+						.offset = {0, 0},
+						.extent = xr->vk.screen_extent.xr_extent
+					},
+					.imageArrayIndex = 0
+				}
+			},
+			{
+				.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
+				.next = NULL,
+				.pose = views[1].pose,
+				.fov = views[1].fov,
+				.subImage =
+				{
+					.swapchain = xr->vk.swapchain,
+					.imageRect =
+					{
+						.offset = {0, 0},
+						.extent = xr->vk.screen_extent.xr_extent
+					},
+					.imageArrayIndex = 1
+				}
+			}
+		};
+
+		projection_layer.viewCount = 2;
+		projection_layer.views = projection_views;
+	}
 
 	XrFrameEndInfo end_info =
 	{
 		.type = XR_TYPE_FRAME_END_INFO,
 		.displayTime = frame_state.predictedDisplayTime,
 		.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
-		.layerCount = 0,
-		.layers = NULL
+		.layerCount = frame_state.shouldRender ? 1 : 0,
+		.layers = frame_state.shouldRender ? const_layers : NULL
 	};
 
 	result = xrEndFrame(xr->session, &end_info);

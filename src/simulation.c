@@ -536,10 +536,15 @@ simulation_get_vr_transform(
 
 	glm_mat4_inv(transform.projection[0], transform.inverse_projection[0]);
 
+	vec3 left_eye_position;
+	glm_vec3_add(left_eye.position, simulation->camera.pos, left_eye_position);
+
+	vec3 left_eye_rotation;
+	glm_vec3_add(left_eye.rotation, simulation->camera.angle, left_eye_rotation);
+
 	glm_mat4_identity(transform.view[0]);
-	glm_euler_xyz(left_eye.rotation, transform.view[0]);
-	glm_translate(transform.view[0], (vec3){ -left_eye.position[0],
-		-left_eye.position[1], -left_eye.position[2] });
+	glm_euler_xyz(left_eye_rotation, transform.view[0]);
+	glm_translate(transform.view[0], (vec3){ -left_eye_position[0], -left_eye_position[1], -left_eye_position[2] });
 
 	glm_mat4_inv(transform.view[0], transform.inverse_view[0]);
 
@@ -551,10 +556,15 @@ simulation_get_vr_transform(
 
 	glm_mat4_inv(transform.projection[1], transform.inverse_projection[1]);
 
+	vec3 right_eye_position;
+	glm_vec3_add(right_eye.position, simulation->camera.pos, right_eye_position);
+
+	vec3 right_eye_rotation;
+	glm_vec3_add(right_eye.rotation, simulation->camera.angle, right_eye_rotation);
+
 	glm_mat4_identity(transform.view[1]);
-	glm_euler_xyz(right_eye.rotation, transform.view[1]);
-	glm_translate(transform.view[1], (vec3){ -right_eye.position[0],
-		-right_eye.position[1], -right_eye.position[2] });
+	glm_euler_xyz(right_eye_rotation, transform.view[1]);
+	glm_translate(transform.view[1], (vec3){ -right_eye_position[0], -right_eye_position[1], -right_eye_position[2] });
 
 	glm_mat4_inv(transform.view[1], transform.inverse_view[1]);
 
