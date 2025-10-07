@@ -16,6 +16,8 @@
 
 #version 450
 
+#extension GL_EXT_multiview : require
+
 layout(location = 0) out vec2 outCoords;
 
 void

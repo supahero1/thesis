@@ -177,7 +177,7 @@ vk_ssao_frag_kernel_ubo_data_t;
 
 typedef struct vk_skybox_constant_data
 {
-	mat4 transform;
+	mat4 transform[2];
 }
 vk_skybox_constant_data_t;
 
@@ -5247,6 +5247,7 @@ xr_init_ssao_pipeline(
 
 	typedef struct xr_ssao_frag_specialization
 	{
+		int32_t enable_ssao;
 		int32_t ssao_kernel_size;
 		int32_t ssao_noise_size;
 		float ssao_radius;
@@ -5261,6 +5262,7 @@ xr_init_ssao_pipeline(
 
 	xr_ssao_frag_specialization_t frag_specialization_data =
 	{
+		.enable_ssao = xr->options.enable_ssao,
 		.ssao_kernel_size = xr->options.ssao_kernel_size,
 		.ssao_noise_size = xr->options.ssao_noise_size,
 		.ssao_radius = xr->options.ssao_radius,
@@ -5276,46 +5278,51 @@ xr_init_ssao_pipeline(
 	{
 		{
 			.constantID = 0,
+			.offset = offsetof(xr_ssao_frag_specialization_t, enable_ssao),
+			.size = sizeof(frag_specialization_data.enable_ssao)
+		},
+		{
+			.constantID = 1,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_kernel_size),
 			.size = sizeof(frag_specialization_data.ssao_kernel_size)
 		},
 		{
-			.constantID = 1,
+			.constantID = 2,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_noise_size),
 			.size = sizeof(frag_specialization_data.ssao_noise_size)
 		},
 		{
-			.constantID = 2,
+			.constantID = 3,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_radius),
 			.size = sizeof(frag_specialization_data.ssao_radius)
 		},
 		{
-			.constantID = 3,
+			.constantID = 4,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_bias),
 			.size = sizeof(frag_specialization_data.ssao_bias)
 		},
 		{
-			.constantID = 4,
+			.constantID = 5,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_power),
 			.size = sizeof(frag_specialization_data.ssao_power)
 		},
 		{
-			.constantID = 5,
+			.constantID = 6,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_range_check),
 			.size = sizeof(frag_specialization_data.ssao_range_check)
 		},
 		{
-			.constantID = 6,
+			.constantID = 7,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_depth_k),
 			.size = sizeof(frag_specialization_data.ssao_depth_k)
 		},
 		{
-			.constantID = 7,
+			.constantID = 8,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_depth_gamma),
 			.size = sizeof(frag_specialization_data.ssao_depth_gamma)
 		},
 		{
-			.constantID = 8,
+			.constantID = 9,
 			.offset = offsetof(xr_ssao_frag_specialization_t, ssao_debug),
 			.size = sizeof(frag_specialization_data.ssao_debug)
 		}
@@ -5842,6 +5849,7 @@ xr_init_ssao_blur_pipeline(
 
 	typedef struct xr_ssao_blur_frag_specialization
 	{
+		int32_t enable_ssao;
 		float ssao_blur_radius;
 		float ssao_blur_falloff;
 		float ssao_blur_depth_tolerance;
@@ -5850,6 +5858,7 @@ xr_init_ssao_blur_pipeline(
 
 	xr_ssao_blur_frag_specialization_t frag_specialization_data =
 	{
+		.enable_ssao = xr->options.enable_ssao,
 		.ssao_blur_radius = xr->options.ssao_blur_radius,
 		.ssao_blur_falloff = xr->options.ssao_blur_falloff,
 		.ssao_blur_depth_tolerance = xr->options.ssao_blur_depth_tolerance
@@ -5859,16 +5868,21 @@ xr_init_ssao_blur_pipeline(
 	{
 		{
 			.constantID = 0,
+			.offset = offsetof(xr_ssao_blur_frag_specialization_t, enable_ssao),
+			.size = sizeof(frag_specialization_data.enable_ssao)
+		},
+		{
+			.constantID = 1,
 			.offset = offsetof(xr_ssao_blur_frag_specialization_t, ssao_blur_radius),
 			.size = sizeof(frag_specialization_data.ssao_blur_radius)
 		},
 		{
-			.constantID = 1,
+			.constantID = 2,
 			.offset = offsetof(xr_ssao_blur_frag_specialization_t, ssao_blur_falloff),
 			.size = sizeof(frag_specialization_data.ssao_blur_falloff)
 		},
 		{
-			.constantID = 2,
+			.constantID = 3,
 			.offset = offsetof(xr_ssao_blur_frag_specialization_t, ssao_blur_depth_tolerance),
 			.size = sizeof(frag_specialization_data.ssao_blur_depth_tolerance)
 		}
@@ -6193,10 +6207,22 @@ xr_init_output_render_pass(
 		}
 	};
 
+	VkRenderPassMultiviewCreateInfo multiview_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO,
+		.pNext = NULL,
+		.subpassCount = 1,
+		.pViewMasks = (uint32_t[]){ 0b11 },
+		.dependencyCount = 0,
+		.pViewOffsets = NULL,
+		.correlationMaskCount = 1,
+		.pCorrelationMasks = (uint32_t[]){ 0b11 }
+	};
+
 	VkRenderPassCreateInfo render_pass_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-		.pNext = NULL,
+		.pNext = &multiview_info,
 		.flags = 0,
 		.attachmentCount = MACRO_ARRAY_LEN(attachments),
 		.pAttachments = attachments,
@@ -7696,7 +7722,7 @@ xr_init_output_framebuffer(
 		.pNext = NULL,
 		.flags = 0,
 		.image = frame->output.image,
-		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 		.format = xr->vk.format,
 		.components =
 		{
@@ -7711,7 +7737,7 @@ xr_init_output_framebuffer(
 			.baseMipLevel = 0,
 			.levelCount = 1,
 			.baseArrayLayer = 0,
-			.layerCount = 1
+			.layerCount = xr->view_count
 		}
 	};
 
@@ -7834,13 +7860,218 @@ xr_device_wait_idle(
 }
 
 
+private triplet_t
+xr_quaternion_to_euler(
+	XrQuaternionf q
+	)
+{
+	triplet_t euler;
+
+	float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
+	float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+	euler.x = atan2f(sinr_cosp, cosr_cosp);
+
+	float sinp = 2.0f * (q.w * q.y - q.z * q.x);
+	if(fabsf(sinp) >= 1.0f)
+	{
+		euler.y = copysignf(M_PI / 2.0f, sinp);
+	}
+	else
+	{
+		euler.y = asinf(sinp);
+	}
+
+	float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
+	float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+	euler.z = atan2f(siny_cosp, cosy_cosp);
+
+	return euler;
+}
+
+
+private void
+xr_update_hand_tracking(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	if(xr->options.xr_monado)
+	{
+		return;
+	}
+
+	{
+		XrHandJointLocationsEXT locations =
+		{
+			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
+			.next = NULL,
+			.jointCount = XR_HAND_JOINT_COUNT_EXT,
+			.jointLocations = xr->hand_joints_left
+		};
+
+		XrHandJointsLocateInfoEXT locate_info =
+		{
+			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
+			.next = NULL,
+			.baseSpace = xr->space,
+			.time = xr->predicted_display_time
+		};
+
+		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_left, &locate_info, &locations);
+		xr->hand_joints_left_active = (result == XR_SUCCESS && locations.isActive);
+	}
+
+	{
+		XrHandJointLocationsEXT locations =
+		{
+			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
+			.next = NULL,
+			.jointCount = XR_HAND_JOINT_COUNT_EXT,
+			.jointLocations = xr->hand_joints_right
+		};
+
+		XrHandJointsLocateInfoEXT locate_info =
+		{
+			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
+			.next = NULL,
+			.baseSpace = xr->space,
+			.time = xr->predicted_display_time
+		};
+
+		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_right, &locate_info, &locations);
+		xr->hand_joints_right_active = (result == XR_SUCCESS && locations.isActive);
+	}
+}
+
+
+private void
+xr_get_head_pose(
+	xr_t xr,
+	xr_pose_t* pose
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(pose);
+
+	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
+	XrResult result = xrLocateSpace(xr->space, xr->space, xr->predicted_display_time, &location);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
+	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
+
+	pose->position.x = location.pose.position.x;
+	pose->position.y = location.pose.position.y;
+	pose->position.z = location.pose.position.z;
+
+	pose->rotation = xr_quaternion_to_euler(location.pose.orientation);
+}
+
+
+private void
+xr_get_hand_pose(
+	xr_t xr,
+	XrHandTrackerEXT hand_tracker,
+	xr_pose_t* pose
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(pose);
+
+	if(xr->options.xr_monado)
+	{
+		*pose = (xr_pose_t){0};
+		return;
+	}
+
+	XrHandJointLocationEXT* joints;
+	bool active;
+
+	if(hand_tracker == xr->hand_tracker_left)
+	{
+		joints = xr->hand_joints_left;
+		active = xr->hand_joints_left_active;
+	}
+	else if(hand_tracker == xr->hand_tracker_right)
+	{
+		joints = xr->hand_joints_right;
+		active = xr->hand_joints_right_active;
+	}
+	else
+	{
+		hard_assert_unreachable();
+	}
+
+	hard_assert_true(active);
+
+	XrHandJointLocationEXT palm = joints[XR_HAND_JOINT_PALM_EXT];
+	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
+	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
+
+	pose->position.x = palm.pose.position.x;
+	pose->position.y = palm.pose.position.y;
+	pose->position.z = palm.pose.position.z;
+
+	pose->rotation = xr_quaternion_to_euler(palm.pose.orientation);
+}
+
+
 private void
 xr_get_eye_poses(
 	xr_t xr,
 	xr_pose_t* left_pose,
 	xr_pose_t* right_pose,
 	XrView views[2]
-	);
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(left_pose);
+	assert_not_null(right_pose);
+
+	XrViewState view_state = {XR_TYPE_VIEW_STATE};
+	XrView local_views[2] =
+	{
+		{XR_TYPE_VIEW},
+		{XR_TYPE_VIEW}
+	};
+
+	XrViewLocateInfo locate_info =
+	{
+		.type = XR_TYPE_VIEW_LOCATE_INFO,
+		.next = NULL,
+		.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+		.displayTime = xr->predicted_display_time,
+		.space = xr->space
+	};
+
+	uint32_t view_count = 0;
+	XrResult result = xrLocateViews(xr->session, &locate_info, &view_state, 2, &view_count, local_views);
+	hard_assert_eq(result, XR_SUCCESS);
+	hard_assert_eq(view_count, 2);
+
+	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT, 0);
+	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT, 0);
+
+	xr_pose_t head_pose;
+	xr_get_head_pose(xr, &head_pose);
+
+	left_pose->position.x = (local_views[0].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
+	left_pose->position.y = (local_views[0].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
+	left_pose->position.z = (local_views[0].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
+	left_pose->rotation = head_pose.rotation;
+
+	right_pose->position.x = (local_views[1].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
+	right_pose->position.y = (local_views[1].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
+	right_pose->position.z = (local_views[1].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
+	right_pose->rotation = head_pose.rotation;
+
+	if(views)
+	{
+		views[0] = local_views[0];
+		views[1] = local_views[1];
+	}
+}
 
 
 #define XR_FOR_EACH_MODEL(entities_per_model, ...)									\
@@ -8187,7 +8418,7 @@ xr_draw_output(
 	xr_t xr,
 	vk_frame_t* frame,
 	simulation_camera_t* camera,
-	simulation_transform_t* transform,
+	simulation_vr_transform_t* vr_transform,
 	vk_entities_per_model_t* entity_data
 	)
 {
@@ -8218,14 +8449,22 @@ xr_draw_output(
 	case VK_PREVIEW_NONE:
 	{
 		vk_skybox_constant_data_t skybox_constant_data;
-		glm_mat4_copy(transform->projection, skybox_constant_data.transform);
 
-		mat4 view;
-		glm_mat4_copy(transform->view, view);
-		view[3][0] = 0.0f;
-		view[3][1] = 0.0f;
-		view[3][2] = 0.0f;
-		glm_mat4_mul(skybox_constant_data.transform, view, skybox_constant_data.transform);
+		glm_mat4_copy(vr_transform->projection[0], skybox_constant_data.transform[0]);
+		mat4 view_left;
+		glm_mat4_copy(vr_transform->view[0], view_left);
+		view_left[3][0] = 0.0f;
+		view_left[3][1] = 0.0f;
+		view_left[3][2] = 0.0f;
+		glm_mat4_mul(skybox_constant_data.transform[0], view_left, skybox_constant_data.transform[0]);
+
+		glm_mat4_copy(vr_transform->projection[1], skybox_constant_data.transform[1]);
+		mat4 view_right;
+		glm_mat4_copy(vr_transform->view[1], view_right);
+		view_right[3][0] = 0.0f;
+		view_right[3][1] = 0.0f;
+		view_right[3][2] = 0.0f;
+		glm_mat4_mul(skybox_constant_data.transform[1], view_right, skybox_constant_data.transform[1]);
 
 		xr->vk.table.vkCmdBindPipeline(xr->vk.barrier->command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.skybox.pipeline);
@@ -8445,7 +8684,6 @@ xr_draw(
 	xr_pose_t left_eye, right_eye;
 	xr_get_eye_poses(xr, &left_eye, &right_eye, views);
 
-	simulation_transform_t transform = simulation_get_transform(xr->simulation, xr->vk.screen_extent.pair);
 	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(xr->simulation,
 		xr->vk.screen_extent.pair, *(simulation_eye_pose_t*) &left_eye, *(simulation_eye_pose_t*) &right_eye);
 
@@ -8524,7 +8762,7 @@ xr_draw(
 	xr_timing_end(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
 
 	xr_timing_start(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
-	xr_draw_output(xr, frame, &camera, &transform, entity_data);
+	xr_draw_output(xr, frame, &camera, &vr_transform, entity_data);
 	xr_timing_end(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
 
 	xr_timing_query(xr, &xr->vk.barrier->timing);
@@ -8759,220 +8997,6 @@ xr_free_xr_hand_tracking(
 }
 
 
-private triplet_t
-xr_quaternion_to_euler(
-	XrQuaternionf q
-	)
-{
-	triplet_t euler;
-
-	float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
-	float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-	euler.x = atan2f(sinr_cosp, cosr_cosp);
-
-	float sinp = 2.0f * (q.w * q.y - q.z * q.x);
-	if(fabsf(sinp) >= 1.0f)
-	{
-		euler.y = copysignf(M_PI / 2.0f, sinp);
-	}
-	else
-	{
-		euler.y = asinf(sinp);
-	}
-
-	float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
-	float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-	euler.z = atan2f(siny_cosp, cosy_cosp);
-
-	return euler;
-}
-
-
-private void
-xr_update_hand_tracking(
-	xr_t xr
-	)
-{
-	assert_not_null(xr);
-
-	if(xr->options.xr_monado)
-	{
-		return;
-	}
-
-	{
-		XrHandJointLocationsEXT locations =
-		{
-			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
-			.next = NULL,
-			.jointCount = XR_HAND_JOINT_COUNT_EXT,
-			.jointLocations = xr->hand_joints_left
-		};
-
-		XrHandJointsLocateInfoEXT locate_info =
-		{
-			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
-			.next = NULL,
-			.baseSpace = xr->space,
-			.time = xr->predicted_display_time
-		};
-
-		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_left, &locate_info, &locations);
-		xr->hand_joints_left_active = (result == XR_SUCCESS && locations.isActive);
-	}
-
-	{
-		XrHandJointLocationsEXT locations =
-		{
-			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
-			.next = NULL,
-			.jointCount = XR_HAND_JOINT_COUNT_EXT,
-			.jointLocations = xr->hand_joints_right
-		};
-
-		XrHandJointsLocateInfoEXT locate_info =
-		{
-			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
-			.next = NULL,
-			.baseSpace = xr->space,
-			.time = xr->predicted_display_time
-		};
-
-		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_right, &locate_info, &locations);
-		xr->hand_joints_right_active = (result == XR_SUCCESS && locations.isActive);
-	}
-}
-
-
-private void
-xr_get_head_pose(
-	xr_t xr,
-	xr_pose_t* pose
-	)
-{
-	assert_not_null(xr);
-	assert_not_null(pose);
-
-	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
-	XrResult result = xrLocateSpace(xr->space, xr->space, xr->predicted_display_time, &location);
-	hard_assert_eq(result, XR_SUCCESS);
-
-	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
-	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
-
-	pose->position.x = location.pose.position.x;
-	pose->position.y = location.pose.position.y;
-	pose->position.z = location.pose.position.z;
-
-	pose->rotation = xr_quaternion_to_euler(location.pose.orientation);
-}
-
-
-private void
-xr_get_hand_pose(
-	xr_t xr,
-	XrHandTrackerEXT hand_tracker,
-	xr_pose_t* pose
-	)
-{
-	assert_not_null(xr);
-	assert_not_null(pose);
-
-	if(xr->options.xr_monado)
-	{
-		*pose = (xr_pose_t){0};
-		return;
-	}
-
-	XrHandJointLocationEXT* joints;
-	bool active;
-
-	if(hand_tracker == xr->hand_tracker_left)
-	{
-		joints = xr->hand_joints_left;
-		active = xr->hand_joints_left_active;
-	}
-	else if(hand_tracker == xr->hand_tracker_right)
-	{
-		joints = xr->hand_joints_right;
-		active = xr->hand_joints_right_active;
-	}
-	else
-	{
-		hard_assert_unreachable();
-	}
-
-	hard_assert_true(active);
-
-	XrHandJointLocationEXT palm = joints[XR_HAND_JOINT_PALM_EXT];
-	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
-	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
-
-	pose->position.x = palm.pose.position.x;
-	pose->position.y = palm.pose.position.y;
-	pose->position.z = palm.pose.position.z;
-
-	pose->rotation = xr_quaternion_to_euler(palm.pose.orientation);
-}
-
-
-private void
-xr_get_eye_poses(
-	xr_t xr,
-	xr_pose_t* left_pose,
-	xr_pose_t* right_pose,
-	XrView views[2]
-	)
-{
-	assert_not_null(xr);
-	assert_not_null(left_pose);
-	assert_not_null(right_pose);
-
-	XrViewState view_state = {XR_TYPE_VIEW_STATE};
-	XrView local_views[2] =
-	{
-		{XR_TYPE_VIEW},
-		{XR_TYPE_VIEW}
-	};
-
-	XrViewLocateInfo locate_info =
-	{
-		.type = XR_TYPE_VIEW_LOCATE_INFO,
-		.next = NULL,
-		.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
-		.displayTime = xr->predicted_display_time,
-		.space = xr->space
-	};
-
-	uint32_t view_count = 0;
-	XrResult result = xrLocateViews(xr->session, &locate_info, &view_state, 2, &view_count, local_views);
-	hard_assert_eq(result, XR_SUCCESS);
-	hard_assert_eq(view_count, 2);
-
-	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT, 0);
-	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT, 0);
-
-	xr_pose_t head_pose;
-	xr_get_head_pose(xr, &head_pose);
-
-	left_pose->position.x = (local_views[0].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
-	left_pose->position.y = (local_views[0].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
-	left_pose->position.z = (local_views[0].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
-	left_pose->rotation = head_pose.rotation;
-
-	right_pose->position.x = (local_views[1].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
-	right_pose->position.y = (local_views[1].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
-	right_pose->position.z = (local_views[1].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
-	right_pose->rotation = head_pose.rotation;
-
-	if(views)
-	{
-		views[0] = local_views[0];
-		views[1] = local_views[1];
-	}
-}
-
-
 private void
 xr_poll_events(
 	xr_t xr
@@ -9058,8 +9082,7 @@ xr_poll_events(
 						break;
 					}
 
-					default:
-						break;
+					default: break;
 				}
 
 				break;
@@ -9090,15 +9113,6 @@ xr_process_frame(
 	assert_not_null(xr);
 
 	static XrTime previous_display_time = 0;
-
-	// if(
-	// 	xr->state != XR_SESSION_STATE_SYNCHRONIZED &&
-	// 	xr->state != XR_SESSION_STATE_VISIBLE &&
-	// 	xr->state != XR_SESSION_STATE_FOCUSED
-	// 	)
-	// {
-	// 	return;
-	// }
 
 	XrFrameWaitInfo wait_info = {XR_TYPE_FRAME_WAIT_INFO};
 	XrFrameState frame_state = {XR_TYPE_FRAME_STATE};

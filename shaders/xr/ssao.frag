@@ -18,15 +18,16 @@
 
 #extension GL_EXT_multiview : require
 
-layout(constant_id = 0) const int ssao_kernel_size = 12;
-layout(constant_id = 1) const int ssao_noise_size = 4;
-layout(constant_id = 2) const float ssao_radius = 96.0;
-layout(constant_id = 3) const float ssao_bias = 0.1;
-layout(constant_id = 4) const float ssao_power = 6.0;
-layout(constant_id = 5) const float ssao_range_check = 4.0;
-layout(constant_id = 6) const float ssao_depth_k = 0.06;
-layout(constant_id = 7) const float ssao_depth_gamma = 16.0;
-layout(constant_id = 8) const bool ssao_debug = false;
+layout(constant_id = 0) const bool enable_ssao = true;
+layout(constant_id = 1) const int ssao_kernel_size = 12;
+layout(constant_id = 2) const int ssao_noise_size = 4;
+layout(constant_id = 3) const float ssao_radius = 96.0;
+layout(constant_id = 4) const float ssao_bias = 0.1;
+layout(constant_id = 5) const float ssao_power = 6.0;
+layout(constant_id = 6) const float ssao_range_check = 4.0;
+layout(constant_id = 7) const float ssao_depth_k = 0.06;
+layout(constant_id = 8) const float ssao_depth_gamma = 16.0;
+layout(constant_id = 9) const bool ssao_debug = false;
 
 layout(set = 0, binding = 0) uniform sampler2DArray inViewPosition;
 layout(set = 0, binding = 1) uniform sampler2DArray inViewNormal;
@@ -51,6 +52,12 @@ layout(location = 0) out float outOcclusion;
 void
 main()
 {
+	if(!enable_ssao)
+	{
+		outOcclusion = 1.0;
+		return;
+	}
+
 	vec4 fragPos = texture(inViewPosition, vec3(inCoords, gl_ViewIndex));
 	vec3 normal = texture(inViewNormal, vec3(inCoords, gl_ViewIndex)).xyz * 2.0 - 1.0;
 

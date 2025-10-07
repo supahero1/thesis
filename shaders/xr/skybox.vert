@@ -16,9 +16,11 @@
 
 #version 450
 
+#extension GL_EXT_multiview : require
+
 layout(push_constant) uniform Constants
 {
-	mat4 transform;
+	mat4 transform[2];
 }
 consts;
 
@@ -29,7 +31,8 @@ layout(location = 0) out vec3 outPosition;
 void
 main()
 {
-	gl_Position = consts.transform * vec4(inPosition, 1.0);
+	uint viewIndex = gl_ViewIndex;
+	gl_Position = consts.transform[viewIndex] * vec4(inPosition, 1.0);
 	gl_Position.z = gl_Position.w;
 
 	outPosition = inPosition;

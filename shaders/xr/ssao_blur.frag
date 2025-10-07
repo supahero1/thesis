@@ -18,9 +18,10 @@
 
 #extension GL_EXT_multiview : require
 
-layout(constant_id = 0) const float ssao_blur_radius = 5.0;
-layout(constant_id = 1) const float ssao_blur_falloff = 1.9;
-layout(constant_id = 2) const float ssao_blur_depth_tolerance = 256.0;
+layout(constant_id = 0) const bool enable_ssao = true;
+layout(constant_id = 1) const float ssao_blur_radius = 5.0;
+layout(constant_id = 2) const float ssao_blur_falloff = 1.9;
+layout(constant_id = 3) const float ssao_blur_depth_tolerance = 256.0;
 
 layout(set = 0, binding = 0) uniform sampler2DArray inViewPosition;
 layout(set = 0, binding = 1) uniform sampler2DArray inViewNormal;
@@ -33,6 +34,12 @@ layout(location = 0) out float outOcclusion;
 void
 main()
 {
+	if(!enable_ssao)
+	{
+		outOcclusion = 1.0;
+		return;
+	}
+
 	vec2 texSize = vec2(textureSize(inViewPosition, 0).xy);
 	vec2 texel = 1.0 / texSize;
 

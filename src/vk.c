@@ -4956,6 +4956,7 @@ vk_init_ssao_pipeline(
 
 	typedef struct vk_ssao_frag_specialization
 	{
+		int32_t enable_ssao;
 		int32_t ssao_kernel_size;
 		int32_t ssao_noise_size;
 		float ssao_radius;
@@ -4970,6 +4971,7 @@ vk_init_ssao_pipeline(
 
 	vk_ssao_frag_specialization_t frag_specialization_data =
 	{
+		.enable_ssao = vk->options.enable_ssao,
 		.ssao_kernel_size = vk->options.ssao_kernel_size,
 		.ssao_noise_size = vk->options.ssao_noise_size,
 		.ssao_radius = vk->options.ssao_radius,
@@ -4985,46 +4987,51 @@ vk_init_ssao_pipeline(
 	{
 		{
 			.constantID = 0,
+			.offset = offsetof(vk_ssao_frag_specialization_t, enable_ssao),
+			.size = sizeof(frag_specialization_data.enable_ssao)
+		},
+		{
+			.constantID = 1,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_kernel_size),
 			.size = sizeof(frag_specialization_data.ssao_kernel_size)
 		},
 		{
-			.constantID = 1,
+			.constantID = 2,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_noise_size),
 			.size = sizeof(frag_specialization_data.ssao_noise_size)
 		},
 		{
-			.constantID = 2,
+			.constantID = 3,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_radius),
 			.size = sizeof(frag_specialization_data.ssao_radius)
 		},
 		{
-			.constantID = 3,
+			.constantID = 4,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_bias),
 			.size = sizeof(frag_specialization_data.ssao_bias)
 		},
 		{
-			.constantID = 4,
+			.constantID = 5,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_power),
 			.size = sizeof(frag_specialization_data.ssao_power)
 		},
 		{
-			.constantID = 5,
+			.constantID = 6,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_range_check),
 			.size = sizeof(frag_specialization_data.ssao_range_check)
 		},
 		{
-			.constantID = 6,
+			.constantID = 7,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_depth_k),
 			.size = sizeof(frag_specialization_data.ssao_depth_k)
 		},
 		{
-			.constantID = 7,
+			.constantID = 8,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_depth_gamma),
 			.size = sizeof(frag_specialization_data.ssao_depth_gamma)
 		},
 		{
-			.constantID = 8,
+			.constantID = 9,
 			.offset = offsetof(vk_ssao_frag_specialization_t, ssao_debug),
 			.size = sizeof(frag_specialization_data.ssao_debug)
 		}
@@ -5539,6 +5546,7 @@ vk_init_ssao_blur_pipeline(
 
 	typedef struct vk_ssao_blur_frag_specialization
 	{
+		int32_t enable_ssao;
 		float ssao_blur_radius;
 		float ssao_blur_falloff;
 		float ssao_blur_depth_tolerance;
@@ -5547,6 +5555,7 @@ vk_init_ssao_blur_pipeline(
 
 	vk_ssao_blur_frag_specialization_t frag_specialization_data =
 	{
+		.enable_ssao = vk->options.enable_ssao,
 		.ssao_blur_radius = vk->options.ssao_blur_radius,
 		.ssao_blur_falloff = vk->options.ssao_blur_falloff,
 		.ssao_blur_depth_tolerance = vk->options.ssao_blur_depth_tolerance
@@ -5556,16 +5565,21 @@ vk_init_ssao_blur_pipeline(
 	{
 		{
 			.constantID = 0,
+			.offset = offsetof(vk_ssao_blur_frag_specialization_t, enable_ssao),
+			.size = sizeof(frag_specialization_data.enable_ssao)
+		},
+		{
+			.constantID = 1,
 			.offset = offsetof(vk_ssao_blur_frag_specialization_t, ssao_blur_radius),
 			.size = sizeof(frag_specialization_data.ssao_blur_radius)
 		},
 		{
-			.constantID = 1,
+			.constantID = 2,
 			.offset = offsetof(vk_ssao_blur_frag_specialization_t, ssao_blur_falloff),
 			.size = sizeof(frag_specialization_data.ssao_blur_falloff)
 		},
 		{
-			.constantID = 2,
+			.constantID = 3,
 			.offset = offsetof(vk_ssao_blur_frag_specialization_t, ssao_blur_depth_tolerance),
 			.size = sizeof(frag_specialization_data.ssao_blur_depth_tolerance)
 		}
