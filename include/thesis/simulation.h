@@ -95,8 +95,8 @@ simulation_transform_t;
 
 typedef struct simulation_eye_pose
 {
+	vec4 rotation;
 	vec3 position;
-	vec3 rotation;
 }
 simulation_eye_pose_t;
 

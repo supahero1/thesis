@@ -24,7 +24,6 @@
 #include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
-#include <thesis/extent_3d.h>
 
 #include <volk.h>
 
@@ -34,7 +33,6 @@
 
 #include <signal.h>
 #include <string.h>
-#include <math.h>
 
 #define VK_STATS_SIZE 64
 #define VK_QUERY_SIZE 32
@@ -49,7 +47,7 @@
 #define VK_WINDOW_SENSITIVITY 0.003f
 #define VK_WINDOW_SPEED 500.0f
 
-#define XR_COORDINATE_SCALE 1.0f
+#define XR_COORDINATE_SCALE 100.0f
 
 
 typedef enum vk_image_type
@@ -404,13 +402,6 @@ typedef struct vk_descriptor_set_layout
 	uint32_t multiplier;
 }
 vk_descriptor_set_layout_t;
-
-typedef struct xr_pose
-{
-	triplet_t position;
-	triplet_t rotation;
-}
-xr_pose_t;
 
 struct xr
 {
@@ -7860,35 +7851,6 @@ xr_device_wait_idle(
 }
 
 
-private triplet_t
-xr_quaternion_to_euler(
-	XrQuaternionf q
-	)
-{
-	triplet_t euler;
-
-	float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
-	float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-	euler.x = atan2f(sinr_cosp, cosr_cosp);
-
-	float sinp = 2.0f * (q.w * q.y - q.z * q.x);
-	if(fabsf(sinp) >= 1.0f)
-	{
-		euler.y = copysignf(M_PI / 2.0f, sinp);
-	}
-	else
-	{
-		euler.y = asinf(sinp);
-	}
-
-	float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
-	float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-	euler.z = atan2f(siny_cosp, cosy_cosp);
-
-	return euler;
-}
-
-
 private void
 xr_update_hand_tracking(
 	xr_t xr
@@ -7946,34 +7908,10 @@ xr_update_hand_tracking(
 
 
 private void
-xr_get_head_pose(
-	xr_t xr,
-	xr_pose_t* pose
-	)
-{
-	assert_not_null(xr);
-	assert_not_null(pose);
-
-	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
-	XrResult result = xrLocateSpace(xr->space, xr->space, xr->predicted_display_time, &location);
-	hard_assert_eq(result, XR_SUCCESS);
-
-	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
-	hard_assert_neq(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
-
-	pose->position.x = location.pose.position.x;
-	pose->position.y = location.pose.position.y;
-	pose->position.z = location.pose.position.z;
-
-	pose->rotation = xr_quaternion_to_euler(location.pose.orientation);
-}
-
-
-private void
 xr_get_hand_pose(
 	xr_t xr,
 	XrHandTrackerEXT hand_tracker,
-	xr_pose_t* pose
+	XrPosef* pose
 	)
 {
 	assert_not_null(xr);
@@ -7981,7 +7919,7 @@ xr_get_hand_pose(
 
 	if(xr->options.xr_monado)
 	{
-		*pose = (xr_pose_t){0};
+		*pose = (XrPosef){0};
 		return;
 	}
 
@@ -8009,25 +7947,19 @@ xr_get_hand_pose(
 	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
 	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
 
-	pose->position.x = palm.pose.position.x;
-	pose->position.y = palm.pose.position.y;
-	pose->position.z = palm.pose.position.z;
-
-	pose->rotation = xr_quaternion_to_euler(palm.pose.orientation);
+	*pose = palm.pose;
 }
 
 
 private void
 xr_get_eye_poses(
 	xr_t xr,
-	xr_pose_t* left_pose,
-	xr_pose_t* right_pose,
+	XrPosef* left_pose,
+	XrPosef* right_pose,
 	XrView views[2]
 	)
 {
 	assert_not_null(xr);
-	assert_not_null(left_pose);
-	assert_not_null(right_pose);
 
 	XrViewState view_state = {XR_TYPE_VIEW_STATE};
 	XrView local_views[2] =
@@ -8053,18 +7985,28 @@ xr_get_eye_poses(
 	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT, 0);
 	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT, 0);
 
-	xr_pose_t head_pose;
-	xr_get_head_pose(xr, &head_pose);
+	XrVector3f head_pos =
+	{
+		(local_views[0].pose.position.x + local_views[1].pose.position.x) * 0.5f,
+		(local_views[0].pose.position.y + local_views[1].pose.position.y) * 0.5f,
+		(local_views[0].pose.position.z + local_views[1].pose.position.z) * 0.5f
+	};
 
-	left_pose->position.x = (local_views[0].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
-	left_pose->position.y = (local_views[0].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
-	left_pose->position.z = (local_views[0].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
-	left_pose->rotation = head_pose.rotation;
+	if(left_pose)
+	{
+		left_pose->position.x = (local_views[0].pose.position.x - head_pos.x) * XR_COORDINATE_SCALE;
+		left_pose->position.y = (local_views[0].pose.position.y - head_pos.y) * XR_COORDINATE_SCALE;
+		left_pose->position.z = (local_views[0].pose.position.z - head_pos.z) * XR_COORDINATE_SCALE;
+		left_pose->orientation = local_views[0].pose.orientation;
+	}
 
-	right_pose->position.x = (local_views[1].pose.position.x - head_pose.position.x) * XR_COORDINATE_SCALE;
-	right_pose->position.y = (local_views[1].pose.position.y - head_pose.position.y) * XR_COORDINATE_SCALE;
-	right_pose->position.z = (local_views[1].pose.position.z - head_pose.position.z) * XR_COORDINATE_SCALE;
-	right_pose->rotation = head_pose.rotation;
+	if(right_pose)
+	{
+		right_pose->position.x = (local_views[1].pose.position.x - head_pos.x) * XR_COORDINATE_SCALE;
+		right_pose->position.y = (local_views[1].pose.position.y - head_pos.y) * XR_COORDINATE_SCALE;
+		right_pose->position.z = (local_views[1].pose.position.z - head_pos.z) * XR_COORDINATE_SCALE;
+		right_pose->orientation = local_views[1].pose.orientation;
+	}
 
 	if(views)
 	{
@@ -8224,9 +8166,9 @@ xr_draw_scene(
 	xr->vk.table.vkCmdSetViewport(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.screen_extent.viewport);
 	xr->vk.table.vkCmdSetScissor(xr->vk.barrier->command_buffer, 0, 1, &xr->vk.screen_extent.scissor);
 
-	xr_pose_t left_eye_pose;
-	xr_pose_t right_eye_pose;
-	xr_get_eye_poses(xr, &left_eye_pose, &right_eye_pose, NULL);
+	XrPosef left_eye;
+	XrPosef right_eye;
+	xr_get_eye_poses(xr, &left_eye, &right_eye, NULL);
 
 	vk_scene_vert_ubo_data_t scene_vert_ubo_data;
 
@@ -8239,12 +8181,10 @@ xr_draw_scene(
 	glm_mat4_copy(vr_transform->light_transform, scene_vert_ubo_data.light_transform);
 	glm_vec4_copy(vr_transform->light_direction, scene_vert_ubo_data.light_direction);
 
-	glm_vec3_copy((vec3){left_eye_pose.position.x, left_eye_pose.position.y, left_eye_pose.position.z},
-		scene_vert_ubo_data.camera_position[0]);
+	glm_vec3_copy((void*) &left_eye.position, scene_vert_ubo_data.camera_position[0]);
 	scene_vert_ubo_data.camera_position[0][3] = 1.0f;
 
-	glm_vec3_copy((vec3){right_eye_pose.position.x, right_eye_pose.position.y, right_eye_pose.position.z},
-		scene_vert_ubo_data.camera_position[1]);
+	glm_vec3_copy((void*) &right_eye.position, scene_vert_ubo_data.camera_position[1]);
 	scene_vert_ubo_data.camera_position[1][3] = 1.0f;
 
 	xr_copy_to_buffer(xr, &frame->scene.vert_ubo.buffer,
@@ -8681,11 +8621,20 @@ xr_draw(
 
 	simulation_camera_t camera = simulation_get_camera(xr->simulation);
 
-	xr_pose_t left_eye, right_eye;
+	XrPosef left_eye;
+	XrPosef right_eye;
 	xr_get_eye_poses(xr, &left_eye, &right_eye, views);
 
-	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(xr->simulation,
-		xr->vk.screen_extent.pair, *(simulation_eye_pose_t*) &left_eye, *(simulation_eye_pose_t*) &right_eye);
+	simulation_eye_pose_t left_eye_pose;
+	(void) memcpy(&left_eye_pose.rotation, &left_eye.orientation, sizeof(XrQuaternionf));
+	(void) memcpy(&left_eye_pose.position, &left_eye.position, sizeof(XrVector3f));
+
+	simulation_eye_pose_t right_eye_pose;
+	(void) memcpy(&right_eye_pose.rotation, &right_eye.orientation, sizeof(XrQuaternionf));
+	(void) memcpy(&right_eye_pose.position, &right_eye.position, sizeof(XrVector3f));
+
+	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(
+		xr->simulation, xr->vk.screen_extent.pair, left_eye_pose, right_eye_pose);
 
 	uint32_t sim_entity_count;
 	simulation_entity_data_t* sim_entity_data = simulation_get_entity_data(xr->simulation, &sim_entity_count);
@@ -9152,8 +9101,7 @@ xr_process_frame(
 
 	if(frame_state.shouldRender)
 	{
-		xr_pose_t left_eye, right_eye;
-		xr_get_eye_poses(xr, &left_eye, &right_eye, views);
+		xr_get_eye_poses(xr, NULL, NULL, views);
 
 		xr_draw(xr, views);
 
