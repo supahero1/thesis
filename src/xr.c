@@ -881,14 +881,19 @@ xr_init_stats(
 
 	xr->stats = simulation_get_stats(xr->simulation);
 
-	stats_add(xr->stats, "xr_barrier_timing_shadow", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_barrier_timing_scene", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_barrier_timing_ssao", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_barrier_timing_ssao_blur", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_barrier_timing_output", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_command_record_time", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_time", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_shadow", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_scene", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_ssao", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_ssao_blur", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_output", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_all", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_frame_delta_time", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_shadow", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_scene", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_ssao", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_ssao_blur", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_output", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_all", VK_STATS_SIZE);
 }
 
 
@@ -899,14 +904,19 @@ xr_free_stats(
 {
 	assert_not_null(xr);
 
+	stats_del(xr->stats, "xr_command_all");
+	stats_del(xr->stats, "xr_command_output");
+	stats_del(xr->stats, "xr_command_ssao_blur");
+	stats_del(xr->stats, "xr_command_ssao");
+	stats_del(xr->stats, "xr_command_scene");
+	stats_del(xr->stats, "xr_command_shadow");
 	stats_del(xr->stats, "xr_frame_delta_time");
-	stats_del(xr->stats, "xr_frame_time");
-	stats_del(xr->stats, "xr_command_record_time");
-	stats_del(xr->stats, "xr_barrier_timing_output");
-	stats_del(xr->stats, "xr_barrier_timing_ssao_blur");
-	stats_del(xr->stats, "xr_barrier_timing_ssao");
-	stats_del(xr->stats, "xr_barrier_timing_scene");
-	stats_del(xr->stats, "xr_barrier_timing_shadow");
+	stats_del(xr->stats, "xr_frame_all");
+	stats_del(xr->stats, "xr_frame_output");
+	stats_del(xr->stats, "xr_frame_ssao_blur");
+	stats_del(xr->stats, "xr_frame_ssao");
+	stats_del(xr->stats, "xr_frame_scene");
+	stats_del(xr->stats, "xr_frame_shadow");
 }
 
 
@@ -2036,7 +2046,8 @@ xr_init_xr_swapchain(
 		.type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
 		.next = NULL,
 		.createFlags = 0,
-		.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
+		.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
+			XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
 		.format = xr->vk.format,
 		.sampleCount = 1,
 		.width = xr->vk.swapchain_extent.w,
@@ -8053,6 +8064,8 @@ xr_draw_shadow(
 	assert_not_null(xr);
 	assert_not_null(frame);
 
+	uint64_t start_time = time_get();
+
 	VkClearValue clear_values[] =
 	{
 		{
@@ -8109,6 +8122,8 @@ xr_draw_shadow(
 	XR_FOR_EACH_MODEL_END(entities_per_model, model);
 
 	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+
+	stats_log(xr->stats, "xr_command_shadow", time_get() - start_time);
 }
 
 
@@ -8123,6 +8138,8 @@ xr_draw_scene(
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
+
+	uint64_t start_time = time_get();
 
 	VkClearValue clear_values[] =
 	{
@@ -8246,6 +8263,8 @@ xr_draw_scene(
 	XR_FOR_EACH_MODEL_END(entities_per_model, model);
 
 	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+
+	stats_log(xr->stats, "xr_command_scene", time_get() - start_time);
 }
 
 
@@ -8260,6 +8279,8 @@ xr_draw_ssao(
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
+
+	uint64_t start_time = time_get();
 
 	VkRenderPassBeginInfo render_pass_begin_info =
 	{
@@ -8302,6 +8323,8 @@ xr_draw_ssao(
 	xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
 
 	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+
+	stats_log(xr->stats, "xr_command_ssao", time_get() - start_time);
 }
 
 
@@ -8316,6 +8339,8 @@ xr_draw_ssao_blur(
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
+
+	uint64_t start_time = time_get();
 
 	VkRenderPassBeginInfo render_pass_begin_info =
 	{
@@ -8350,6 +8375,8 @@ xr_draw_ssao_blur(
 	xr->vk.table.vkCmdDraw(xr->vk.barrier->command_buffer, 6, 1, 0, 0);
 
 	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+
+	stats_log(xr->stats, "xr_command_ssao_blur", time_get() - start_time);
 }
 
 
@@ -8364,6 +8391,8 @@ xr_draw_output(
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
+
+	uint64_t start_time = time_get();
 
 	VkRenderPassBeginInfo render_pass_begin_info =
 	{
@@ -8535,6 +8564,8 @@ xr_draw_output(
 
 
 	xr->vk.table.vkCmdEndRenderPass(xr->vk.barrier->command_buffer);
+
+	stats_log(xr->stats, "xr_command_output", time_get() - start_time);
 }
 
 
@@ -8555,23 +8586,23 @@ xr_draw(
 		xr_timing_load(xr, &xr->vk.barrier->timing);
 
 		uint64_t shadow_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
-		stats_log(xr->stats, "xr_barrier_timing_shadow", shadow_time);
+		stats_log(xr->stats, "xr_frame_shadow", shadow_time);
 		frame_time += shadow_time;
 
 		uint64_t scene_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
-		stats_log(xr->stats, "xr_barrier_timing_scene", scene_time);
+		stats_log(xr->stats, "xr_frame_scene", scene_time);
 		frame_time += scene_time;
 
 		uint64_t ssao_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
-		stats_log(xr->stats, "xr_barrier_timing_ssao", ssao_time);
+		stats_log(xr->stats, "xr_frame_ssao", ssao_time);
 		frame_time += ssao_time;
 
 		uint64_t ssao_blur_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
-		stats_log(xr->stats, "xr_barrier_timing_ssao_blur", ssao_blur_time);
+		stats_log(xr->stats, "xr_frame_ssao_blur", ssao_blur_time);
 		frame_time += ssao_blur_time;
 
 		uint64_t output_time = xr_timing_get(xr, &xr->vk.barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
-		stats_log(xr->stats, "xr_barrier_timing_output", output_time);
+		stats_log(xr->stats, "xr_frame_output", output_time);
 		frame_time += output_time;
 	}
 
@@ -8752,10 +8783,10 @@ xr_draw(
 	hard_assert_eq(xr_result, XR_SUCCESS);
 
 	uint64_t end_time = time_get();
-	stats_log(xr->stats, "xr_command_record_time", end_time - start_time);
+	stats_log(xr->stats, "xr_command_all", end_time - start_time);
 
 	frame_time += end_time - start_time;
-	stats_log(xr->stats, "xr_frame_time", frame_time);
+	stats_log(xr->stats, "xr_frame_all", frame_time);
 
 	++xr->vk.barrier;
 	if(xr->vk.barrier >= xr->vk.barriers + VK_MAX_FRAMES)
