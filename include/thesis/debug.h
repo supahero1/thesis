@@ -67,12 +67,13 @@ while(0)
 #define hard_assert_false(a, ...) hard_assert_eq(a, false __VA_OPT__(,) __VA_ARGS__)
 #define hard_assert_null(a, ...) hard_assert_eq(a, ASSERT_NULL __VA_OPT__(,) __VA_ARGS__)
 #define hard_assert_not_null(a, ...) hard_assert_neq(a, ASSERT_NULL __VA_OPT__(,) __VA_ARGS__)
-#define hard_assert_ptr(ptr, size, ...)	\
-hard_assert_not_null(ptr,				\
-	{									\
-		if(size == 0) break;			\
-		__VA_ARGS__ __VA_OPT__(;)		\
-	}									\
+#define hard_assert_ptr(ptr, size, ...)				\
+hard_assert_not_null(ptr,							\
+	{												\
+		bool is_zero = sizeof(*ptr) * size == 0;	\
+		if(__builtin_expect(is_zero, 1)) break;		\
+		__VA_ARGS__ __VA_OPT__(;)					\
+	}												\
 	)
 #define hard_assert_lt(a, b, ...) hard_assert_base(a, b, <, >= __VA_OPT__(,) __VA_ARGS__)
 #define hard_assert_le(a, b, ...) hard_assert_base(a, b, <=, > __VA_OPT__(,) __VA_ARGS__)
@@ -111,11 +112,12 @@ while(0)
 #define empty_assert_false(a, ...) empty_assert_eq(a, false)
 #define empty_assert_null(a, ...) empty_assert_eq(a, ASSERT_NULL)
 #define empty_assert_not_null(a, ...) empty_assert_neq(a, ASSERT_NULL)
-#define empty_assert_ptr(ptr, size, ...)	\
-empty_assert_base(ptr, ASSERT_NULL, !=,		\
-	{										\
-		if(size == 0) break;				\
-	}										\
+#define empty_assert_ptr(ptr, size, ...)			\
+empty_assert_base(ptr, ASSERT_NULL, !=,				\
+	{												\
+		bool is_zero = sizeof(*ptr) * size == 0;	\
+		if(__builtin_expect(is_zero, 1)) break;		\
+	}												\
 	)
 #define empty_assert_lt(a, b, ...) empty_assert_base(a, b, <)
 #define empty_assert_le(a, b, ...) empty_assert_base(a, b, <=)

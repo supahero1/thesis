@@ -81,10 +81,10 @@ simulation_model_table_value_free_fn(
 	if(info->texture)
 	{
 		alloc_free(info->texture->data, info->texture->size);
-		alloc_free(info->texture, sizeof(*info->texture));
+		alloc_free(info->texture, 1);
 	}
 
-	alloc_free(info, sizeof(*info));
+	alloc_free(info, 1);
 }
 
 
@@ -98,7 +98,7 @@ simulation_init(
 	int status = VIPS_INIT("thesis");
 	hard_assert_false(status);
 
-	simulation_t simulation = alloc_calloc(sizeof(*simulation));
+	simulation_t simulation = alloc_calloc(simulation, 1);
 	assert_not_null(simulation);
 
 	sync_mtx_init(&simulation->mutex);
@@ -150,9 +150,9 @@ simulation_free(
 
 	for(uint32_t i = 0; i < simulation->entity_count; ++i)
 	{
-		alloc_free(simulation->entities[i], sizeof(*simulation->entities[i]));
+		alloc_free(simulation->entities[i], 1);
 	}
-	alloc_free(simulation->entities, sizeof(*simulation->entities) * simulation->entity_count);
+	alloc_free(simulation->entities, simulation->entity_count);
 
 	str_free(simulation->skybox_path);
 
@@ -162,11 +162,11 @@ simulation_free(
 	{
 		model_free(simulation->info.models[i]);
 	}
-	alloc_free(simulation->info.models, sizeof(*simulation->info.models) * simulation->info.model_count);
+	alloc_free(simulation->info.models, simulation->info.model_count);
 
 	sync_mtx_free(&simulation->mutex);
 
-	alloc_free(simulation, sizeof(*simulation));
+	alloc_free(simulation, 1);
 
 	vips_shutdown();
 }
@@ -361,37 +361,27 @@ simulation_add_entity(
 {
 	assert_not_null(simulation);
 
-	simulation->entities = alloc_remalloc(
-		simulation->entities,
-		sizeof(*simulation->entities) * simulation->entity_count,
-		sizeof(*simulation->entities) * (simulation->entity_count + 1)
-		);
+	simulation->entities = alloc_remalloc(simulation->entities, simulation->entity_count, simulation->entity_count + 1);
 	assert_not_null(simulation->entities);
 
-	simulation_entity_t* entity = alloc_malloc(sizeof(*entity));
+	simulation_entity_t* entity = alloc_malloc(entity, 1);
 	assert_not_null(entity);
 
 	simulation->entities[simulation->entity_count++] = entity;
 
-	simulation_texture_info_t* info = hash_table_get(
-		simulation->model_table,
-		entity_init.model_path
-		);
+	simulation_texture_info_t* info = hash_table_get(simulation->model_table, entity_init.model_path);
 
 	if(!info)
 	{
-		simulation->info.models = alloc_remalloc(
-			simulation->info.models,
-			sizeof(*simulation->info.models) * simulation->info.model_count,
-			sizeof(*simulation->info.models) * (simulation->info.model_count + 1)
-			);
+		simulation->info.models = alloc_remalloc(simulation->info.models,
+			simulation->info.model_count, simulation->info.model_count + 1);
 		assert_not_null(simulation->info.models);
 
 		model_t* model = model_init(entity_init.model_path, entity_init.scale);
 		simulation->info.material_count += model->material_count;
 		simulation->info.models[simulation->info.model_count] = model;
 
-		info = alloc_calloc(sizeof(*info));
+		info = alloc_calloc(info, 1);
 		assert_not_null(info);
 
 		info->model_idx = simulation->info.model_count++;
@@ -423,8 +413,8 @@ simulation_get_entity_data(
 		*data_count = simulation->entity_count;
 	}
 
-	simulation_entity_data_t* data = alloc_malloc(sizeof(*data) * simulation->entity_count);
-	assert_ptr(data, sizeof(*data) * simulation->entity_count);
+	simulation_entity_data_t* data = alloc_malloc(data, simulation->entity_count);
+	assert_ptr(data, simulation->entity_count);
 
 	for(uint32_t i = 0; i < simulation->entity_count; ++i)
 	{
@@ -454,7 +444,7 @@ simulation_free_entity_data(
 	uint32_t data_count
 	)
 {
-	alloc_free(data, sizeof(*data) * data_count);
+	alloc_free(data, data_count);
 }
 
 
@@ -609,7 +599,7 @@ simulation_load_texture(
 {
 	assert_not_null(path);
 
-	simulation_texture_t* texture = alloc_calloc(sizeof(*texture));
+	simulation_texture_t* texture = alloc_calloc(texture, 1);
 	assert_not_null(texture);
 
 	int width;
@@ -654,8 +644,8 @@ simulation_load_texture(
 	size *= texture->layers * 4;
 	texture->size = size;
 
-	texture->data = alloc_malloc(texture->size);
-	assert_not_null(texture->data);
+	texture->data = alloc_malloc(texture->data, texture->size);
+	assert_ptr(texture->data, texture->size);
 
 	uint32_t mip_size = texture->width * texture->height * 4;
 	memcpy(texture->data, data, mip_size);
@@ -769,7 +759,7 @@ simulation_get_texture(
 
 	if(!info)
 	{
-		info = alloc_calloc(sizeof(*info));
+		info = alloc_calloc(info, 1);
 		assert_not_null(info);
 
 		hash_table_set(simulation->model_table, path->str, info);

@@ -234,313 +234,217 @@ alloc_handle_get_flags_u(
 }
 
 
-_inline_ void*
-alloc_alloc_s(
-	_in_ alloc_state* state,
-	alloc_t size,
-	int zero
-	)
-{
-	return alloc_alloc_h(alloc_get_handle_s(state, size), size, zero);
-}
+#define alloc_alloc_s(state, ptr, size, zero)						\
+({																	\
+	__typeof__(state) _state = (state);								\
+	alloc_t _size = sizeof(*ptr) * (size);							\
+	int _zero = (zero);												\
+																	\
+	alloc_alloc_h(alloc_get_handle_s(_state, _size), _size, _zero);	\
+})
 
 
-_inline_ void*
-alloc_alloc_us(
-	_in_ alloc_state* state,
-	alloc_t size,
-	int zero
-	)
-{
-	return alloc_alloc_uh(alloc_get_handle_s(state, size), size, zero);
-}
+#define alloc_alloc_us(state, ptr, size, zero)							\
+({																		\
+	__typeof__(state) _state = (state);									\
+	alloc_t _size = sizeof(*ptr) * (size);								\
+	int _zero = (zero);													\
+																		\
+	alloc_alloc_uh(alloc_get_handle_s(_state, _size), _size, _zero);	\
+})
 
 
-_inline_ void*
-alloc_alloc(
-	alloc_t size,
-	int zero
-	)
-{
-	return alloc_alloc_h(alloc_get_handle(size), size, zero);
-}
+#define alloc_alloc(ptr, size, zero)						\
+({															\
+	alloc_t _size = sizeof(*ptr) * (size);					\
+	int _zero = (zero);										\
+															\
+	alloc_alloc_h(alloc_get_handle(_size), _size, _zero);	\
+})
 
 
-_inline_ void*
-alloc_alloc_u(
-	alloc_t size,
-	int zero
-	)
-{
-	return alloc_alloc_uh(alloc_get_handle(size), size, zero);
-}
+#define alloc_alloc_u(ptr, size, zero)							\
+({																\
+	alloc_t _size = sizeof(*ptr) * (size);						\
+	int _zero = (zero);											\
+																\
+	alloc_alloc_uh(alloc_get_handle_u(_size), _size, _zero);	\
+})
 
 
-_inline_ void
-alloc_free_s(
-	_in_ alloc_state* state,
-	_in_ void* ptr,
-	alloc_t size
-	)
-{
-	alloc_free_h(alloc_get_handle_s(state, size), ptr, size);
-}
+#define alloc_free_s(state, ptr, size)								\
+({																	\
+	__typeof__(state) _state = (state);								\
+	__typeof__(ptr) _ptr = (ptr);									\
+	alloc_t _size = sizeof(*_ptr) * (size);							\
+																	\
+	alloc_free_h(alloc_get_handle_s(_state, _size), _ptr, _size);	\
+})
 
 
-_inline_ void
-alloc_free_us(
-	_in_ alloc_state* state,
-	_in_ void* ptr,
-	alloc_t size
-	)
-{
-	alloc_free_uh(alloc_get_handle_s(state, size), ptr, size);
-}
+#define alloc_free_us(state, ptr, size)								\
+({																	\
+	__typeof__(state) _state = (state);								\
+	__typeof__(ptr) _ptr = (ptr);									\
+	alloc_t _size = sizeof(*_ptr) * (size);							\
+																	\
+	alloc_free_uh(alloc_get_handle_s(_state, _size), _ptr, _size);	\
+})
 
 
-_inline_ void
-alloc_free(
-	_in_ void* ptr,
-	alloc_t size
-	)
-{
-	alloc_free_h(alloc_get_handle(size), ptr, size);
-}
+#define alloc_free(ptr, size)							\
+({														\
+	__typeof__(ptr) _ptr = (ptr);						\
+	alloc_t _size = sizeof(*_ptr) * (size);				\
+														\
+	alloc_free_h(alloc_get_handle(_size), _ptr, _size);	\
+})
 
 
-_inline_ void
-alloc_free_u(
-	_in_ void* ptr,
-	alloc_t size
-	)
-{
-	alloc_free_uh(alloc_get_handle(size), ptr, size);
-}
+#define alloc_free_u(ptr, size)								\
+({															\
+	__typeof__(ptr) _ptr = (ptr);							\
+	alloc_t _size = sizeof(*_ptr) * (size);					\
+															\
+	alloc_free_uh(alloc_get_handle_u(_size), _ptr, _size);	\
+})
 
 
-_inline_ void*
-alloc_realloc_s(
-	_in_ alloc_state* old_state,
-	_in_ void* ptr,
-	alloc_t old_size,
-	_in_ alloc_state* new_state,
-	alloc_t new_size,
-	int zero
-	)
-{
-	return allow_realloc_h(alloc_get_handle_s(old_state, old_size), ptr, old_size,
-		alloc_get_handle_s(new_state, new_size), new_size, zero);
-}
+#define alloc_realloc_s(old_state, ptr, old_size, new_state, new_size, zero)	\
+({																				\
+	__typeof__(old_state) _old_state = (old_state);								\
+	__typeof__(ptr) _ptr = (ptr);												\
+	alloc_t _old_size = sizeof(*_ptr) * (old_size);								\
+	__typeof__(new_state) _new_state = (new_state);								\
+	alloc_t _new_size = sizeof(*_ptr) * (new_size);								\
+	int _zero = (zero);															\
+																				\
+	allow_realloc_h(															\
+		alloc_get_handle_s(_old_state, _old_size),								\
+		_ptr,																	\
+		_old_size,																\
+		alloc_get_handle_s(_new_state, _new_size),								\
+		_new_size,																\
+		_zero																	\
+	);																			\
+})
 
 
-_inline_ void*
-alloc_realloc_us(
-	_in_ alloc_state* old_state,
-	_in_ void* ptr,
-	alloc_t old_size,
-	_in_ alloc_state* new_state,
-	alloc_t new_size,
-	int zero
-	)
-{
-	return allow_realloc_uh(alloc_get_handle_s(old_state, old_size), ptr, old_size,
-		alloc_get_handle_s(new_state, new_size), new_size, zero);
-}
+#define alloc_realloc_us(old_state, ptr, old_size, new_state, new_size, zero)	\
+({																				\
+	__typeof__(old_state) _old_state = (old_state);								\
+	__typeof__(ptr) _ptr = (ptr);												\
+	alloc_t _old_size = sizeof(*_ptr) * (old_size);								\
+	__typeof__(new_state) _new_state = (new_state);								\
+	alloc_t _new_size = sizeof(*_ptr) * (new_size);								\
+	int _zero = (zero);															\
+																				\
+	allow_realloc_uh(															\
+		alloc_get_handle_s(_old_state, _old_size),								\
+		_ptr,																	\
+		_old_size,																\
+		alloc_get_handle_s(_new_state, _new_size),								\
+		_new_size,																\
+		_zero																	\
+	);																			\
+})
 
 
-_inline_ void*
-alloc_realloc(
-	_in_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size,
-	int zero
-	)
-{
-	return allow_realloc_h(alloc_get_handle(old_size), ptr, old_size,
-		alloc_get_handle(new_size), new_size, zero);
-}
+#define alloc_realloc(ptr, old_size, new_size, zero)	\
+({														\
+	__typeof__(ptr) _ptr = (ptr);						\
+	alloc_t _old_size = sizeof(*_ptr) * (old_size);		\
+	alloc_t _new_size = sizeof(*_ptr) * (new_size);		\
+	int _zero = (zero);									\
+														\
+	allow_realloc_h(									\
+		alloc_get_handle(_old_size),					\
+		_ptr,											\
+		_old_size,										\
+		alloc_get_handle(_new_size),					\
+		_new_size,										\
+		_zero											\
+	);													\
+})
 
 
-_inline_ void*
-alloc_realloc_u(
-	_in_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size,
-	int zero
-	)
-{
-	return allow_realloc_uh(alloc_get_handle(old_size), ptr, old_size,
-		alloc_get_handle(new_size), new_size, zero);
-}
+#define alloc_realloc_u(ptr, old_size, new_size, zero)	\
+({														\
+	__typeof__(ptr) _ptr = (ptr);						\
+	alloc_t _old_size = sizeof(*_ptr) * (old_size);		\
+	alloc_t _new_size = sizeof(*_ptr) * (new_size);		\
+	int _zero = (zero);									\
+														\
+	allow_realloc_uh(									\
+		alloc_get_handle_u(_old_size),					\
+		_ptr,											\
+		_old_size,										\
+		alloc_get_handle_u(_new_size),					\
+		_new_size,										\
+		_zero											\
+	);													\
+})
 
 
-_inline_ void*
-alloc_malloc_s(
-	_in_ alloc_state* state,
-	alloc_t size
-	)
-{
-	return alloc_alloc_s(state, size, 0);
-}
+#define alloc_malloc_s(state, ptr, size)	\
+alloc_alloc_s(state, ptr, size, 0)
 
 
-_inline_ void*
-alloc_malloc_us(
-	_in_ alloc_state* state,
-	alloc_t size
-	)
-{
-	return alloc_alloc_us(state, size, 0);
-}
+#define alloc_malloc_us(state, ptr, size)	\
+alloc_alloc_us(state, ptr, size, 0)
 
 
-_inline_ void*
-alloc_malloc(
-	alloc_t size
-	)
-{
-	return alloc_alloc(size, 0);
-}
+#define alloc_malloc(ptr, size)	\
+alloc_alloc(ptr, size, 0)
 
 
-_inline_ void*
-alloc_malloc_u(
-	alloc_t size
-	)
-{
-	return alloc_alloc_u(size, 0);
-}
+#define alloc_malloc_u(ptr, size)	\
+alloc_alloc_u(ptr, size, 0)
 
 
-_inline_ void*
-alloc_calloc_s(
-	_in_ alloc_state* state,
-	alloc_t size
-	)
-{
-	return alloc_alloc_s(state, size, 1);
-}
+#define alloc_calloc_s(state, ptr, size)	\
+alloc_alloc_s(state, ptr, size, 1)
 
 
-_inline_ void*
-alloc_calloc_us(
-	_in_ alloc_state* state,
-	alloc_t size
-	)
-{
-	return alloc_alloc_us(state, size, 1);
-}
+#define alloc_calloc_us(state, ptr, size)	\
+alloc_alloc_us(state, ptr, size, 1)
 
 
-_inline_ void*
-alloc_calloc(
-	alloc_t size
-	)
-{
-	return alloc_alloc(size, 1);
-}
+#define alloc_calloc(ptr, size)	\
+alloc_alloc(ptr, size, 1)
 
 
-_inline_ void*
-alloc_calloc_u(
-	alloc_t size
-	)
-{
-	return alloc_alloc_u(size, 1);
-}
+#define alloc_calloc_u(ptr, size)	\
+alloc_alloc_u(ptr, size, 1)
 
 
-_inline_ void*
-alloc_remalloc_s(
-	_in_ alloc_state* old_state,
-	_in_ void* ptr,
-	alloc_t old_size,
-	_in_ alloc_state* new_state,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc_s(old_state, ptr, old_size, new_state, new_size, 0);
-}
+#define alloc_remalloc_s(old_state, ptr, old_size, new_state, new_size)	\
+alloc_realloc_s(old_state, ptr, old_size, new_state, new_size, 0)
 
 
-_inline_ void*
-alloc_remalloc_us(
-	_in_ alloc_state* old_state,
-	_in_ void* ptr,
-	alloc_t old_size,
-	_in_ alloc_state* new_state,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc_us(old_state, ptr, old_size, new_state, new_size, 0);
-}
+#define alloc_remalloc_us(old_state, ptr, old_size, new_state, new_size)	\
+alloc_realloc_us(old_state, ptr, old_size, new_state, new_size, 0)
 
 
-_inline_ void*
-alloc_remalloc(
-	_in_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc(ptr, old_size, new_size, 0);
-}
+#define alloc_remalloc(ptr, old_size, new_size)	\
+alloc_realloc(ptr, old_size, new_size, 0)
 
 
-_inline_ void*
-alloc_remalloc_u(
-	_in_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc_u(ptr, old_size, new_size, 0);
-}
+#define alloc_remalloc_u(ptr, old_size, new_size)	\
+alloc_realloc_u(ptr, old_size, new_size, 0)
 
 
-_inline_ void*
-alloc_recalloc_s(
-	_in_ alloc_state* old_state,
-	_in_ void* ptr,
-	alloc_t old_size,
-	_in_ alloc_state* new_state,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc_s(old_state, ptr, old_size, new_state, new_size, 1);
-}
+#define alloc_recalloc_s(old_state, ptr, old_size, new_state, new_size)	\
+alloc_realloc_s(old_state, ptr, old_size, new_state, new_size, 1)
 
 
-_inline_ void*
-alloc_recalloc_us(
-	_in_ alloc_state* old_state,
-	_in_ void* ptr,
-	alloc_t old_size,
-	_in_ alloc_state* new_state,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc_us(old_state, ptr, old_size, new_state, new_size, 1);
-}
+#define alloc_recalloc_us(old_state, ptr, old_size, new_state, new_size)	\
+alloc_realloc_us(old_state, ptr, old_size, new_state, new_size, 1)
 
 
-_inline_ void*
-alloc_recalloc(
-	_in_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc(ptr, old_size, new_size, 1);
-}
+#define alloc_recalloc(ptr, old_size, new_size)	\
+alloc_realloc(ptr, old_size, new_size, 1)
 
 
-_inline_ void*
-alloc_recalloc_u(
-	_in_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size
-	)
-{
-	return alloc_realloc_u(ptr, old_size, new_size, 1);
-}
+#define alloc_recalloc_u(ptr, old_size, new_size)	\
+alloc_realloc_u(ptr, old_size, new_size, 1)

@@ -45,8 +45,8 @@ app_init(
 	char** argv
 	)
 {
-	app_t app = alloc_malloc(sizeof(*app));
-	assert_ptr(app, sizeof(*app));
+	app_t app = alloc_malloc(app, 1);
+	assert_not_null(app);
 
 	assert_ge(argc, 1);
 	assert_not_null(argv);
@@ -168,7 +168,7 @@ app_free(
 	options_free(global_options);
 	global_options = NULL;
 
-	alloc_free(app, sizeof(*app));
+	alloc_free(app, 1);
 }
 
 

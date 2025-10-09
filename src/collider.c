@@ -56,7 +56,7 @@ collider_init(
 	stats_t stats
 	)
 {
-	collider_t collider = alloc_calloc(sizeof(*collider));
+	collider_t collider = alloc_calloc(collider, 1);
 	assert_not_null(collider);
 
 	collider->stats = stats;
@@ -89,9 +89,9 @@ collider_free(
 {
 	assert_not_null(collider);
 
-	alloc_free(collider->query_entities, sizeof(*collider->query_entities) * collider->query_entities_size);
+	alloc_free(collider->query_entities, collider->query_entities_size);
 
-	alloc_free(collider->balls, sizeof(*collider->balls) * collider->balls_count);
+	alloc_free(collider->balls, collider->balls_count);
 
 	stats_del(collider->stats, "collider_resolve");
 	stats_del(collider->stats, "collider_collide");
@@ -99,7 +99,7 @@ collider_free(
 
 	octree_free(&collider->octree);
 
-	alloc_free(collider, sizeof(*collider));
+	alloc_free(collider, 1);
 }
 
 
@@ -118,11 +118,7 @@ collider_add(
 		return;
 	}
 
-	collider->balls = alloc_remalloc(
-		collider->balls,
-		sizeof(*collider->balls) * collider->balls_count,
-		sizeof(*collider->balls) * (collider->balls_count + 1)
-		);
+	collider->balls = alloc_remalloc(collider->balls, collider->balls_count, collider->balls_count + 1);
 	assert_not_null(collider->balls);
 
 	collider->balls[collider->balls_count++] = *entity;
@@ -153,11 +149,7 @@ collider_query_entity(
 	{
 		uint32_t new_size = (collider->query_entities_size << 1) | 1;
 
-		collider->query_entities = alloc_remalloc(
-			collider->query_entities,
-			sizeof(*collider->query_entities) * collider->query_entities_size,
-			sizeof(*collider->query_entities) * new_size
-			);
+		collider->query_entities = alloc_remalloc(collider->query_entities, collider->query_entities_size, new_size);
 		assert_not_null(collider->query_entities);
 
 		collider->query_entities_size = new_size;
@@ -200,11 +192,7 @@ collider_query(
 	{
 		uint32_t new_size = collider->query_entities_size >> 1;
 
-		collider->query_entities = alloc_remalloc(
-			collider->query_entities,
-			sizeof(*collider->query_entities) * collider->query_entities_size,
-			sizeof(*collider->query_entities) * new_size
-			);
+		collider->query_entities = alloc_remalloc(collider->query_entities, collider->query_entities_size, new_size);
 		assert_not_null(collider->query_entities);
 
 		collider->query_entities_size = new_size;

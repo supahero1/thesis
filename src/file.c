@@ -100,10 +100,10 @@ file_read_cap(
 		goto goto_end;
 	}
 
-	file->data = alloc_malloc(file->len);
-	hard_assert_not_null(file->data);
+	file->data = alloc_malloc(file->data, file->len);
+	hard_assert_ptr(file->data, file->len);
 
-	if(read(fd, file->data, file->len) != file->len)
+	if(file->len && read(fd, file->data, file->len) != file->len)
 	{
 		file_free(*file);
 	}

@@ -202,7 +202,8 @@ typedef struct vk_model
 	vk_mesh_t* meshes;
 	uint32_t mesh_count;
 
-	vk_buffer_t instance_buffer;
+	vk_buffer_t instance_buffers[VK_MAX_IMAGES];
+	vk_buffer_t indirect_buffers[VK_MAX_IMAGES];
 }
 vk_model_t;
 
@@ -214,6 +215,11 @@ vk_model_instance_data_t;
 
 typedef struct vk_entities_per_model
 {
+	simulation_entity_data_t* original_entities;
+	uint32_t original_entity_count;
+
+	uint32_t model_count;
+
 	simulation_entity_data_t** entities;
 	uint32_t entities_used;
 	uint32_t entities_size;
@@ -240,6 +246,8 @@ typedef struct frame
 {
 	struct
 	{
+		vk_frame_buffer_t vert_ubo;
+
 		vk_frame_image_t map;
 
 		VkFramebuffer framebuffer;
@@ -285,6 +293,8 @@ typedef struct frame
 
 	struct
 	{
+		vk_frame_buffer_t vert_ubo;
+
 		VkImage image;
 		VkImageView image_view;
 		VkFramebuffer framebuffer;
@@ -325,8 +335,8 @@ struct barrier
 {
 	VkSemaphore semaphore;
 	VkFence fence;
-	VkCommandBuffer command_buffer;
-	vk_timing_t timing;
+	VkCommandBuffer command_buffers[VK_MAX_IMAGES];
+	vk_timing_t timings[VK_MAX_IMAGES];
 };
 
 typedef enum vk_preview
@@ -621,6 +631,8 @@ struct vk
 	vk_barrier_t* barrier;
 
 	VkSwapchainKHR swapchain;
+
+	bool recorded_commands;
 };
 
 
@@ -848,11 +860,6 @@ vk_init_stats(
 	stats_add(vk->stats, "vk_frame_ssao_blur", VK_STATS_SIZE);
 	stats_add(vk->stats, "vk_frame_output", VK_STATS_SIZE);
 	stats_add(vk->stats, "vk_frame_all", VK_STATS_SIZE);
-	stats_add(vk->stats, "vk_command_shadow", VK_STATS_SIZE);
-	stats_add(vk->stats, "vk_command_scene", VK_STATS_SIZE);
-	stats_add(vk->stats, "vk_command_ssao", VK_STATS_SIZE);
-	stats_add(vk->stats, "vk_command_ssao_blur", VK_STATS_SIZE);
-	stats_add(vk->stats, "vk_command_output", VK_STATS_SIZE);
 	stats_add(vk->stats, "vk_command_all", VK_STATS_SIZE);
 }
 
@@ -865,11 +872,6 @@ vk_free_stats(
 	assert_not_null(vk);
 
 	stats_del(vk->stats, "vk_command_all");
-	stats_del(vk->stats, "vk_command_output");
-	stats_del(vk->stats, "vk_command_ssao_blur");
-	stats_del(vk->stats, "vk_command_ssao");
-	stats_del(vk->stats, "vk_command_scene");
-	stats_del(vk->stats, "vk_command_shadow");
 	stats_del(vk->stats, "vk_frame_all");
 	stats_del(vk->stats, "vk_frame_output");
 	stats_del(vk->stats, "vk_frame_ssao_blur");
@@ -2107,7 +2109,7 @@ vk_descriptor_set_pool_add(
 	assert_not_null(vk);
 	assert_not_null(set_pool);
 
-	vk_descriptor_pool_t* pool = alloc_malloc(sizeof(*pool));
+	vk_descriptor_pool_t* pool = alloc_malloc(pool, 1);
 	assert_not_null(pool);
 
 	VkDescriptorPoolSize sizes[set_pool->size_count];
@@ -2283,7 +2285,7 @@ vk_init_set_layout(
 		++size;
 	}
 
-	VkDescriptorPoolSize* new_sizes = alloc_calloc(sizeof(*new_sizes) * unique_types);
+	VkDescriptorPoolSize* new_sizes = alloc_calloc(new_sizes, unique_types);
 	assert_not_null(new_sizes);
 
 	VkDescriptorSetLayoutBinding bindings[size_count];
@@ -2385,7 +2387,7 @@ vk_init_set_layout(
 			set_layout->set_pool = set_pool;
 			++set_pool->refs;
 
-			alloc_free(sizes, sizeof(*sizes) * size_count);
+			alloc_free(sizes, size_count);
 			return;
 		}
 
@@ -2393,13 +2395,11 @@ vk_init_set_layout(
 	}
 
 
-	vk->set_pools = alloc_remalloc(vk->set_pools,
-		sizeof(*vk->set_pools) * vk->set_pool_count,
-		sizeof(*vk->set_pools) * (vk->set_pool_count + 1));
+	vk->set_pools = alloc_remalloc(vk->set_pools, vk->set_pool_count, vk->set_pool_count + 1);
 	assert_not_null(vk->set_pools);
 
 	set_pool_ptr = vk->set_pools + vk->set_pool_count++;
-	*set_pool_ptr = alloc_malloc(sizeof(**set_pool_ptr));
+	*set_pool_ptr = alloc_malloc(*set_pool_ptr, 1);
 	assert_not_null(*set_pool_ptr);
 
 	vk_descriptor_set_pool_t* set_pool = *set_pool_ptr;
@@ -2437,11 +2437,11 @@ vk_free_set_layout(
 			vk->table.vkDestroyDescriptorPool(vk->device, pool->pool, NULL);
 
 			vk_descriptor_pool_t* next = pool->next;
-			alloc_free(pool, sizeof(*pool));
+			alloc_free(pool, 1);
 			pool = next;
 		}
 
-		alloc_free(set_pool->sizes, sizeof(*set_pool->sizes) * set_pool->size_count);
+		alloc_free(set_pool->sizes, set_pool->size_count);
 	}
 
 	vk->table.vkDestroyDescriptorSetLayout(vk->device, set_layout->layout, NULL);
@@ -2568,12 +2568,12 @@ vk_free_sets(
 	while(set_pool_ptr < set_pool_ptr_end)
 	{
 		vk_descriptor_set_pool_t* set_pool = *set_pool_ptr;
-		alloc_free(set_pool, sizeof(*set_pool));
+		alloc_free(set_pool, 1);
 
 		++set_pool_ptr;
 	}
 
-	alloc_free(vk->set_pools, sizeof(*vk->set_pools) * vk->set_pool_count);
+	alloc_free(vk->set_pools, vk->set_pool_count);
 }
 
 
@@ -3440,10 +3440,10 @@ vk_init_timing(
 	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 	vk_init_buffer(vk, sizeof(uint64_t) * count * 2, usage, flags, &timing->buffer);
 
-	timing->results = alloc_malloc(sizeof(*timing->results) * timing->count * 2);
+	timing->results = alloc_malloc(timing->results, timing->count * 2);
 	assert_not_null(timing->results);
 
-	timing->index_map = alloc_malloc(sizeof(*timing->index_map) * timing->count);
+	timing->index_map = alloc_malloc(timing->index_map, timing->count);
 	assert_not_null(timing->index_map);
 
 	timing->current = 0;
@@ -3464,8 +3464,8 @@ vk_free_timing(
 		return;
 	}
 
-	alloc_free(timing->index_map, sizeof(*timing->index_map) * timing->count);
-	alloc_free(timing->results, sizeof(*timing->results) * timing->count * 2);
+	alloc_free(timing->index_map, timing->count);
+	alloc_free(timing->results, timing->count * 2);
 
 	vk_free_buffer(vk, &timing->buffer);
 
@@ -3702,7 +3702,7 @@ vk_free_pipeline_cache(
 	VkResult result = vk->table.vkGetPipelineCacheData(vk->device, pipeline_cache, &file.len, NULL);
 	hard_assert_eq(result, VK_SUCCESS);
 
-	file.data = alloc_malloc(file.len);
+	file.data = alloc_malloc(file.data, file.len);
 	assert_ptr(file.data, file.len);
 
 	result = vk->table.vkGetPipelineCacheData(vk->device, pipeline_cache, &file.len, file.data);
@@ -4110,13 +4110,9 @@ vk_init_shadow_pipeline(
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
-	VkPushConstantRange push_constants[] =
+	VkDescriptorSetLayout set_layouts[] =
 	{
-		{
-			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-			.offset = 0,
-			.size = sizeof(vk_shadow_vert_constant_data_t)
-		}
+		vk->vert_ubo_set_layout.layout
 	};
 
 	VkPipelineLayoutCreateInfo pipeline_layout_info =
@@ -4124,10 +4120,10 @@ vk_init_shadow_pipeline(
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.setLayoutCount = 0,
-		.pSetLayouts = NULL,
-		.pushConstantRangeCount = MACRO_ARRAY_LEN(push_constants),
-		.pPushConstantRanges = push_constants
+		.setLayoutCount = MACRO_ARRAY_LEN(set_layouts),
+		.pSetLayouts = set_layouts,
+		.pushConstantRangeCount = 0,
+		.pPushConstantRanges = NULL
 	};
 
 	VkResult result = vk->table.vkCreatePipelineLayout(vk->device,
@@ -6118,17 +6114,9 @@ vk_init_skybox_pipeline(
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
-	VkPushConstantRange push_constants[] =
-	{
-		{
-			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-			.offset = 0,
-			.size = sizeof(vk_skybox_constant_data_t)
-		}
-	};
-
 	VkDescriptorSetLayout set_layouts[] =
 	{
+		vk->vert_ubo_set_layout.layout,
 		vk->sampler_set_layout.layout
 	};
 
@@ -6139,8 +6127,8 @@ vk_init_skybox_pipeline(
 		.flags = 0,
 		.setLayoutCount = MACRO_ARRAY_LEN(set_layouts),
 		.pSetLayouts = set_layouts,
-		.pushConstantRangeCount = MACRO_ARRAY_LEN(push_constants),
-		.pPushConstantRanges = push_constants
+		.pushConstantRangeCount = 0,
+		.pPushConstantRanges = NULL
 	};
 
 	VkResult result = vk->table.vkCreatePipelineLayout(vk->device,
@@ -6843,11 +6831,11 @@ vk_init_models(
 
 
 
-	vk->materials = alloc_malloc(sizeof(*vk->materials) * vk->material_count);
-	assert_ptr(vk->materials, sizeof(*vk->materials) * vk->material_count);
+	vk->materials = alloc_malloc(vk->materials, vk->material_count);
+	assert_ptr(vk->materials, vk->material_count);
 
-	vk->models = alloc_malloc(sizeof(*vk->models) * vk->model_count);
-	assert_ptr(vk->models, sizeof(*vk->models) * vk->model_count);
+	vk->models = alloc_malloc(vk->models, vk->model_count);
+	assert_ptr(vk->models, vk->model_count);
 
 	vk_material_t* material = vk->materials;
 	vk_model_t* model = vk->models;
@@ -6856,8 +6844,8 @@ vk_init_models(
 	{
 		model_t* sim_model = info.models[i];
 
-		model->meshes = alloc_malloc(sizeof(*model->meshes) * sim_model->mesh_count);
-		assert_ptr(model->meshes, sizeof(*model->meshes) * sim_model->mesh_count);
+		model->meshes = alloc_malloc(model->meshes, sim_model->mesh_count);
+		assert_ptr(model->meshes, sim_model->mesh_count);
 		model->mesh_count = sim_model->mesh_count;
 
 		vk_mesh_t* mesh = model->meshes;
@@ -6876,9 +6864,8 @@ vk_init_models(
 			vk_copy_to_buffer(vk, &mesh->shadow_vertex_buffer,
 				sim_mesh->vertices, sizeof(*sim_mesh->vertices) * sim_mesh->vertex_count);
 
-			vk_mesh_vertex_data_t* vertex_data =
-				alloc_malloc(sizeof(*vertex_data) * sim_mesh->vertex_count);
-			assert_ptr(vertex_data, sizeof(*vertex_data) * sim_mesh->vertex_count);
+			vk_mesh_vertex_data_t* vertex_data = alloc_malloc(vertex_data, sim_mesh->vertex_count);
+			assert_ptr(vertex_data, sim_mesh->vertex_count);
 
 			vk_mesh_vertex_data_t* data = vertex_data;
 			vk_mesh_vertex_data_t* data_end = data + sim_mesh->vertex_count;
@@ -6904,7 +6891,7 @@ vk_init_models(
 			vk_copy_to_buffer(vk, &mesh->scene_vertex_buffer,
 				vertex_data, sizeof(*vertex_data) * sim_mesh->vertex_count);
 
-			alloc_free(vertex_data, sizeof(*vertex_data) * sim_mesh->vertex_count);
+			alloc_free(vertex_data, sim_mesh->vertex_count);
 
 			vk_init_index_buffer(vk, sizeof(*sim_mesh->indexes) *
 				sim_mesh->index_count, &mesh->index_buffer);
@@ -6971,7 +6958,15 @@ vk_init_models(
 			++set;
 		}
 
-		vk_init_vertex_buffer(vk, sizeof(vk_model_instance_data_t) * VK_MAX_INSTANCES, &model->instance_buffer);
+		for(uint32_t i = 0; i < vk->image_count; ++i)
+		{
+			vk_init_vertex_buffer(vk, sizeof(vk_model_instance_data_t) * VK_MAX_INSTANCES, &model->instance_buffers[i]);
+
+			VkBufferUsageFlags indirect_usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+			VkMemoryPropertyFlags indirect_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+			vk_init_buffer(vk, sizeof(VkDrawIndexedIndirectCommand) * model->mesh_count,
+				indirect_usage, indirect_flags, &model->indirect_buffers[i]);
+		}
 
 		++model;
 	}
@@ -6992,7 +6987,11 @@ vk_free_models(
 
 	while(model < model_end)
 	{
-		vk_free_buffer(vk, &model->instance_buffer);
+		for(uint32_t i = 0; i < vk->image_count; ++i)
+		{
+			vk_free_buffer(vk, &model->indirect_buffers[i]);
+			vk_free_buffer(vk, &model->instance_buffers[i]);
+		}
 
 		vk_mesh_t* mesh = model->meshes;
 		vk_mesh_t* mesh_end = mesh + model->mesh_count;
@@ -7006,12 +7005,12 @@ vk_free_models(
 			++mesh;
 		}
 
-		alloc_free(model->meshes, sizeof(*model->meshes) * model->mesh_count);
+		alloc_free(model->meshes, model->mesh_count);
 
 		++model;
 	}
 
-	alloc_free(vk->models, sizeof(*vk->models) * vk->model_count);
+	alloc_free(vk->models, vk->model_count);
 
 	vk_material_t* material = vk->materials;
 	vk_material_t* material_end = material + vk->material_count;
@@ -7023,7 +7022,7 @@ vk_free_models(
 		++material;
 	}
 
-	alloc_free(vk->materials, sizeof(*vk->materials) * vk->material_count);
+	alloc_free(vk->materials, vk->material_count);
 }
 
 
@@ -7083,7 +7082,8 @@ vk_init_frames(
 {
 	assert_not_null(vk);
 
-	VkCommandBuffer command_buffers[MACRO_ARRAY_LEN(vk->barriers)];
+	uint32_t command_buffer_count = MACRO_ARRAY_LEN(vk->barriers) * vk->image_count;
+	VkCommandBuffer command_buffers[command_buffer_count];
 	VkCommandBuffer* command_buffer = command_buffers;
 
 	VkCommandBufferAllocateInfo command_buffer_info =
@@ -7092,11 +7092,10 @@ vk_init_frames(
 		.pNext = NULL,
 		.commandPool = vk->command_pool,
 		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = MACRO_ARRAY_LEN(command_buffers)
+		.commandBufferCount = command_buffer_count
 	};
 
-	VkResult result = vk->table.vkAllocateCommandBuffers(
-		vk->device, &command_buffer_info, command_buffers);
+	VkResult result = vk->table.vkAllocateCommandBuffers(vk->device, &command_buffer_info, command_buffers);
 	hard_assert_eq(result, VK_SUCCESS);
 
 
@@ -7125,12 +7124,13 @@ vk_init_frames(
 		result = vk->table.vkCreateFence(vk->device, &fence_info, NULL, &barrier->fence);
 		hard_assert_eq(result, VK_SUCCESS);
 
-		barrier->command_buffer = *command_buffer;
-
-		vk_init_timing(vk, &barrier->timing, barrier->command_buffer, VK_BARRIER_TIMING_IDX__COUNT);
+		for(uint32_t i = 0; i < vk->image_count; ++i)
+		{
+			barrier->command_buffers[i] = *(command_buffer++);
+			vk_init_timing(vk, &barrier->timings[i], barrier->command_buffers[i], VK_BARRIER_TIMING_IDX__COUNT);
+		}
 
 		++barrier;
-		++command_buffer;
 	}
 
 	vk->barrier = vk->barriers;
@@ -7144,7 +7144,8 @@ vk_free_frames(
 {
 	assert_not_null(vk);
 
-	VkCommandBuffer command_buffers[MACRO_ARRAY_LEN(vk->barriers)];
+	uint32_t command_buffer_count = MACRO_ARRAY_LEN(vk->barriers) * vk->image_count;
+	VkCommandBuffer command_buffers[command_buffer_count];
 	VkCommandBuffer* command_buffer = command_buffers;
 
 	vk_barrier_t* barrier = vk->barriers;
@@ -7152,19 +7153,19 @@ vk_free_frames(
 
 	while(barrier < barrier_end)
 	{
-		vk_free_timing(vk, &barrier->timing);
-
-		*command_buffer = barrier->command_buffer;
+		for(uint32_t i = 0; i < vk->image_count; ++i)
+		{
+			vk_free_timing(vk, &barrier->timings[i]);
+			*(command_buffer++) = barrier->command_buffers[i];
+		}
 
 		vk->table.vkDestroyFence(vk->device, barrier->fence, NULL);
 		vk->table.vkDestroySemaphore(vk->device, barrier->semaphore, NULL);
 
 		++barrier;
-		++command_buffer;
 	}
 
-	vk->table.vkFreeCommandBuffers(vk->device,
-		vk->command_pool, MACRO_ARRAY_LEN(vk->barriers), command_buffers);
+	vk->table.vkFreeCommandBuffers(vk->device, vk->command_pool, command_buffer_count, command_buffers);
 }
 
 
@@ -7176,6 +7177,8 @@ vk_init_shadow_framebuffer(
 {
 	assert_not_null(vk);
 	assert_not_null(frame);
+
+	vk_init_vert_ubo_buffer(vk, sizeof(vk_shadow_vert_constant_data_t), &frame->shadow.vert_ubo);
 
 	vk_image_t* image = &frame->shadow.map.image;
 	image->type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_DEPTH_BIT |
@@ -7220,6 +7223,7 @@ vk_free_shadow_framebuffer(
 	vk->table.vkDestroyFramebuffer(vk->device, frame->shadow.framebuffer, NULL);
 
 	vk_free_frame_image(vk, &frame->shadow.map);
+	vk_free_ubo_buffer(vk, &frame->shadow.vert_ubo);
 }
 
 
@@ -7458,6 +7462,8 @@ vk_init_output_framebuffer(
 	assert_not_null(vk);
 	assert_not_null(frame);
 
+	vk_init_vert_ubo_buffer(vk, sizeof(vk_skybox_constant_data_t), &frame->output.vert_ubo);
+
 	frame->output.image = *swapchain_image;
 
 	VkImageViewCreateInfo image_view_info =
@@ -7524,6 +7530,8 @@ vk_free_output_framebuffer(
 
 	vk->table.vkDestroyFramebuffer(vk->device, frame->output.framebuffer, NULL);
 	vk->table.vkDestroyImageView(vk->device, frame->output.image_view, NULL);
+
+	vk_free_ubo_buffer(vk, &frame->output.vert_ubo);
 }
 
 
@@ -7620,25 +7628,6 @@ vk_device_wait_idle(
 }
 
 
-private void
-vk_recreate_swapchain(
-	vk_t vk
-	)
-{
-	assert_not_null(vk);
-
-	vk_device_wait_idle(vk);
-
-	vk_get_extent(vk);
-
-	vk_free_framebuffers(vk);
-	vk_init_swapchain(vk);
-	vk_init_framebuffers(vk);
-
-	atomic_store_rel(&vk->window.resize.boolean, false);
-}
-
-
 #define VK_FOR_EACH_MODEL(entities_per_model, ...)									\
 do																					\
 {																					\
@@ -7650,13 +7639,9 @@ do																					\
 																					\
 	while(entities_per_model < entities_per_model##_end)							\
 	{																				\
-		if(entities_per_model->entities_used != 0)									\
-		{																			\
-			hard_assert_le(entities_per_model->entities_used, VK_MAX_INSTANCES);
+		hard_assert_le(entities_per_model->entities_used, VK_MAX_INSTANCES);
 
 #define VK_FOR_EACH_MODEL_END(entities_per_model, ...)	\
-		}												\
-														\
 		++entities_per_model;							\
 		__VA_OPT__(++__VA_ARGS__;)						\
 	}													\
@@ -7665,18 +7650,17 @@ while(0)
 
 
 private void
-vk_draw_shadow(
+vk_record_shadow(
 	vk_t vk,
+	VkCommandBuffer command_buffer,
 	vk_frame_t* frame,
-	simulation_camera_t* camera,
-	simulation_transform_t* transform,
 	vk_entities_per_model_t* entity_data
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(frame);
 
-	uint64_t start_time = time_get();
+	uint32_t image_idx = frame - vk->frames;
 
 	VkClearValue clear_values[] =
 	{
@@ -7696,62 +7680,59 @@ vk_draw_shadow(
 		.pClearValues = clear_values
 	};
 
-	vk->table.vkCmdBeginRenderPass(vk->barrier->command_buffer,
+	vk->table.vkCmdBeginRenderPass(command_buffer,
 		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+	vk->table.vkCmdBindPipeline(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->shadow.pipeline);
 
-	vk_shadow_vert_constant_data_t shadow_vert_constant_data;
-	glm_mat4_copy(transform->light_transform, shadow_vert_constant_data.transform);
-
-	vk->table.vkCmdPushConstants(vk->barrier->command_buffer,
-		vk->shadow.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
-		0, sizeof(shadow_vert_constant_data), &shadow_vert_constant_data);
+	vk->table.vkCmdBindDescriptorSets(command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->shadow.pipeline_layout,
+		0, 1, &frame->shadow.vert_ubo.set, 0, NULL);
 
 	VK_FOR_EACH_MODEL(entities_per_model, model)
 	{
-		vk->table.vkCmdBindVertexBuffers(vk->barrier->command_buffer,
-			1, 1, &model->instance_buffer.buffer, (VkDeviceSize[]){0});
+		vk->table.vkCmdBindVertexBuffers(command_buffer, 1, 1,
+			&model->instance_buffers[image_idx].buffer, (VkDeviceSize[]){0});
 
 		vk_mesh_t* mesh = model->meshes;
 		vk_mesh_t* mesh_end = mesh + model->mesh_count;
 
 		while(mesh < mesh_end)
 		{
-			vk->table.vkCmdBindVertexBuffers(vk->barrier->command_buffer,
-				0, 1, &mesh->shadow_vertex_buffer.buffer, (VkDeviceSize[]){0});
+			uint32_t mesh_idx = mesh - model->meshes;
 
-			vk->table.vkCmdBindIndexBuffer(vk->barrier->command_buffer,
+			vk->table.vkCmdBindVertexBuffers(command_buffer, 0, 1,
+				&mesh->shadow_vertex_buffer.buffer, (VkDeviceSize[]){0});
+
+			vk->table.vkCmdBindIndexBuffer(command_buffer,
 				mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-			vk->table.vkCmdDrawIndexed(vk->barrier->command_buffer,
-				mesh->index_count, entities_per_model->entities_used, 0, 0, 0);
+			vk->table.vkCmdDrawIndexedIndirect(command_buffer,
+				model->indirect_buffers[image_idx].buffer,
+				sizeof(VkDrawIndexedIndirectCommand) * mesh_idx, 1, 0);
 
 			++mesh;
 		}
 	}
 	VK_FOR_EACH_MODEL_END(entities_per_model, model);
 
-	vk->table.vkCmdEndRenderPass(vk->barrier->command_buffer);
-
-	stats_log(vk->stats, "vk_command_shadow", time_get() - start_time);
+	vk->table.vkCmdEndRenderPass(command_buffer);
 }
 
 
 private void
-vk_draw_scene(
+vk_record_scene(
 	vk_t vk,
+	VkCommandBuffer command_buffer,
 	vk_frame_t* frame,
-	simulation_camera_t* camera,
-	simulation_transform_t* transform,
 	vk_entities_per_model_t* entity_data
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(frame);
 
-	uint64_t start_time = time_get();
+	uint32_t image_idx = frame - vk->frames;
 
 	VkClearValue clear_values[] =
 	{
@@ -7789,49 +7770,37 @@ vk_draw_scene(
 		.pClearValues = clear_values
 	};
 
-	vk->table.vkCmdBeginRenderPass(vk->barrier->command_buffer,
+	vk->table.vkCmdBeginRenderPass(command_buffer,
 		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	vk->table.vkCmdSetViewport(vk->barrier->command_buffer, 0, 1, &vk->screen_extent.viewport);
-	vk->table.vkCmdSetScissor(vk->barrier->command_buffer, 0, 1, &vk->screen_extent.scissor);
+	vk->table.vkCmdSetViewport(command_buffer, 0, 1, &vk->screen_extent.viewport);
+	vk->table.vkCmdSetScissor(command_buffer, 0, 1, &vk->screen_extent.scissor);
 
-	vk_scene_vert_ubo_data_t scene_vert_ubo_data;
-	glm_mat4_copy(transform->projection, scene_vert_ubo_data.projection);
-	glm_mat4_copy(transform->view, scene_vert_ubo_data.view);
-	glm_mat4_copy(transform->light_transform, scene_vert_ubo_data.light_transform);
-	glm_vec4_copy(transform->light_direction, scene_vert_ubo_data.light_direction);
-	glm_vec3_copy(camera->pos, scene_vert_ubo_data.camera_position);
-	scene_vert_ubo_data.camera_position[3] = 1.0f;
-
-	vk_copy_to_buffer(vk, &frame->scene.vert_ubo.buffer,
-		&scene_vert_ubo_data, sizeof(scene_vert_ubo_data));
-
-	vk_scene_frag_constant_data_t scene_frag_constant_data =
-	{
-		.near = camera->near
-	};
-
-	vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+	vk->table.vkCmdBindPipeline(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.pipeline);
 
-	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+	vk->table.vkCmdBindDescriptorSets(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.pipeline_layout,
 		0, 1, &frame->scene.vert_ubo.set, 0, NULL);
 
-	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+	vk->table.vkCmdBindDescriptorSets(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.pipeline_layout,
 		2, 1, &frame->shadow.map.set, 0, NULL);
 
+	vk_scene_frag_constant_data_t scene_frag_constant_data = {0};
+
 	VK_FOR_EACH_MODEL(entities_per_model, model)
 	{
-		vk->table.vkCmdBindVertexBuffers(vk->barrier->command_buffer,
-			1, 1, &model->instance_buffer.buffer, (VkDeviceSize[]){0});
+		vk->table.vkCmdBindVertexBuffers(command_buffer, 1, 1,
+			&model->instance_buffers[image_idx].buffer, (VkDeviceSize[]){0});
 
 		vk_mesh_t* mesh = model->meshes;
 		vk_mesh_t* mesh_end = mesh + model->mesh_count;
 
 		while(mesh < mesh_end)
 		{
+			uint32_t mesh_idx = mesh - model->meshes;
+
 			vk_material_t* material = vk->materials + mesh->material_idx;
 
 			glm_vec4_copy(material->constant_data.diffuse, scene_frag_constant_data.diffuse);
@@ -7839,47 +7808,42 @@ vk_draw_scene(
 			scene_frag_constant_data.shininess = material->constant_data.shininess;
 			scene_frag_constant_data.shininess_strength = material->constant_data.shininess_strength;
 
-			vk->table.vkCmdPushConstants(vk->barrier->command_buffer,
+			vk->table.vkCmdPushConstants(command_buffer,
 				vk->scene.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
 				0, sizeof(scene_frag_constant_data), &scene_frag_constant_data);
 
-			vk->table.vkCmdBindVertexBuffers(vk->barrier->command_buffer,
-				0, 1, &mesh->scene_vertex_buffer.buffer, (VkDeviceSize[]){0});
+			vk->table.vkCmdBindVertexBuffers(command_buffer, 0, 1,
+				&mesh->scene_vertex_buffer.buffer, (VkDeviceSize[]){0});
 
-			vk->table.vkCmdBindIndexBuffer(vk->barrier->command_buffer,
+			vk->table.vkCmdBindIndexBuffer(command_buffer,
 				mesh->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-			vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+			vk->table.vkCmdBindDescriptorSets(command_buffer,
 				VK_PIPELINE_BIND_POINT_GRAPHICS, vk->scene.pipeline_layout,
 				1, 1, &material->set, 0, NULL);
 
-			vk->table.vkCmdDrawIndexed(vk->barrier->command_buffer,
-				mesh->index_count, entities_per_model->entities_used, 0, 0, 0);
+			vk->table.vkCmdDrawIndexedIndirect(command_buffer,
+				model->indirect_buffers[image_idx].buffer,
+				sizeof(VkDrawIndexedIndirectCommand) * mesh_idx, 1, 0);
 
 			++mesh;
 		}
 	}
 	VK_FOR_EACH_MODEL_END(entities_per_model, model);
 
-	vk->table.vkCmdEndRenderPass(vk->barrier->command_buffer);
-
-	stats_log(vk->stats, "vk_command_scene", time_get() - start_time);
+	vk->table.vkCmdEndRenderPass(command_buffer);
 }
 
 
 private void
-vk_draw_ssao(
+vk_record_ssao(
 	vk_t vk,
-	vk_frame_t* frame,
-	simulation_camera_t* camera,
-	simulation_transform_t* transform,
-	vk_entities_per_model_t* entity_data
+	VkCommandBuffer command_buffer,
+	vk_frame_t* frame
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(frame);
-
-	uint64_t start_time = time_get();
 
 	VkRenderPassBeginInfo render_pass_begin_info =
 	{
@@ -7892,19 +7856,13 @@ vk_draw_ssao(
 		.pClearValues = NULL
 	};
 
-	vk->table.vkCmdBeginRenderPass(vk->barrier->command_buffer,
+	vk->table.vkCmdBeginRenderPass(command_buffer,
 		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	vk->table.vkCmdSetViewport(vk->barrier->command_buffer, 0, 1, &vk->ssao_extent.viewport);
-	vk->table.vkCmdSetScissor(vk->barrier->command_buffer, 0, 1, &vk->ssao_extent.scissor);
+	vk->table.vkCmdSetViewport(command_buffer, 0, 1, &vk->ssao_extent.viewport);
+	vk->table.vkCmdSetScissor(command_buffer, 0, 1, &vk->ssao_extent.scissor);
 
-	vk_ssao_frag_ubo_data_t ssao_frag_ubo_data;
-	glm_mat4_copy(transform->projection, ssao_frag_ubo_data.projection);
-
-	vk_copy_to_buffer(vk, &frame->ssao.frag_ubo.buffer,
-		&ssao_frag_ubo_data, sizeof(ssao_frag_ubo_data));
-
-	vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+	vk->table.vkCmdBindPipeline(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao.pipeline);
 
 	VkDescriptorSet sets[] =
@@ -7915,31 +7873,25 @@ vk_draw_ssao(
 		vk->ssao.kernel_ubo.set
 	};
 
-	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+	vk->table.vkCmdBindDescriptorSets(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao.pipeline_layout,
 		0, MACRO_ARRAY_LEN(sets), sets, 0, NULL);
 
-	vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+	vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
-	vk->table.vkCmdEndRenderPass(vk->barrier->command_buffer);
-
-	stats_log(vk->stats, "vk_command_ssao", time_get() - start_time);
+	vk->table.vkCmdEndRenderPass(command_buffer);
 }
 
 
 private void
-vk_draw_ssao_blur(
+vk_record_ssao_blur(
 	vk_t vk,
-	vk_frame_t* frame,
-	simulation_camera_t* camera,
-	simulation_transform_t* transform,
-	vk_entities_per_model_t* entity_data
+	VkCommandBuffer command_buffer,
+	vk_frame_t* frame
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(frame);
-
-	uint64_t start_time = time_get();
 
 	VkRenderPassBeginInfo render_pass_begin_info =
 	{
@@ -7952,13 +7904,13 @@ vk_draw_ssao_blur(
 		.pClearValues = NULL
 	};
 
-	vk->table.vkCmdBeginRenderPass(vk->barrier->command_buffer,
+	vk->table.vkCmdBeginRenderPass(command_buffer,
 		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	vk->table.vkCmdSetViewport(vk->barrier->command_buffer, 0, 1, &vk->ssao_extent.viewport);
-	vk->table.vkCmdSetScissor(vk->barrier->command_buffer, 0, 1, &vk->ssao_extent.scissor);
+	vk->table.vkCmdSetViewport(command_buffer, 0, 1, &vk->ssao_extent.viewport);
+	vk->table.vkCmdSetScissor(command_buffer, 0, 1, &vk->ssao_extent.scissor);
 
-	vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+	vk->table.vkCmdBindPipeline(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_blur.pipeline);
 
 	VkDescriptorSet sets[] =
@@ -7967,31 +7919,25 @@ vk_draw_ssao_blur(
 		frame->ssao.map.set
 	};
 
-	vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+	vk->table.vkCmdBindDescriptorSets(command_buffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS, vk->ssao_blur.pipeline_layout,
 		0, MACRO_ARRAY_LEN(sets), sets, 0, NULL);
 
-	vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+	vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
-	vk->table.vkCmdEndRenderPass(vk->barrier->command_buffer);
-
-	stats_log(vk->stats, "vk_command_ssao_blur", time_get() - start_time);
+	vk->table.vkCmdEndRenderPass(command_buffer);
 }
 
 
 private void
-vk_draw_output(
+vk_record_output(
 	vk_t vk,
-	vk_frame_t* frame,
-	simulation_camera_t* camera,
-	simulation_transform_t* transform,
-	vk_entities_per_model_t* entity_data
+	VkCommandBuffer command_buffer,
+	vk_frame_t* frame
 	)
 {
 	assert_not_null(vk);
 	assert_not_null(frame);
-
-	uint64_t start_time = time_get();
 
 	VkRenderPassBeginInfo render_pass_begin_info =
 	{
@@ -8004,50 +7950,38 @@ vk_draw_output(
 		.pClearValues = NULL
 	};
 
-	vk->table.vkCmdBeginRenderPass(vk->barrier->command_buffer,
+	vk->table.vkCmdBeginRenderPass(command_buffer,
 		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	vk->table.vkCmdSetViewport(vk->barrier->command_buffer, 0, 1, &vk->screen_extent.viewport);
-	vk->table.vkCmdSetScissor(vk->barrier->command_buffer, 0, 1, &vk->screen_extent.scissor);
+	vk->table.vkCmdSetViewport(command_buffer, 0, 1, &vk->screen_extent.viewport);
+	vk->table.vkCmdSetScissor(command_buffer, 0, 1, &vk->screen_extent.scissor);
 
 
 	switch(vk->options.preview)
 	{
-
 	case VK_PREVIEW_NONE:
 	{
-		vk_skybox_constant_data_t skybox_constant_data;
-		glm_mat4_copy(transform->projection, skybox_constant_data.transform);
-
-		mat4 view;
-		glm_mat4_copy(transform->view, view);
-		view[3][0] = 0.0f;
-		view[3][1] = 0.0f;
-		view[3][2] = 0.0f;
-		glm_mat4_mul(skybox_constant_data.transform, view, skybox_constant_data.transform);
-
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.skybox.pipeline);
 
-		vk->table.vkCmdPushConstants(vk->barrier->command_buffer,
-			vk->output.skybox.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
-			0, sizeof(skybox_constant_data), &skybox_constant_data);
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.skybox.pipeline_layout,
+			0, 1, &frame->output.vert_ubo.set, 0, NULL);
 
-		vk->table.vkCmdBindVertexBuffers(vk->barrier->command_buffer,
-			0, 1, &vk->output.skybox.vertex_buffer.buffer, (VkDeviceSize[]){0});
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.skybox.pipeline_layout,
+			1, 1, &vk->output.skybox.sky.set, 0, NULL);
 
-		vk->table.vkCmdBindIndexBuffer(vk->barrier->command_buffer,
+		vk->table.vkCmdBindVertexBuffers(command_buffer, 0, 1,
+			&vk->output.skybox.vertex_buffer.buffer, (VkDeviceSize[]){0});
+
+		vk->table.vkCmdBindIndexBuffer(command_buffer,
 			vk->output.skybox.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
-			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.skybox.pipeline_layout,
-			0, 1, &vk->output.skybox.sky.set, 0, NULL);
-
-		vk->table.vkCmdDrawIndexed(vk->barrier->command_buffer,
+		vk->table.vkCmdDrawIndexed(command_buffer,
 			MACRO_ARRAY_LEN(vk_skybox_index_data), 1, 0, 0, 0);
 
-
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.compose.pipeline);
 
 		VkDescriptorSet sets[] =
@@ -8056,95 +7990,95 @@ vk_draw_output(
 			frame->ssao_blur.map.set
 		};
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.compose.pipeline_layout,
 			0, MACRO_ARRAY_LEN(sets), sets, 0, NULL);
 
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+		vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
 		break;
 	}
 
 	case VK_PREVIEW_SHADOW_MAP:
 	{
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.depth.pipeline);
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.depth.pipeline_layout,
 			0, 1, &frame->shadow.map.set, 0, NULL);
 
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+		vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
 		break;
 	}
 
 	case VK_PREVIEW_SCENE_POSITION_MAP:
 	{
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline);
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline_layout,
 			0, 1, &frame->scene.position.set, 0, NULL);
 
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+		vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
 		break;
 	}
 
 	case VK_PREVIEW_SCENE_NORMAL_MAP:
 	{
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline);
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline_layout,
 			0, 1, &frame->scene.normal.set, 0, NULL);
 
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+		vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
 		break;
 	}
 
 	case VK_PREVIEW_SCENE_MAP:
 	{
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline);
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline_layout,
 			0, 1, &frame->scene.map.set, 0, NULL);
 
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+		vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
 		break;
 	}
 
 	case VK_PREVIEW_SSAO_MAP:
 	{
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline);
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline_layout,
 			0, 1, &frame->ssao.map.set, 0, NULL);
 
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+		vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
 		break;
 	}
 
 	case VK_PREVIEW_SSAO_BLUR_MAP:
 	{
-		vk->table.vkCmdBindPipeline(vk->barrier->command_buffer,
+		vk->table.vkCmdBindPipeline(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline);
 
-		vk->table.vkCmdBindDescriptorSets(vk->barrier->command_buffer,
+		vk->table.vkCmdBindDescriptorSets(command_buffer,
 			VK_PIPELINE_BIND_POINT_GRAPHICS, vk->output.preview.image.pipeline_layout,
 			0, 1, &frame->ssao_blur.map.set, 0, NULL);
 
-		vk->table.vkCmdDraw(vk->barrier->command_buffer, 6, 1, 0, 0);
+		vk->table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
 
 		break;
 	}
@@ -8154,9 +8088,169 @@ vk_draw_output(
 	}
 
 
-	vk->table.vkCmdEndRenderPass(vk->barrier->command_buffer);
+	vk->table.vkCmdEndRenderPass(command_buffer);
+}
 
-	stats_log(vk->stats, "vk_command_output", time_get() - start_time);
+
+private void
+vk_record_command_buffer(
+	vk_t vk,
+	VkCommandBuffer command_buffer,
+	vk_frame_t* frame,
+	vk_timing_t* timing,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(frame);
+	assert_not_null(timing);
+
+	VkCommandBufferBeginInfo command_buffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pInheritanceInfo = NULL
+	};
+
+	VkResult result = vk->table.vkBeginCommandBuffer(command_buffer, &command_buffer_info);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	vk_timing_reset(vk, timing);
+
+	vk_timing_start(vk, timing, VK_BARRIER_TIMING_IDX_SHADOW);
+	vk_record_shadow(vk, command_buffer, frame, entity_data);
+	vk_timing_end(vk, timing, VK_BARRIER_TIMING_IDX_SHADOW);
+
+	vk_timing_start(vk, timing, VK_BARRIER_TIMING_IDX_SCENE);
+	vk_record_scene(vk, command_buffer, frame, entity_data);
+	vk_timing_end(vk, timing, VK_BARRIER_TIMING_IDX_SCENE);
+
+	vk_timing_start(vk, timing, VK_BARRIER_TIMING_IDX_SSAO);
+	vk_record_ssao(vk, command_buffer, frame);
+	vk_timing_end(vk, timing, VK_BARRIER_TIMING_IDX_SSAO);
+
+	vk_timing_start(vk, timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+	vk_record_ssao_blur(vk, command_buffer, frame);
+	vk_timing_end(vk, timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+
+	vk_timing_start(vk, timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+	vk_record_output(vk, command_buffer, frame);
+	vk_timing_end(vk, timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+
+	vk_timing_query(vk, timing);
+
+	result = vk->table.vkEndCommandBuffer(command_buffer);
+	hard_assert_eq(result, VK_SUCCESS);
+}
+
+
+private void
+vk_record_all_command_buffers(
+	vk_t vk,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(entity_data);
+
+	vk_barrier_t* barrier = vk->barriers;
+	vk_barrier_t* barrier_end = barrier + MACRO_ARRAY_LEN(vk->barriers);
+
+	while(barrier < barrier_end)
+	{
+		for(uint32_t i = 0; i < vk->image_count; ++i)
+		{
+			vk_record_command_buffer(vk, barrier->command_buffers[i],
+				&vk->frames[i], &barrier->timings[i], entity_data);
+		}
+
+		++barrier;
+	}
+}
+
+
+private void
+vk_recreate_swapchain(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	vk_device_wait_idle(vk);
+
+	vk_get_extent(vk);
+
+	vk_free_framebuffers(vk);
+	vk_init_swapchain(vk);
+	vk_init_framebuffers(vk);
+
+	vk->recorded_commands = false;
+
+	atomic_store_rel(&vk->window.resize.boolean, false);
+}
+
+
+private vk_entities_per_model_t*
+vk_init_entities_per_model(
+	vk_t vk
+	)
+{
+	assert_not_null(vk);
+
+	uint32_t sim_entity_count;
+	simulation_entity_data_t* sim_entity_data = simulation_get_entity_data(vk->simulation, &sim_entity_count);
+
+	simulation_entity_data_t* sim_entity = sim_entity_data;
+	simulation_entity_data_t* sim_entity_end = sim_entity + sim_entity_count;
+
+	vk_entities_per_model_t* entity_data = alloc_calloc(entity_data, vk->model_count);
+	assert_ptr(entity_data, vk->model_count);
+
+	entity_data->original_entities = sim_entity_data;
+	entity_data->original_entity_count = sim_entity_count;
+
+	while(sim_entity < sim_entity_end)
+	{
+		vk_entities_per_model_t* entities = entity_data + sim_entity->model_idx;
+
+		if(entities->entities_used >= entities->entities_size)
+		{
+			uint32_t new_size = (entities->entities_size << 1) | 1;
+
+			entities->entities = alloc_recalloc(entities->entities, entities->entities_size, new_size);
+			assert_ptr(entities->entities, new_size);
+
+			entities->entities_size = new_size;
+		}
+
+		entities->entities[entities->entities_used++] = sim_entity;
+
+		++sim_entity;
+	}
+
+	return entity_data;
+}
+
+
+private void
+vk_free_entities_per_model(
+	vk_t vk,
+	vk_entities_per_model_t* entity_data
+	)
+{
+	assert_not_null(vk);
+	assert_not_null(entity_data);
+
+	simulation_free_entity_data(entity_data->original_entities, entity_data->original_entity_count);
+
+	VK_FOR_EACH_MODEL(entities_per_model)
+	{
+		alloc_free(entities_per_model->entities, entities_per_model->entities_used);
+	}
+	VK_FOR_EACH_MODEL_END(entities_per_model);
+
+	alloc_free(entity_data, vk->model_count);
 }
 
 
@@ -8169,32 +8263,6 @@ vk_draw(
 
 	VkResult result = vk->table.vkWaitForFences(vk->device, 1, &vk->barrier->fence, VK_TRUE, UINT64_MAX);
 	hard_assert_eq(result, VK_SUCCESS);
-
-	uint64_t frame_time = 0;
-	if(vk->barrier->timing.current)
-	{
-		vk_timing_load(vk, &vk->barrier->timing);
-
-		uint64_t shadow_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
-		stats_log(vk->stats, "vk_frame_shadow", shadow_time);
-		frame_time += shadow_time;
-
-		uint64_t scene_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
-		stats_log(vk->stats, "vk_frame_scene", scene_time);
-		frame_time += scene_time;
-
-		uint64_t ssao_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
-		stats_log(vk->stats, "vk_frame_ssao", ssao_time);
-		frame_time += ssao_time;
-
-		uint64_t ssao_blur_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
-		stats_log(vk->stats, "vk_frame_ssao_blur", ssao_blur_time);
-		frame_time += ssao_blur_time;
-
-		uint64_t output_time = vk_timing_get(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
-		stats_log(vk->stats, "vk_frame_output", output_time);
-		frame_time += output_time;
-	}
 
 	uint32_t image_idx;
 	result = vk->table.vkAcquireNextImageKHR(vk->device, vk->swapchain,
@@ -8222,58 +8290,45 @@ vk_draw(
 	result = vk->table.vkResetFences(vk->device, 1, &vk->barrier->fence);
 	hard_assert_eq(result, VK_SUCCESS);
 
+	uint64_t frame_time = 0;
+	vk_timing_t* timing = &vk->barrier->timings[image_idx];
+	if(timing->current)
+	{
+		vk_timing_load(vk, timing);
 
+		uint64_t shadow_time = vk_timing_get(vk, timing, VK_BARRIER_TIMING_IDX_SHADOW);
+		stats_log(vk->stats, "vk_frame_shadow", shadow_time);
+		frame_time += shadow_time;
+
+		uint64_t scene_time = vk_timing_get(vk, timing, VK_BARRIER_TIMING_IDX_SCENE);
+		stats_log(vk->stats, "vk_frame_scene", scene_time);
+		frame_time += scene_time;
+
+		uint64_t ssao_time = vk_timing_get(vk, timing, VK_BARRIER_TIMING_IDX_SSAO);
+		stats_log(vk->stats, "vk_frame_ssao", ssao_time);
+		frame_time += ssao_time;
+
+		uint64_t ssao_blur_time = vk_timing_get(vk, timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+		stats_log(vk->stats, "vk_frame_ssao_blur", ssao_blur_time);
+		frame_time += ssao_blur_time;
+
+		uint64_t output_time = vk_timing_get(vk, timing, VK_BARRIER_TIMING_IDX_OUTPUT);
+		stats_log(vk->stats, "vk_frame_output", output_time);
+		frame_time += output_time;
+	}
 
 	simulation_update(vk->simulation);
 	uint64_t start_time = time_get();
 
-	result = vk->table.vkResetCommandBuffer(vk->barrier->command_buffer, 0);
-	hard_assert_eq(result, VK_SUCCESS);
-
-	VkCommandBufferBeginInfo command_buffer_info =
-	{
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-		.pNext = NULL,
-		.flags = 0,
-		.pInheritanceInfo = NULL
-	};
-
-	result = vk->table.vkBeginCommandBuffer(vk->barrier->command_buffer, &command_buffer_info);
-	hard_assert_eq(result, VK_SUCCESS);
-
 	simulation_camera_t camera = simulation_get_camera(vk->simulation);
 	simulation_transform_t transform = simulation_get_transform(vk->simulation, vk->screen_extent.pair);
 
-	uint32_t sim_entity_count;
-	simulation_entity_data_t* sim_entity_data = simulation_get_entity_data(vk->simulation, &sim_entity_count);
+	vk_entities_per_model_t* entity_data = vk_init_entities_per_model(vk);
 
-	simulation_entity_data_t* sim_entity = sim_entity_data;
-	simulation_entity_data_t* sim_entity_end = sim_entity + sim_entity_count;
-
-	vk_entities_per_model_t* entity_data = alloc_calloc(sizeof(*entity_data) * vk->model_count);
-	assert_ptr(entity_data, sizeof(*entity_data) * vk->model_count);
-
-	while(sim_entity < sim_entity_end)
+	if(!vk->recorded_commands)
 	{
-		vk_entities_per_model_t* entities = entity_data + sim_entity->model_idx;
-
-		if(entities->entities_used >= entities->entities_size)
-		{
-			uint32_t new_size = (entities->entities_size << 1) | 1;
-
-			entities->entities = alloc_recalloc(
-				entities->entities,
-				sizeof(*entities->entities) * entities->entities_size,
-				sizeof(*entities->entities) * new_size
-				);
-			assert_ptr(entities->entities, sizeof(*entities->entities) * new_size);
-
-			entities->entities_size = new_size;
-		}
-
-		entities->entities[entities->entities_used++] = sim_entity;
-
-		++sim_entity;
+		vk_record_all_command_buffers(vk, entity_data);
+		vk->recorded_commands = true;
 	}
 
 	VK_FOR_EACH_MODEL(entities_per_model, model)
@@ -8281,9 +8336,8 @@ vk_draw(
 		simulation_entity_data_t** entity = entities_per_model->entities;
 		simulation_entity_data_t** entity_end = entity + entities_per_model->entities_used;
 
-		uint64_t instance_data_size = sizeof(vk_model_instance_data_t) * entities_per_model->entities_used;
-		vk_model_instance_data_t* instance_data = alloc_malloc(instance_data_size);
-		assert_ptr(instance_data, instance_data_size);
+		vk_model_instance_data_t* instance_data = alloc_malloc(instance_data, entities_per_model->entities_used);
+		assert_ptr(instance_data, entities_per_model->entities_used);
 
 		vk_model_instance_data_t* instance = instance_data;
 
@@ -8295,49 +8349,67 @@ vk_draw(
 			++instance;
 		}
 
-		vk_copy_to_buffer(vk, &model->instance_buffer, instance_data, instance_data_size);
-		alloc_free(instance_data, instance_data_size);
+		vk_copy_to_buffer(vk, &model->instance_buffers[image_idx],
+			instance_data, sizeof(*instance_data) * entities_per_model->entities_used);
+
+		alloc_free(instance_data, entities_per_model->entities_used);
+
+		VkDrawIndexedIndirectCommand indirect_cmds[model->mesh_count];
+		vk_mesh_t* mesh = model->meshes;
+		vk_mesh_t* mesh_end = mesh + model->mesh_count;
+
+		while(mesh < mesh_end)
+		{
+			indirect_cmds[mesh - model->meshes] =
+			(VkDrawIndexedIndirectCommand)
+			{
+				.indexCount = mesh->index_count,
+				.instanceCount = entities_per_model->entities_used,
+				.firstIndex = 0,
+				.vertexOffset = 0,
+				.firstInstance = 0
+			};
+
+			++mesh;
+		}
+
+		vk_copy_to_buffer(vk, &model->indirect_buffers[image_idx],
+			indirect_cmds, sizeof(*indirect_cmds) * model->mesh_count);
 	}
 	VK_FOR_EACH_MODEL_END(entities_per_model, model);
 
-	vk_timing_reset(vk, &vk->barrier->timing);
+	vk_free_entities_per_model(vk, entity_data);
 
-	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
-	vk_draw_shadow(vk, frame, &camera, &transform, entity_data);
-	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SHADOW);
+	vk_shadow_vert_constant_data_t shadow_vert_ubo_data;
+	glm_mat4_copy(transform.light_transform, shadow_vert_ubo_data.transform);
+	vk_copy_to_buffer(vk, &frame->shadow.vert_ubo.buffer,
+		&shadow_vert_ubo_data, sizeof(shadow_vert_ubo_data));
 
-	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
-	vk_draw_scene(vk, frame, &camera, &transform, entity_data);
-	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SCENE);
+	vk_scene_vert_ubo_data_t scene_vert_ubo_data;
+	glm_mat4_copy(transform.projection, scene_vert_ubo_data.projection);
+	glm_mat4_copy(transform.view, scene_vert_ubo_data.view);
+	glm_mat4_copy(transform.light_transform, scene_vert_ubo_data.light_transform);
+	glm_vec4_copy(transform.light_direction, scene_vert_ubo_data.light_direction);
+	glm_vec3_copy(camera.pos, scene_vert_ubo_data.camera_position);
+	scene_vert_ubo_data.camera_position[3] = 1.0f;
+	vk_copy_to_buffer(vk, &frame->scene.vert_ubo.buffer,
+		&scene_vert_ubo_data, sizeof(scene_vert_ubo_data));
 
-	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
-	vk_draw_ssao(vk, frame, &camera, &transform, entity_data);
-	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO);
+	vk_ssao_frag_ubo_data_t ssao_frag_ubo_data;
+	glm_mat4_copy(transform.projection, ssao_frag_ubo_data.projection);
+	vk_copy_to_buffer(vk, &frame->ssao.frag_ubo.buffer,
+		&ssao_frag_ubo_data, sizeof(ssao_frag_ubo_data));
 
-	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
-	vk_draw_ssao_blur(vk, frame, &camera, &transform, entity_data);
-	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
-
-	vk_timing_start(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
-	vk_draw_output(vk, frame, &camera, &transform, entity_data);
-	vk_timing_end(vk, &vk->barrier->timing, VK_BARRIER_TIMING_IDX_OUTPUT);
-
-	vk_timing_query(vk, &vk->barrier->timing);
-
-	VK_FOR_EACH_MODEL(entities_per_model)
-	{
-		alloc_free(entities_per_model->entities,
-			sizeof(*entities_per_model->entities) * entities_per_model->entities_size);
-	}
-	VK_FOR_EACH_MODEL_END(entities_per_model);
-
-	alloc_free(entity_data, sizeof(*entity_data) * vk->model_count);
-
-	simulation_free_entity_data(sim_entity_data, sim_entity_count);
-
-	result = vk->table.vkEndCommandBuffer(vk->barrier->command_buffer);
-	hard_assert_eq(result, VK_SUCCESS);
-
+	vk_skybox_constant_data_t skybox_vert_ubo_data;
+	glm_mat4_copy(transform.projection, skybox_vert_ubo_data.transform);
+	mat4 view;
+	glm_mat4_copy(transform.view, view);
+	view[3][0] = 0.0f;
+	view[3][1] = 0.0f;
+	view[3][2] = 0.0f;
+	glm_mat4_mul(skybox_vert_ubo_data.transform, view, skybox_vert_ubo_data.transform);
+	vk_copy_to_buffer(vk, &frame->output.vert_ubo.buffer,
+		&skybox_vert_ubo_data, sizeof(skybox_vert_ubo_data));
 
 	VkPipelineStageFlags wait_stages[] =
 	{
@@ -8352,7 +8424,7 @@ vk_draw(
 		.pWaitSemaphores = &vk->barrier->semaphore,
 		.pWaitDstStageMask = wait_stages,
 		.commandBufferCount = 1,
-		.pCommandBuffers = &vk->barrier->command_buffer,
+		.pCommandBuffers = vk->barrier->command_buffers + image_idx,
 		.signalSemaphoreCount = 1,
 		.pSignalSemaphores = &frame->semaphore
 	};
@@ -8845,18 +8917,12 @@ vk_free(
 {
 	assert_not_null(vk);
 
-	if(!vk->options.window_enable)
-	{
-		alloc_free(vk, sizeof(*vk));
-		return;
-	}
-
 	window_manager_stop_running(vk->window.manager);
 	thread_join(vk->window.thread);
 
 	vk_free_window(vk);
 
-	alloc_free(vk, sizeof(*vk));
+	alloc_free(vk, 1);
 }
 
 
@@ -8867,14 +8933,14 @@ vk_init(
 {
 	assert_not_null(simulation);
 
-	vk_t vk = alloc_calloc(sizeof(*vk));
+	vk_t vk = alloc_calloc(vk, 1);
 	assert_not_null(vk);
 
 	vk_init_options(vk);
 
 	if(!vk->options.window_enable)
 	{
-		alloc_free(vk, sizeof(*vk));
+		alloc_free(vk, 1);
 		return vk;
 	}
 

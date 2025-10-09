@@ -16,7 +16,7 @@
 
 #version 450
 
-layout(binding = 0) uniform samplerCube inTexture;
+layout(set = 1, binding = 0) uniform samplerCube inTexture;
 
 layout(location = 0) in vec3 inPosition;
 

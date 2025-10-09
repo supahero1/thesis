@@ -23,12 +23,13 @@
 
 	#include <valgrind/valgrind.h>
 #endif
-
-#if ALLOC_DEBUG
+#define ALLOC_DEBUG
+#ifdef ALLOC_DEBUG
 	#include <stdlib.h>
+#else
+	#include <stdio.h>
 #endif
 
-#include <stdio.h>
 #include <assert.h>
 #include <string.h>
 
@@ -1751,7 +1752,11 @@ allow_realloc_h(
 	int zero
 	)
 {
+#ifndef ALLOC_DEBUG
 	ALLOC_REALLOC(alloc_alloc_h, alloc_free_h);
+#else
+	return realloc((void*) ptr, new_size);
+#endif
 }
 
 
@@ -1765,7 +1770,11 @@ allow_realloc_uh(
 	int zero
 	)
 {
+#ifndef ALLOC_DEBUG
 	ALLOC_REALLOC(alloc_alloc_uh, alloc_free_uh);
+#else
+	return realloc((void*) ptr, new_size);
+#endif
 }
 
 

@@ -55,8 +55,8 @@ stats_hash_table_value_free_fn(
 {
 	assert_not_null(entry);
 
-	alloc_free(entry->times, sizeof(*entry->times) * entry->max_count);
-	alloc_free(entry, sizeof(*entry));
+	alloc_free(entry->times, entry->max_count);
+	alloc_free(entry, 1);
 }
 
 
@@ -146,7 +146,7 @@ stats_init(
 	void
 	)
 {
-	stats_t stats = alloc_calloc(sizeof(*stats));
+	stats_t stats = alloc_calloc(stats, 1);
 	assert_not_null(stats);
 
 	stats->table = hash_table_init(64, NULL, (void*) stats_hash_table_value_free_fn);
@@ -185,9 +185,9 @@ stats_free(
 
 	hash_table_free(stats->table);
 
-	alloc_free(stats->buffer, stats->buffer_size);
+	sync_mtx_free(&stats->mutex);
 
-	alloc_free(stats, sizeof(*stats));
+	alloc_free(stats, 1);
 }
 
 
@@ -202,11 +202,11 @@ stats_add(
 	assert_not_null(name);
 	assert_gt(max_count, 0);
 
-	stats_entry_t* entry = alloc_malloc(sizeof(*entry));
+	stats_entry_t* entry = alloc_malloc(entry, 1);
 	assert_not_null(entry);
 
-	uint64_t* times = alloc_malloc(sizeof(*entry->times) * max_count);
-	assert_not_null(times);
+	uint64_t* times = alloc_malloc(times, max_count);
+	assert_ptr(times, max_count);
 
 	*entry =
 	(stats_entry_t)

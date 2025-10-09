@@ -35,7 +35,7 @@ thread_fn(
 	)
 {
 	thread_data_t data = init_data->data;
-	alloc_free(init_data, sizeof(*init_data));
+	alloc_free(init_data, 1);
 
 	data.fn(data.data);
 	return NULL;
@@ -52,7 +52,7 @@ thread_init(
 
 	thread_t id;
 
-	thread_init_data_t* init_data = alloc_malloc(sizeof(*init_data));
+	thread_init_data_t* init_data = alloc_malloc(init_data, 1);
 	assert_not_null(init_data);
 
 	init_data->data = data;
@@ -252,11 +252,7 @@ threads_resize(
 	{
 		uint32_t new_size = (new_used << 1) | 1;
 
-		threads->threads = alloc_remalloc(
-			threads->threads,
-			sizeof(*threads->threads) * threads->size,
-			sizeof(*threads->threads) * new_size
-			);
+		threads->threads = alloc_remalloc(threads->threads, threads->size, new_size);
 		assert_not_null(threads->threads);
 
 		threads->size = new_size;
@@ -284,7 +280,7 @@ threads_free(
 {
 	assert_not_null(threads);
 
-	alloc_free(threads->threads, sizeof(*threads->threads) * threads->size);
+	alloc_free(threads->threads, threads->size);
 }
 
 
@@ -454,7 +450,7 @@ thread_pool_free(
 {
 	assert_not_null(pool);
 
-	alloc_free(pool->queue, sizeof(*pool->queue) * pool->size);
+	alloc_free(pool->queue, pool->size);
 
 	sync_mtx_free(&pool->mtx);
 	sync_sem_free(&pool->sem);
@@ -495,11 +491,7 @@ thread_pool_resize(
 	{
 		uint32_t new_size = (new_used << 1) | 1;
 
-		pool->queue = alloc_remalloc(
-			pool->queue,
-			sizeof(*pool->queue) * pool->size,
-			sizeof(*pool->queue) * new_size
-			);
+		pool->queue = alloc_remalloc(pool->queue, pool->size, new_size);
 		assert_not_null(pool->queue);
 
 		pool->size = new_size;

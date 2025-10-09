@@ -190,7 +190,7 @@ window_init(
 	void
 	)
 {
-	window_t window = alloc_malloc(sizeof(*window));
+	window_t window = alloc_malloc(window, 1);
 	assert_not_null(window);
 
 	event_target_init(&window->event_table.init_target);
@@ -240,7 +240,7 @@ window_free(
 	SDL_DestroyWindow(window->sdl_window);
 	SDL_DestroyProperties(window->sdl_props);
 
-	alloc_free(window, sizeof(*window));
+	alloc_free(window, 1);
 }
 
 
@@ -251,8 +251,8 @@ window_close(
 {
 	assert_not_null(window);
 
-	window_user_event_window_close_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_window_close_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_window_close_data_t)
@@ -314,8 +314,8 @@ window_set_cursor(
 	assert_ge(cursor, 0);
 	assert_lt(cursor, WINDOW_CURSOR__COUNT);
 
-	window_user_event_set_cursor_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_set_cursor_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_set_cursor_data_t)
@@ -334,8 +334,8 @@ window_show(
 {
 	assert_not_null(window);
 
-	window_user_event_show_window_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_show_window_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_show_window_data_t)
@@ -353,8 +353,8 @@ window_hide(
 {
 	assert_not_null(window);
 
-	window_user_event_hide_window_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_hide_window_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_hide_window_data_t)
@@ -372,8 +372,8 @@ window_start_typing(
 {
 	assert_not_null(window);
 
-	window_user_event_start_typing_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_start_typing_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_start_typing_data_t)
@@ -391,8 +391,8 @@ window_stop_typing(
 {
 	assert_not_null(window);
 
-	window_user_event_stop_typing_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_stop_typing_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_stop_typing_data_t)
@@ -410,8 +410,8 @@ window_get_clipboard(
 {
 	assert_not_null(window);
 
-	window_user_event_get_clipboard_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_get_clipboard_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_get_clipboard_data_t)
@@ -430,8 +430,8 @@ window_set_clipboard(
 {
 	assert_not_null(window);
 
-	window_user_event_set_clipboard_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_set_clipboard_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_set_clipboard_data_t)
@@ -450,8 +450,8 @@ window_toggle_fullscreen(
 {
 	assert_not_null(window);
 
-	window_user_event_window_fullscreen_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_window_fullscreen_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	*data =
 	(window_user_event_window_fullscreen_data_t)
@@ -767,7 +767,7 @@ window_manager_init(
 	void
 	)
 {
-	window_manager_t manager = alloc_malloc(sizeof(*manager));
+	window_manager_t manager = alloc_malloc(manager, 1);
 	assert_not_null(manager);
 
 	atomic_init(&manager->running, true);
@@ -807,7 +807,7 @@ window_manager_free(
 	assert_null(manager->window_head);
 	assert_eq(manager->window_count, 0);
 
-	alloc_free(manager, sizeof(*manager));
+	alloc_free(manager, 1);
 }
 
 
@@ -835,12 +835,12 @@ window_manager_add(
 	manager->window_head = window;
 	++manager->window_count;
 
-	window_user_event_window_init_data_t* data = alloc_malloc(sizeof(*data));
-	assert_ptr(data, sizeof(*data));
+	window_user_event_window_init_data_t* data = alloc_malloc(data, 1);
+	assert_ptr(data, 1);
 
 	str_t title_str = str_init_copy_cstr(title);
 
-	window_history_t* history_copy = alloc_malloc(sizeof(*history_copy));
+	window_history_t* history_copy = alloc_malloc(history_copy, 1);
 	assert_not_null(history_copy);
 
 	if(history)
@@ -1042,9 +1042,9 @@ window_manager_process_user_event(
 		};
 		event_target_fire(&window->event_table.init_target, &event_data);
 
-		alloc_free(data->history, sizeof(*data->history));
+		alloc_free(data->history, 1);
 		str_free(data->title);
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1074,7 +1074,7 @@ window_manager_process_user_event(
 
 		window_free(window);
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1119,7 +1119,7 @@ window_manager_process_user_event(
 		};
 		event_target_fire(&window->event_table.fullscreen_target, &event_data);
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1136,7 +1136,7 @@ window_manager_process_user_event(
 			SDL_SetCursor(manager->cursors[data->cursor]);
 		}
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1148,7 +1148,7 @@ window_manager_process_user_event(
 		bool status = SDL_ShowWindow(window->sdl_window);
 		hard_assert_true(status, window_sdl_log_error());
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1160,7 +1160,7 @@ window_manager_process_user_event(
 		bool status = SDL_HideWindow(window->sdl_window);
 		hard_assert_true(status, window_sdl_log_error());
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1172,7 +1172,7 @@ window_manager_process_user_event(
 		bool status = SDL_StartTextInput(window->sdl_window);
 		hard_assert_true(status, window_sdl_log_error());
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1184,7 +1184,7 @@ window_manager_process_user_event(
 		bool status = SDL_StopTextInput(window->sdl_window);
 		hard_assert_true(status, window_sdl_log_error());
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1206,7 +1206,7 @@ window_manager_process_user_event(
 		};
 		event_target_fire(&window->event_table.set_clipboard_target, &event_data);
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}
@@ -1233,7 +1233,7 @@ window_manager_process_user_event(
 			SDL_free(text);
 		}
 
-		alloc_free(data, sizeof(*data));
+		alloc_free(data, 1);
 
 		break;
 	}

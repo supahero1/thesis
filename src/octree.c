@@ -27,7 +27,7 @@ octree_init(
 	octree_t* ot
 	)
 {
-	ot->nodes = alloc_malloc(sizeof(*ot->nodes));
+	ot->nodes = alloc_malloc(ot->nodes, 1);
 	ot->node_entities = NULL;
 	ot->entities = NULL;
 #if OCTREE_DEDUPE_COLLISIONS == 1
@@ -77,16 +77,16 @@ octree_free(
 	octree_t* ot
 	)
 {
-	alloc_free(ot->nodes, sizeof(*ot->nodes) * ot->nodes_size);
-	alloc_free(ot->node_entities, sizeof(*ot->node_entities) * ot->node_entities_size);
-	alloc_free(ot->entities, sizeof(*ot->entities) * ot->entities_size);
+	alloc_free(ot->nodes, ot->nodes_size);
+	alloc_free(ot->node_entities, ot->node_entities_size);
+	alloc_free(ot->entities, ot->entities_size);
 #if OCTREE_DEDUPE_COLLISIONS == 1
-	alloc_free(ot->ht_entries, sizeof(*ot->ht_entries) * ot->ht_entries_size);
+	alloc_free(ot->ht_entries, ot->ht_entries_size);
 #endif
-	alloc_free(ot->removals, sizeof(*ot->removals) * ot->removals_size);
-	alloc_free(ot->node_removals, sizeof(*ot->node_removals) * ot->node_removals_size);
-	alloc_free(ot->insertions, sizeof(*ot->insertions) * ot->insertions_size);
-	alloc_free(ot->reinsertions, sizeof(*ot->reinsertions) * ot->reinsertions_size);
+	alloc_free(ot->removals, ot->removals_size);
+	alloc_free(ot->node_removals, ot->node_removals_size);
+	alloc_free(ot->insertions, ot->insertions_size);
+	alloc_free(ot->reinsertions, ot->reinsertions_size);
 }
 
 
@@ -273,9 +273,7 @@ octree_insert(
 	{
 		uint32_t new_size = (ot->insertions_used << 1) | 1;
 
-		ot->insertions = alloc_remalloc(ot->insertions,
-			sizeof(*ot->insertions) * ot->insertions_size,
-			sizeof(*ot->insertions) * new_size);
+		ot->insertions = alloc_remalloc(ot->insertions, ot->insertions_size, new_size);
 		assert_not_null(ot->insertions);
 
 		ot->insertions_size = new_size;
@@ -298,9 +296,7 @@ octree_remove(
 	{
 		uint32_t new_size = (ot->removals_used << 1) | 1;
 
-		ot->removals = alloc_remalloc(ot->removals,
-			sizeof(*ot->removals) * ot->removals_size,
-			sizeof(*ot->removals) * new_size);
+		ot->removals = alloc_remalloc(ot->removals, ot->removals_size, new_size);
 		assert_not_null(ot->removals);
 
 		ot->removals_size = new_size;
@@ -372,7 +368,7 @@ octree_normalize(
 			--node_removal;
 		}
 
-		alloc_free(node_removals, sizeof(*node_removals) * ot->node_removals_size);
+		alloc_free(node_removals, ot->node_removals_size);
 		ot->node_removals = NULL;
 		ot->node_removals_used = 0;
 		ot->node_removals_size = 0;
@@ -438,9 +434,7 @@ octree_normalize(
 					{
 						uint32_t new_size = (node_entities_used << 1) | 1;
 
-						node_entities = alloc_remalloc(node_entities,
-							sizeof(*node_entities) * node_entities_size,
-							sizeof(*node_entities) * new_size);
+						node_entities = alloc_remalloc(node_entities, node_entities_size, new_size);
 						assert_not_null(node_entities);
 
 						node_entities_size = new_size;
@@ -463,7 +457,7 @@ octree_normalize(
 			++reinsertion;
 		}
 
-		alloc_free(reinsertions, sizeof(*reinsertions) * ot->reinsertions_size);
+		alloc_free(reinsertions, ot->reinsertions_size);
 		ot->reinsertions = NULL;
 		ot->reinsertions_used = 0;
 		ot->reinsertions_size = 0;
@@ -539,7 +533,7 @@ octree_normalize(
 			++removal;
 		}
 
-		alloc_free(removals, sizeof(*removals) * ot->removals_size);
+		alloc_free(removals, ot->removals_size);
 		ot->removals = NULL;
 		ot->removals_used = 0;
 		ot->removals_size = 0;
@@ -570,9 +564,7 @@ octree_normalize(
 				{
 					uint32_t new_size = (entities_used << 1) | 1;
 
-					entities = alloc_remalloc(entities,
-						sizeof(*entities) * entities_size,
-						sizeof(*entities) * new_size);
+					entities = alloc_remalloc(entities, entities_size, new_size);
 					assert_not_null(entities);
 
 					entities_size = new_size;
@@ -623,9 +615,7 @@ octree_normalize(
 					{
 						uint32_t new_size = (node_entities_used << 1) | 1;
 
-						node_entities = alloc_remalloc(node_entities,
-							sizeof(*node_entities) * node_entities_size,
-							sizeof(*node_entities) * new_size);
+						node_entities = alloc_remalloc(node_entities, node_entities_size, new_size);
 						assert_not_null(node_entities);
 
 						node_entities_size = new_size;
@@ -646,7 +636,7 @@ octree_normalize(
 			++insertion;
 		}
 
-		alloc_free(insertions, sizeof(*insertions) * ot->insertions_size);
+		alloc_free(insertions, ot->insertions_size);
 		ot->insertions = NULL;
 		ot->insertions_used = 0;
 		ot->insertions_size = 0;
@@ -698,16 +688,16 @@ octree_normalize(
 			new_entities_size = entities_size >> 1;
 		}
 
-		new_nodes = alloc_malloc(sizeof(*new_nodes) * new_nodes_size);
+		new_nodes = alloc_malloc(new_nodes, new_nodes_size);
 		assert_not_null(new_nodes);
 
-		new_node_entities = alloc_malloc(sizeof(*new_node_entities) * new_node_entities_size);
+		new_node_entities = alloc_malloc(new_node_entities, new_node_entities_size);
 		assert_not_null(new_node_entities);
 
-		new_entities = alloc_malloc(sizeof(*new_entities) * new_entities_size);
+		new_entities = alloc_malloc(new_entities, new_entities_size);
 		assert_not_null(new_entities);
 
-		uint32_t* entity_map = alloc_calloc(sizeof(*entity_map) * entities_size);
+		uint32_t* entity_map = alloc_calloc(entity_map, entities_size);
 		assert_not_null(entity_map);
 
 
@@ -874,9 +864,7 @@ octree_normalize(
 						{
 							uint32_t new_size = (nodes_used << 1) | 1;
 
-							nodes = alloc_remalloc(nodes,
-								sizeof(*nodes) * nodes_size,
-								sizeof(*nodes) * new_size);
+							nodes = alloc_remalloc(nodes, nodes_size, new_size);
 							assert_not_null(nodes);
 
 							nodes_size = new_size;
@@ -886,9 +874,7 @@ octree_normalize(
 
 							if(new_size > new_nodes_size)
 							{
-								new_nodes = alloc_remalloc(new_nodes,
-									sizeof(*nodes) * new_nodes_size,
-									sizeof(*nodes) * new_size);
+								new_nodes = alloc_remalloc(new_nodes, new_nodes_size, new_size);
 								assert_not_null(new_nodes);
 
 								new_nodes_size = new_size;
@@ -1016,9 +1002,7 @@ octree_normalize(
 							{
 								uint32_t new_size = (node_entities_used << 1) | 1;
 
-								node_entities = alloc_remalloc(node_entities,
-									sizeof(*node_entities) * node_entities_size,
-									sizeof(*node_entities) * new_size);
+								node_entities = alloc_remalloc(node_entities, node_entities_size, new_size);
 								assert_not_null(node_entities);
 
 								node_entities_size = new_size;
@@ -1028,9 +1012,7 @@ octree_normalize(
 
 								if(new_size > new_node_entities_size)
 								{
-									new_node_entities = alloc_remalloc(new_node_entities,
-										sizeof(*new_node_entities) * new_node_entities_size,
-										sizeof(*new_node_entities) * new_size);
+									new_node_entities = alloc_remalloc(new_node_entities, new_node_entities_size, new_size);
 									assert_not_null(new_node_entities);
 
 									new_node_entities_size = new_size;
@@ -1259,22 +1241,22 @@ octree_normalize(
 		}
 		while(node_info != node_infos);
 
-		alloc_free(nodes, sizeof(*nodes) * nodes_size);
+		alloc_free(nodes, nodes_size);
 		ot->nodes = new_nodes;
 		ot->nodes_used = new_nodes_used;
 		ot->nodes_size = new_nodes_size;
 
-		alloc_free(node_entities, sizeof(*node_entities) * node_entities_size);
+		alloc_free(node_entities, node_entities_size);
 		ot->node_entities = new_node_entities;
 		ot->node_entities_used = new_node_entities_used;
 		ot->node_entities_size = new_node_entities_size;
 
-		alloc_free(entities, sizeof(*entities) * entities_size);
+		alloc_free(entities, entities_size);
 		ot->entities = new_entities;
 		ot->entities_used = new_entities_used;
 		ot->entities_size = new_entities_size;
 
-		alloc_free(entity_map, sizeof(*entity_map) * entities_size);
+		alloc_free(entity_map, entities_size);
 	}
 }
 
@@ -1359,9 +1341,7 @@ octree_update(
 						{
 							uint32_t new_size = (reinsertions_used << 1) | 1;
 
-							reinsertions = alloc_remalloc(reinsertions,
-								sizeof(*reinsertions) * reinsertions_size,
-								sizeof(*reinsertions) * new_size);
+							reinsertions = alloc_remalloc(reinsertions, reinsertions_size, new_size);
 							assert_not_null(reinsertions);
 
 							reinsertions_size = new_size;
@@ -1395,9 +1375,7 @@ octree_update(
 				{
 					uint32_t new_size = (node_removals_used << 1) | 1;
 
-					node_removals = alloc_remalloc(node_removals,
-						sizeof(*node_removals) * node_removals_size,
-						sizeof(*node_removals) * new_size);
+					node_removals = alloc_remalloc(node_removals, node_removals_size, new_size);
 					assert_not_null(node_removals);
 
 					node_removals_size = new_size;
@@ -1537,7 +1515,7 @@ octree_collide(
 
 #if OCTREE_DEDUPE_COLLISIONS == 1
 	uint32_t ht_size = ot->ht_entries_used * 2;
-	uint32_t* ht = alloc_calloc(sizeof(*ht) * ht_size);
+	uint32_t* ht = alloc_calloc(ht, ht_size);
 	assert_not_null(ht);
 
 	octree_ht_entry_t* ht_entries = ot->ht_entries;
@@ -1616,9 +1594,7 @@ octree_collide(
 				{
 					uint32_t new_size = (ht_entries_used << 1) | 1;
 
-					ht_entries = alloc_remalloc(ht_entries,
-						sizeof(*ht_entries) * ht_entries_size,
-						sizeof(*ht_entries) * new_size);
+					ht_entries = alloc_remalloc(ht_entries, ht_entries_size, new_size);
 					assert_not_null(ht_entries);
 
 					ht_entries_size = new_size;
@@ -1650,9 +1626,8 @@ octree_collide(
 	if(ht_entries_used * 4 <= ht_entries_size)
 	{
 		uint32_t new_size = ht_entries_size >> 1;
-		ht_entries = alloc_remalloc(ht_entries,
-			sizeof(*ht_entries) * ht_entries_size,
-			sizeof(*ht_entries) * new_size);
+
+		ht_entries = alloc_remalloc(ht_entries, ht_entries_size, new_size);
 		assert_not_null(ht_entries);
 
 		ht_entries_size = new_size;
@@ -1662,7 +1637,7 @@ octree_collide(
 	ot->ht_entries_used = ht_entries_used;
 	ot->ht_entries_size = ht_entries_size;
 
-	alloc_free(ht, sizeof(*ht) * ht_size);
+	alloc_free(ht, ht_size);
 #endif
 }
 

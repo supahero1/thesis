@@ -56,7 +56,7 @@ options_init(
 	const char* const* argv
 	)
 {
-	options_t options = alloc_malloc(sizeof(*options));
+	options_t options = alloc_malloc(options, 1);
 	assert_not_null(options);
 
 	options->table = hash_table_init(16,
@@ -101,7 +101,7 @@ options_free(
 
 	hash_table_free(options->table);
 
-	alloc_free(options, sizeof(*options));
+	alloc_free(options, 1);
 }
 
 

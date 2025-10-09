@@ -40,7 +40,7 @@ model_init(
 	float scale
 	)
 {
-	model_t* model = alloc_malloc(sizeof(*model));
+	model_t* model = alloc_malloc(model, 1);
 	assert_not_null(model);
 
 	const struct aiScene* scene = aiImportFile(
@@ -73,8 +73,8 @@ model_init(
 	printf("Model '%s':\n", path);
 
 	model->material_count = scene->mNumMaterials;
-	model->materials = alloc_malloc(sizeof(*model->materials) * model->material_count);
-	assert_not_null(model->materials);
+	model->materials = alloc_malloc(model->materials, model->material_count);
+	assert_ptr(model->materials, model->material_count);
 
 	printf("- material_count: %u\n", model->material_count);
 	printf("- materials:\n");
@@ -141,7 +141,7 @@ model_init(
 			const char* tex_path = const_basename(texture_path.data);
 			size_t tex_len = texture_path.length - (tex_path - texture_path.data);
 
-			char* combined_path = alloc_malloc(path_len + tex_len + 2);
+			char* combined_path = alloc_malloc(combined_path, path_len + tex_len + 2);
 			assert_not_null(combined_path);
 
 			char* ptr = combined_path;
@@ -159,8 +159,8 @@ model_init(
 	}
 
 	model->mesh_count = scene->mNumMeshes;
-	model->meshes = alloc_malloc(sizeof(*model->meshes) * model->mesh_count);
-	assert_not_null(model->meshes);
+	model->meshes = alloc_malloc(model->meshes, model->mesh_count);
+	assert_ptr(model->meshes, model->mesh_count);
 
 	printf("- mesh_count: %u\n", model->mesh_count);
 	printf("- meshes:\n");
@@ -186,14 +186,14 @@ model_init(
 			(char*) model->materials[mesh->material_idx].texture->str);
 		printf("        - vertex_count: %u\n", mesh->vertex_count);
 
-		mesh->vertices = alloc_malloc(sizeof(*mesh->vertices) * mesh->vertex_count);
-		assert_not_null(mesh->vertices);
+		mesh->vertices = alloc_malloc(mesh->vertices, mesh->vertex_count);
+		assert_ptr(mesh->vertices, mesh->vertex_count);
 
-		mesh->normals = alloc_malloc(sizeof(*mesh->normals) * mesh->vertex_count);
-		assert_not_null(mesh->normals);
+		mesh->normals = alloc_malloc(mesh->normals, mesh->vertex_count);
+		assert_ptr(mesh->normals, mesh->vertex_count);
 
-		mesh->coords = alloc_malloc(sizeof(*mesh->coords) * mesh->vertex_count);
-		assert_not_null(mesh->coords);
+		mesh->coords = alloc_malloc(mesh->coords, mesh->vertex_count);
+		assert_ptr(mesh->coords, mesh->vertex_count);
 
 		for(uint32_t j = 0; j < mesh->vertex_count; j++)
 		{
@@ -207,8 +207,8 @@ model_init(
 		}
 
 		mesh->index_count = sceneMesh->mNumFaces * 3;
-		mesh->indexes = alloc_malloc(sizeof(*mesh->indexes) * mesh->index_count);
-		assert_not_null(mesh->indexes);
+		mesh->indexes = alloc_malloc(mesh->indexes, mesh->index_count);
+		assert_ptr(mesh->indexes, mesh->index_count);
 
 		printf("        - index_count: %u\n", mesh->index_count);
 
@@ -243,14 +243,14 @@ model_free(
 		mesh_t* mesh = &model->meshes[i];
 		assert_not_null(mesh);
 
-		alloc_free(mesh->indexes, sizeof(*mesh->indexes) * mesh->index_count);
+		alloc_free(mesh->indexes, mesh->index_count);
 
-		alloc_free(mesh->coords, sizeof(*mesh->coords) * mesh->vertex_count);
-		alloc_free(mesh->normals, sizeof(*mesh->normals) * mesh->vertex_count);
-		alloc_free(mesh->vertices, sizeof(*mesh->vertices) * mesh->vertex_count);
+		alloc_free(mesh->coords, mesh->vertex_count);
+		alloc_free(mesh->normals, mesh->vertex_count);
+		alloc_free(mesh->vertices, mesh->vertex_count);
 	}
 
-	alloc_free(model->meshes, sizeof(*model->meshes) * model->mesh_count);
+	alloc_free(model->meshes, model->mesh_count);
 
 	for(uint32_t i = 0; i < model->material_count; i++)
 	{
@@ -260,7 +260,7 @@ model_free(
 		str_free(material->texture);
 	}
 
-	alloc_free(model->materials, sizeof(*model->materials) * model->material_count);
+	alloc_free(model->materials, model->material_count);
 
-	alloc_free(model, sizeof(*model));
+	alloc_free(model, 1);
 }
