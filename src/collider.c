@@ -30,6 +30,22 @@
 #define COLLIDER_VELOCITY_LIMIT 15.0f
 
 
+typedef enum collider_contact_type
+{
+	COLLIDER_CONTACT_TYPE_VERTEX,
+	COLLIDER_CONTACT_TYPE_EDGE,
+	COLLIDER_CONTACT_TYPE_FACE,
+	MACRO_ENUM_BITS(COLLIDER_CONTACT_TYPE)
+}
+collider_contact_type_t;
+
+typedef struct collider_triangle_contact
+{
+	triplet_t point;
+	collider_contact_type_t type;
+}
+collider_triangle_contact_t;
+
 struct collider
 {
 	stats_t stats;
@@ -200,7 +216,7 @@ collider_query(
 }
 
 
-private triplet_t
+private collider_triangle_contact_t
 collider_closest_point_on_triangle(
 	triplet_t p,
 	triplet_t a,
@@ -216,7 +232,7 @@ collider_closest_point_on_triangle(
 	float d2 = triplet_dot(ac, ap);
 	if(d1 <= 0.0f && d2 <= 0.0f)
 	{
-		return a;
+		return (collider_triangle_contact_t){ .point = a, .type = COLLIDER_CONTACT_TYPE_VERTEX };
 	}
 
 	triplet_t bp = triplet_sub(p, b);
@@ -225,7 +241,7 @@ collider_closest_point_on_triangle(
 	float d4 = triplet_dot(ac, bp);
 	if(d3 >= 0.0f && d4 <= d3)
 	{
-		return b;
+		return (collider_triangle_contact_t){ .point = b, .type = COLLIDER_CONTACT_TYPE_VERTEX };
 	}
 
 	triplet_t cp = triplet_sub(p, c);
@@ -234,35 +250,39 @@ collider_closest_point_on_triangle(
 	float d6 = triplet_dot(ac, cp);
 	if(d6 >= 0.0f && d5 <= d6)
 	{
-		return c;
+		return (collider_triangle_contact_t){ .point = c, .type = COLLIDER_CONTACT_TYPE_VERTEX };
 	}
 
 	float vc = d1 * d4 - d3 * d2;
 	if(vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
 	{
 		float v = d1 / (d1 - d3);
-		return triplet_add(a, triplet_scale(ab, v));
+		triplet_t point = triplet_add(a, triplet_scale(ab, v));
+		return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_EDGE };
 	}
 
 	float vb = d5 * d2 - d1 * d6;
 	if(vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
 	{
 		float v = d2 / (d2 - d6);
-		return triplet_add(a, triplet_scale(ac, v));
+		triplet_t point = triplet_add(a, triplet_scale(ac, v));
+		return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_EDGE };
 	}
 
 	float va = d3 * d6 - d5 * d4;
 	if(va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
 	{
 		float v = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-		return triplet_add(b, triplet_scale(triplet_sub(c, b), v));
+		triplet_t point = triplet_add(b, triplet_scale(triplet_sub(c, b), v));
+		return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_EDGE };
 	}
 
 	float denom = 1.0f / (va + vb + vc);
 	float v = vb * denom;
 	float w = vc * denom;
+	triplet_t point = triplet_add(a, triplet_add(triplet_scale(ab, v), triplet_scale(ac, w)));
 
-	return triplet_add(a, triplet_add(triplet_scale(ab, v), triplet_scale(ac, w)));
+	return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_FACE };
 }
 
 
@@ -304,34 +324,57 @@ collider_ball_collide_entity(
 
 	if(entity_b->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
 	{
-		triplet_t closest_point = collider_closest_point_on_triangle(
+		collider_triangle_contact_t contact = collider_closest_point_on_triangle(
 			center_a, entity_b->v0, entity_b->v1, entity_b->v2);
 
-		triplet_t penetration = triplet_sub(center_a, closest_point);
-		if(triplet_length(penetration) >= collider->ball_radius)
+		triplet_t to_center = triplet_sub(center_a, contact.point);
+		float distance = triplet_length(to_center);
+
+		if(distance >= collider->ball_radius)
 		{
 			return;
 		}
 
 		entity_a->hit = true;
 
-		triplet_t normal = triplet_normalize(penetration);
+		triplet_t collision_normal;
 
-		float penetration_depth = collider->ball_radius - triplet_length(penetration);
-		triplet_t correction = triplet_scale(normal, penetration_depth);
+		if(contact.type == COLLIDER_CONTACT_TYPE_FACE)
+		{
+			triplet_t ab = triplet_sub(entity_b->v1, entity_b->v0);
+			triplet_t ac = triplet_sub(entity_b->v2, entity_b->v0);
+			collision_normal = triplet_normalize(triplet_cross(ab, ac));
+			if(triplet_dot(collision_normal, to_center) < 0.0f)
+			{
+				collision_normal = triplet_negate(collision_normal);
+			}
+		}
+		else
+		{
+			collision_normal = triplet_normalize(to_center);
+		}
+
+		float penetration_depth = collider->ball_radius - distance;
+
+		float relative_velocity = triplet_dot(entity_a->v, collision_normal);
+
+		triplet_t correction;
+		if(relative_velocity < 0.0f)
+		{
+			float bounce_distance = penetration_depth * (1.0f + COLLIDER_RESTITUTION);
+			correction = triplet_scale(collision_normal, bounce_distance);
+
+			triplet_t impulse = triplet_scale(collision_normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
+			entity_a->v_force = triplet_add(entity_a->v_force, impulse);
+			++entity_a->force_count;
+		}
+		else
+		{
+			correction = triplet_scale(collision_normal, penetration_depth);
+		}
 
 		entity_a->pos_diff = triplet_add(entity_a->pos_diff, correction);
 		++entity_a->pos_diff_count;
-
-		float relative_velocity = triplet_dot(entity_a->v, normal);
-		if(relative_velocity >= 0.0f)
-		{
-			return;
-		}
-
-		triplet_t impulse = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
-		entity_a->v_force = triplet_add(entity_a->v_force, impulse);
-		++entity_a->force_count;
 	}
 	else /* COLLIDER_ENTITY_TYPE_SPHERE */
 	{
@@ -411,7 +454,7 @@ collider_ball_resolve(
 	entity->v = triplet_add(entity->v, entity->v_force);
 	entity->v_force = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
 
-	triplet_t a = (triplet_t){{ 0.0f, -0.01f, 0.0f }};
+	triplet_t a = (triplet_t){{ 0.0f, -0.1f, 0.0f }};
 	entity->v = triplet_add(entity->v, triplet_scale(a, collider->delta));
 
 	float speed = triplet_length(entity->v);

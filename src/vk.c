@@ -218,8 +218,6 @@ typedef struct vk_entities_per_model
 	simulation_entity_data_t* original_entities;
 	uint32_t original_entity_count;
 
-	uint32_t model_count;
-
 	simulation_entity_data_t** entities;
 	uint32_t entities_used;
 	uint32_t entities_size;

@@ -33,6 +33,8 @@ all:
 	@printf "Specify one (or more) of the following:\n\
 	\n\
 	app         builds the app\n\
+	vk          builds and runs in VK window mode\n\
+	xr          builds and runs in XR vr mode\n\
 	clean       removes any built executables\n\
 	\n\
 	Specify RELEASE=1 for a production build\n\
@@ -132,3 +134,12 @@ app: shaders
 	[[ -n "$(VK_SSAO_BLUR_DEPTH_TOLERANCE)" ]] && args="$$args --vk_ssao_blur_depth_tolerance=$(VK_SSAO_BLUR_DEPTH_TOLERANCE)"; \
 	\
 	cd thesis; $(VALGRIND_CALL) ./thesis_app $$args
+
+
+.PHONY: vk
+vk:
+	$(MAKE) app WINDOW_ENABLE=1 XR_ENABLE=0
+
+.PHONY: xr
+xr:
+	$(MAKE) app WINDOW_ENABLE=0 XR_ENABLE=1
