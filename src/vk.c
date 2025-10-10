@@ -37,7 +37,7 @@
 #define VK_MAX_INSTANCES 128
 #define VK_POOL_SIZE 16
 #define VK_COMMANDS 8
-#define VK_STAGING_BUFFER_SIZE UINT32_C(128) * 1024 * 1024
+#define VK_STAGING_BUFFER_SIZE 1 * 1024 * 1024
 
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
@@ -367,8 +367,10 @@ typedef struct vk_command
 	VkCommandBuffer buffer;
 	VkFence fence;
 	bool waited;
+	bool using_temp;
 
 	vk_buffer_t staging_buffer;
+	vk_buffer_t temp_staging_buffer;
 }
 vk_command_t;
 
@@ -2478,29 +2480,29 @@ vk_free_buffer(
 private void
 vk_init_staging_buffer(
 	vk_t vk,
-	vk_command_t* command,
+	vk_buffer_t* buffer,
 	VkDeviceSize size
 	)
 {
 	assert_not_null(vk);
-	assert_not_null(command);
+	assert_not_null(buffer);
 
 	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-	vk_init_buffer(vk, size, usage, flags, &command->staging_buffer);
+	vk_init_buffer(vk, size, usage, flags, buffer);
 }
 
 
 private void
 vk_free_staging_buffer(
 	vk_t vk,
-	vk_command_t* command
+	vk_buffer_t* buffer
 	)
 {
 	assert_not_null(vk);
-	assert_not_null(command);
+	assert_not_null(buffer);
 
-	vk_free_buffer(vk, &command->staging_buffer);
+	vk_free_buffer(vk, buffer);
 }
 
 
@@ -2675,8 +2677,9 @@ vk_init_commands(
 		hard_assert_eq(result, VK_SUCCESS);
 
 		command->waited = false;
+		command->using_temp = false;
 
-		vk_init_staging_buffer(vk, command, VK_STAGING_BUFFER_SIZE);
+		vk_init_staging_buffer(vk, &command->staging_buffer, VK_STAGING_BUFFER_SIZE);
 
 		++command_buffer;
 		++command;
@@ -2701,7 +2704,12 @@ vk_free_commands(
 
 	while(command != command_end)
 	{
-		vk_free_staging_buffer(vk, command);
+		vk_free_staging_buffer(vk, &command->staging_buffer);
+
+		if(command->using_temp)
+		{
+			vk_free_staging_buffer(vk, &command->temp_staging_buffer);
+		}
 
 		vk->table.vkDestroyFence(vk->device, command->fence, NULL);
 
@@ -2738,6 +2746,12 @@ vk_wait_command(
 	hard_assert_eq(result, VK_SUCCESS);
 
 	command->waited = true;
+
+	if(command->using_temp)
+	{
+		vk_free_staging_buffer(vk, &command->temp_staging_buffer);
+		command->using_temp = false;
+	}
 }
 
 
@@ -2822,7 +2836,6 @@ vk_copy_to_buffer_explicit(
 	assert_not_null(vk);
 	assert_not_null(buffer);
 	assert_ptr(data, size);
-	assert_le(size, VK_STAGING_BUFFER_SIZE);
 
 	if(!size)
 	{
@@ -2831,13 +2844,22 @@ vk_copy_to_buffer_explicit(
 
 	vk_command_t* command = vk_get_command(vk);
 
+	vk_buffer_t* staging_buffer = &command->staging_buffer;
+
+	if(size > VK_STAGING_BUFFER_SIZE)
+	{
+		vk_init_staging_buffer(vk, &command->temp_staging_buffer, size);
+		staging_buffer = &command->temp_staging_buffer;
+		command->using_temp = true;
+	}
+
 	void* mapped_data;
-	VkResult result = vk->table.vkMapMemory(vk->device, command->staging_buffer.memory, 0, size, 0, &mapped_data);
+	VkResult result = vk->table.vkMapMemory(vk->device, staging_buffer->memory, 0, size, 0, &mapped_data);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	memcpy(mapped_data, data, size);
 
-	vk->table.vkUnmapMemory(vk->device, command->staging_buffer.memory);
+	vk->table.vkUnmapMemory(vk->device, staging_buffer->memory);
 
 	VkBufferCopy buffer_copy =
 	{
@@ -2846,7 +2868,7 @@ vk_copy_to_buffer_explicit(
 		.size = size
 	};
 
-	vk->table.vkCmdCopyBuffer(command->buffer, command->staging_buffer.buffer, buffer->buffer, 1, &buffer_copy);
+	vk->table.vkCmdCopyBuffer(command->buffer, staging_buffer->buffer, buffer->buffer, 1, &buffer_copy);
 
 	vk_run_command(vk, command);
 }
@@ -2867,7 +2889,6 @@ vk_read_from_buffer(
 	assert_not_null(vk);
 	assert_not_null(buffer);
 	assert_ptr(data, size);
-	assert_le(size, VK_STAGING_BUFFER_SIZE);
 
 	if(!size)
 	{
@@ -2876,6 +2897,15 @@ vk_read_from_buffer(
 
 	vk_command_t* command = vk_get_command(vk);
 
+	vk_buffer_t* staging_buffer = &command->staging_buffer;
+
+	if(size > VK_STAGING_BUFFER_SIZE)
+	{
+		vk_init_staging_buffer(vk, &command->temp_staging_buffer, size);
+		staging_buffer = &command->temp_staging_buffer;
+		command->using_temp = true;
+	}
+
 	VkBufferCopy buffer_copy =
 	{
 		.srcOffset = 0,
@@ -2883,18 +2913,18 @@ vk_read_from_buffer(
 		.size = size
 	};
 
-	vk->table.vkCmdCopyBuffer(command->buffer, buffer->buffer, command->staging_buffer.buffer, 1, &buffer_copy);
+	vk->table.vkCmdCopyBuffer(command->buffer, buffer->buffer, staging_buffer->buffer, 1, &buffer_copy);
 
 	vk_run_command(vk, command);
 	vk_wait_command(vk, command);
 
 	void* mapped_data;
-	VkResult result = vk->table.vkMapMemory(vk->device, command->staging_buffer.memory, 0, size, 0, &mapped_data);
+	VkResult result = vk->table.vkMapMemory(vk->device, staging_buffer->memory, 0, size, 0, &mapped_data);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	memcpy(data, mapped_data, size);
 
-	vk->table.vkUnmapMemory(vk->device, command->staging_buffer.memory);
+	vk->table.vkUnmapMemory(vk->device, staging_buffer->memory);
 }
 
 
@@ -2906,18 +2936,25 @@ vk_copy_texture_to_image(
 {
 	assert_not_null(vk);
 	assert_not_null(image);
-	assert_le(image->size, VK_STAGING_BUFFER_SIZE);
 
 	vk_command_t* command = vk_get_command(vk);
 
+	vk_buffer_t* staging_buffer = &command->staging_buffer;
+
+	if(image->size > VK_STAGING_BUFFER_SIZE)
+	{
+		vk_init_staging_buffer(vk, &command->temp_staging_buffer, image->size);
+		staging_buffer = &command->temp_staging_buffer;
+		command->using_temp = true;
+	}
+
 	void* mapped_data;
-	VkResult result = vk->table.vkMapMemory(vk->device,
-		command->staging_buffer.memory, 0, image->size, 0, &mapped_data);
+	VkResult result = vk->table.vkMapMemory(vk->device, staging_buffer->memory, 0, image->size, 0, &mapped_data);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	memcpy(mapped_data, image->data, image->size);
 
-	vk->table.vkUnmapMemory(vk->device, command->staging_buffer.memory);
+	vk->table.vkUnmapMemory(vk->device, staging_buffer->memory);
 
 	uint32_t count = image->levels * image->layers;
 	VkBufferImageCopy buffer_image_copies[count];
@@ -2962,7 +2999,7 @@ vk_copy_texture_to_image(
 		height = MACRO_MAX(height >> 1, 1);
 	}
 
-	vk->table.vkCmdCopyBufferToImage(command->buffer, command->staging_buffer.buffer,
+	vk->table.vkCmdCopyBufferToImage(command->buffer, staging_buffer->buffer,
 		image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, count, buffer_image_copies);
 
 	vk_run_command(vk, command);
@@ -7493,8 +7530,7 @@ vk_init_framebuffers(
 	assert_not_null(vk);
 
 	uint32_t image_count;
-	VkResult result = vk->table.vkGetSwapchainImagesKHR(
-		vk->device, vk->swapchain, &image_count, NULL);
+	VkResult result = vk->table.vkGetSwapchainImagesKHR(vk->device, vk->swapchain, &image_count, NULL);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	assert_lt(image_count, VK_MAX_IMAGES);
@@ -7503,8 +7539,7 @@ vk_init_framebuffers(
 	vk->image_count = image_count;
 
 	VkImage images[image_count];
-	result = vk->table.vkGetSwapchainImagesKHR(
-		vk->device, vk->swapchain, &image_count, images);
+	result = vk->table.vkGetSwapchainImagesKHR(vk->device, vk->swapchain, &image_count, images);
 	hard_assert_eq(result, VK_SUCCESS);
 
 
