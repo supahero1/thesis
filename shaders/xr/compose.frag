@@ -18,8 +18,6 @@
 
 #extension GL_EXT_multiview : require
 
-layout(constant_id = 0) const bool enable_ssao = true;
-
 layout(set = 0, binding = 0) uniform sampler2DArray inScene;
 layout(set = 1, binding = 0) uniform sampler2DArray inSSAO;
 
@@ -33,10 +31,6 @@ main()
 	vec4 color = texture(inScene, vec3(inCoords, gl_ViewIndex));
 	vec4 ssao = texture(inSSAO, vec3(inCoords, gl_ViewIndex));
 
-	if(enable_ssao)
-	{
-		color.rgb *= ssao.r;
-	}
-
+	color.rgb *= ssao.r;
 	outColor = color;
 }

@@ -3064,7 +3064,7 @@ xr_init_frag_ubo_buffer(
 
 
 private void
-xr_copy_to_buffer(
+xr_copy_to_buffer_explicit(
 	xr_t xr,
 	vk_buffer_t* buffer,
 	const void* data,
@@ -3104,6 +3104,10 @@ xr_copy_to_buffer(
 
 	xr_run_command(xr, command);
 }
+
+
+#define xr_copy_to_buffer(xr, buffer, data, size)	\
+xr_copy_to_buffer_explicit((xr), (buffer), (data), sizeof(*(data)) * (size))
 
 
 private void
@@ -3682,7 +3686,7 @@ xr_init_timing(
 
 	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-	xr_init_buffer(xr, sizeof(uint64_t) * count * 2, usage, flags, &timing->buffer);
+	xr_init_buffer(xr, sizeof(*timing->results) * timing->count * 2, usage, flags, &timing->buffer);
 
 	timing->results = alloc_malloc(timing->results, timing->count * 2);
 	assert_not_null(timing->results);
@@ -5598,10 +5602,11 @@ xr_init_ssao_kernel_const(
 {
 	assert_not_null(xr);
 
-	xr_init_frag_ubo_buffer(xr, sizeof(vec4) * xr->options.ssao_kernel_size, &xr->vk.ssao.kernel_ubo);
-
 	uint32_t size = xr->options.ssao_kernel_size;
 	vec4 data[size];
+
+	xr_init_frag_ubo_buffer(xr, sizeof(*data) * size, &xr->vk.ssao.kernel_ubo);
+
 	vec4* kernel = data;
 	vec4* kernel_end = kernel + size;
 
@@ -5636,7 +5641,7 @@ xr_init_ssao_kernel_const(
 		++kernel;
 	}
 
-	xr_copy_to_buffer(xr, &xr->vk.ssao.kernel_ubo.buffer, data, sizeof(*data) * size);
+	xr_copy_to_buffer(xr, &xr->vk.ssao.kernel_ubo.buffer, data, size);
 }
 
 
@@ -6508,13 +6513,11 @@ xr_init_skybox_consts(
 
 	xr_init_vertex_buffer(xr, sizeof(xr_vk_skybox_vertex_data), &xr->vk.output.skybox.vertex_buffer);
 
-	xr_copy_to_buffer(xr, &xr->vk.output.skybox.vertex_buffer,
-		xr_vk_skybox_vertex_data, sizeof(xr_vk_skybox_vertex_data));
+	xr_copy_to_buffer(xr, &xr->vk.output.skybox.vertex_buffer, xr_vk_skybox_vertex_data, MACRO_ARRAY_LEN(xr_vk_skybox_vertex_data));
 
 	xr_init_index_buffer(xr, sizeof(xr_vk_skybox_index_data), &xr->vk.output.skybox.index_buffer);
 
-	xr_copy_to_buffer(xr, &xr->vk.output.skybox.index_buffer,
-		xr_vk_skybox_index_data, sizeof(xr_vk_skybox_index_data));
+	xr_copy_to_buffer(xr, &xr->vk.output.skybox.index_buffer, xr_vk_skybox_index_data, MACRO_ARRAY_LEN(xr_vk_skybox_index_data));
 }
 
 
@@ -6539,34 +6542,6 @@ xr_init_compose_pipeline(
 {
 	assert_not_null(xr);
 
-	typedef struct xr_compose_frag_specialization
-	{
-		int32_t enable_ssao;
-	}
-	xr_compose_frag_specialization_t;
-
-	xr_compose_frag_specialization_t frag_specialization_data =
-	{
-		.enable_ssao = xr->options.enable_ssao
-	};
-
-	VkSpecializationMapEntry frag_map_entries[] =
-	{
-		{
-			.constantID = 0,
-			.offset = offsetof(xr_compose_frag_specialization_t, enable_ssao),
-			.size = sizeof(frag_specialization_data.enable_ssao)
-		}
-	};
-
-	VkSpecializationInfo frag_specialization_info =
-	{
-		.mapEntryCount = MACRO_ARRAY_LEN(frag_map_entries),
-		.pMapEntries = frag_map_entries,
-		.dataSize = sizeof(frag_specialization_data),
-		.pData = &frag_specialization_data
-	};
-
 	VkPipelineShaderStageCreateInfo shader_stages[] =
 	{
 		{
@@ -6585,7 +6560,7 @@ xr_init_compose_pipeline(
 			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
 			.module = xr_create_shader(xr, "shaders/xr/compose.frag.spv"),
 			.pName = "main",
-			.pSpecializationInfo = &frag_specialization_info
+			.pSpecializationInfo = NULL
 		}
 	};
 
@@ -7165,8 +7140,7 @@ xr_init_models(
 
 			xr_init_vertex_buffer(xr, sizeof(vk_shadow_vertex_data_t) *
 				sim_mesh->vertex_count, &mesh->shadow_vertex_buffer);
-			xr_copy_to_buffer(xr, &mesh->shadow_vertex_buffer,
-				sim_mesh->vertices, sizeof(*sim_mesh->vertices) * sim_mesh->vertex_count);
+			xr_copy_to_buffer(xr, &mesh->shadow_vertex_buffer, sim_mesh->vertices, sim_mesh->vertex_count);
 
 			vk_mesh_vertex_data_t* vertex_data = alloc_malloc(vertex_data, sim_mesh->vertex_count);
 			assert_ptr(vertex_data, sim_mesh->vertex_count);
@@ -7192,15 +7166,13 @@ xr_init_models(
 
 			xr_init_vertex_buffer(xr, sizeof(*vertex_data) *
 				sim_mesh->vertex_count, &mesh->scene_vertex_buffer);
-			xr_copy_to_buffer(xr, &mesh->scene_vertex_buffer,
-				vertex_data, sizeof(*vertex_data) * sim_mesh->vertex_count);
+			xr_copy_to_buffer(xr, &mesh->scene_vertex_buffer, vertex_data, sim_mesh->vertex_count);
 
 			alloc_free(vertex_data, sim_mesh->vertex_count);
 
 			xr_init_index_buffer(xr, sizeof(*sim_mesh->indexes) *
 				sim_mesh->index_count, &mesh->index_buffer);
-			xr_copy_to_buffer(xr, &mesh->index_buffer,
-				sim_mesh->indexes, sizeof(*sim_mesh->indexes) * sim_mesh->index_count);
+			xr_copy_to_buffer(xr, &mesh->index_buffer, sim_mesh->indexes, sim_mesh->index_count);
 
 			++mesh;
 			++sim_mesh;
@@ -8747,8 +8719,7 @@ xr_draw(
 			++instance;
 		}
 
-		xr_copy_to_buffer(xr, &model->instance_buffers[image_idx],
-			instance_data, sizeof(*instance_data) * entities_per_model->entities_used);
+		xr_copy_to_buffer(xr, &model->instance_buffers[image_idx], instance_data, entities_per_model->entities_used);
 
 		alloc_free(instance_data, entities_per_model->entities_used);
 
@@ -8771,8 +8742,7 @@ xr_draw(
 			++mesh;
 		}
 
-		xr_copy_to_buffer(xr, &model->indirect_buffers[image_idx],
-			indirect_cmds, sizeof(*indirect_cmds) * model->mesh_count);
+		xr_copy_to_buffer(xr, &model->indirect_buffers[image_idx], indirect_cmds, model->mesh_count);
 	}
 	XR_FOR_EACH_MODEL_END(entities_per_model, model);
 
@@ -8780,8 +8750,7 @@ xr_draw(
 
 	vk_shadow_vert_constant_data_t shadow_vert_ubo_data;
 	glm_mat4_copy(vr_transform.light_transform, shadow_vert_ubo_data.transform);
-	xr_copy_to_buffer(xr, &frame->shadow.vert_ubo.buffer,
-		&shadow_vert_ubo_data, sizeof(shadow_vert_ubo_data));
+	xr_copy_to_buffer(xr, &frame->shadow.vert_ubo.buffer, &shadow_vert_ubo_data, 1);
 
 	vk_scene_vert_ubo_data_t scene_vert_ubo_data;
 	glm_mat4_copy(vr_transform.projection[0], scene_vert_ubo_data.projection[0]);
@@ -8794,13 +8763,11 @@ xr_draw(
 	scene_vert_ubo_data.camera_position[0][3] = 1.0f;
 	glm_vec3_copy((void*) &right_eye.position, scene_vert_ubo_data.camera_position[1]);
 	scene_vert_ubo_data.camera_position[1][3] = 1.0f;
-	xr_copy_to_buffer(xr, &frame->scene.vert_ubo.buffer,
-		&scene_vert_ubo_data, sizeof(scene_vert_ubo_data));
+	xr_copy_to_buffer(xr, &frame->scene.vert_ubo.buffer, &scene_vert_ubo_data, 1);
 
 	vk_ssao_frag_ubo_data_t ssao_frag_ubo_data;
 	glm_mat4_copy(vr_transform.projection[0], ssao_frag_ubo_data.projection);
-	xr_copy_to_buffer(xr, &frame->ssao.frag_ubo.buffer,
-		&ssao_frag_ubo_data, sizeof(ssao_frag_ubo_data));
+	xr_copy_to_buffer(xr, &frame->ssao.frag_ubo.buffer, &ssao_frag_ubo_data, 1);
 
 	vk_skybox_constant_data_t skybox_vert_ubo_data;
 	glm_mat4_copy(vr_transform.projection[0], skybox_vert_ubo_data.transform[0]);
@@ -8817,8 +8784,7 @@ xr_draw(
 	view_right[3][1] = 0.0f;
 	view_right[3][2] = 0.0f;
 	glm_mat4_mul(skybox_vert_ubo_data.transform[1], view_right, skybox_vert_ubo_data.transform[1]);
-	xr_copy_to_buffer(xr, &frame->output.vert_ubo.buffer,
-		&skybox_vert_ubo_data, sizeof(skybox_vert_ubo_data));
+	xr_copy_to_buffer(xr, &frame->output.vert_ubo.buffer, &skybox_vert_ubo_data, 1);
 
 	VkSubmitInfo submit_info =
 	{

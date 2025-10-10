@@ -16,8 +16,6 @@
 
 #version 450
 
-layout(constant_id = 0) const bool enable_ssao = true;
-
 layout(set = 0, binding = 0) uniform sampler2D inScene;
 layout(set = 1, binding = 0) uniform sampler2D inSSAO;
 
@@ -31,10 +29,6 @@ main()
 	vec4 color = texture(inScene, inCoords);
 	vec4 ssao = texture(inSSAO, inCoords);
 
-	if(enable_ssao)
-	{
-		color.rgb *= ssao.r;
-	}
-
+	color.rgb *= ssao.r;
 	outColor = color;
 }
