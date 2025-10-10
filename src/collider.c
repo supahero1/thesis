@@ -315,12 +315,7 @@ collider_ball_collide_entity(
 		return;
 	}
 
-	triplet_t center_a =
-	{
-		.x = (entity_a->rect_extent.min.x + entity_a->rect_extent.max.x) * 0.5f,
-		.y = (entity_a->rect_extent.min.y + entity_a->rect_extent.max.y) * 0.5f,
-		.z = (entity_a->rect_extent.min.z + entity_a->rect_extent.max.z) * 0.5f
-	};
+	triplet_t center_a = rect_extent_3d_center(entity_a->rect_extent);
 
 	if(entity_b->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
 	{
@@ -358,32 +353,19 @@ collider_ball_collide_entity(
 
 		float relative_velocity = triplet_dot(entity_a->v, collision_normal);
 
-		triplet_t correction;
+		entity_a->pos_diff = triplet_add(entity_a->pos_diff, triplet_scale(collision_normal, penetration_depth));
+		++entity_a->pos_diff_count;
+
 		if(relative_velocity < 0.0f)
 		{
-			float bounce_distance = penetration_depth * (1.0f + COLLIDER_RESTITUTION);
-			correction = triplet_scale(collision_normal, bounce_distance);
-
 			triplet_t impulse = triplet_scale(collision_normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
 			entity_a->v_force = triplet_add(entity_a->v_force, impulse);
 			++entity_a->force_count;
 		}
-		else
-		{
-			correction = triplet_scale(collision_normal, penetration_depth);
-		}
-
-		entity_a->pos_diff = triplet_add(entity_a->pos_diff, correction);
-		++entity_a->pos_diff_count;
 	}
 	else /* COLLIDER_ENTITY_TYPE_SPHERE */
 	{
-		triplet_t center_b =
-		{
-			.x = (entity_b->rect_extent.min.x + entity_b->rect_extent.max.x) * 0.5f,
-			.y = (entity_b->rect_extent.min.y + entity_b->rect_extent.max.y) * 0.5f,
-			.z = (entity_b->rect_extent.min.z + entity_b->rect_extent.max.z) * 0.5f
-		};
+		triplet_t center_b = rect_extent_3d_center(entity_b->rect_extent);
 
 		triplet_t penetration = triplet_sub(center_a, center_b);
 
@@ -396,16 +378,31 @@ collider_ball_collide_entity(
 		triplet_t normal = triplet_normalize(penetration);
 
 		float penetration_depth = collider->ball_diameter - distance;
-		triplet_t pos_diff = triplet_scale(normal, penetration_depth * 0.5f);
-
-		entity_a->pos_diff = triplet_add(entity_a->pos_diff, pos_diff);
-		++entity_a->pos_diff_count;
-
-		entity_b->pos_diff = triplet_sub(entity_b->pos_diff, pos_diff);
-		++entity_b->pos_diff_count;
 
 		triplet_t velocity_diff = triplet_sub(entity_a->v, entity_b->v);
 		float relative_velocity = triplet_dot(velocity_diff, normal);
+
+		float vel_a = fabsf(triplet_dot(entity_a->v, normal));
+		float vel_b = fabsf(triplet_dot(entity_b->v, normal));
+		float total_vel = vel_a + vel_b;
+
+		float ratio_a = 0.5f;
+		float ratio_b = 0.5f;
+		if(total_vel > 0.0001f)
+		{
+			ratio_a = vel_a / total_vel;
+			ratio_b = vel_b / total_vel;
+		}
+
+		triplet_t pos_diff_a = triplet_scale(normal, penetration_depth * ratio_a);
+		triplet_t pos_diff_b = triplet_scale(normal, penetration_depth * ratio_b);
+
+		entity_a->pos_diff = triplet_add(entity_a->pos_diff, pos_diff_a);
+		++entity_a->pos_diff_count;
+
+		entity_b->pos_diff = triplet_sub(entity_b->pos_diff, pos_diff_b);
+		++entity_b->pos_diff_count;
+
 		if(relative_velocity >= 0.0f)
 		{
 			return;
@@ -429,12 +426,7 @@ collider_ball_resolve(
 	assert_not_null(collider);
 	assert_not_null(entity);
 
-	triplet_t pos =
-	{
-		.x = (entity->rect_extent.min.x + entity->rect_extent.max.x) * 0.5f,
-		.y = (entity->rect_extent.min.y + entity->rect_extent.max.y) * 0.5f,
-		.z = (entity->rect_extent.min.z + entity->rect_extent.max.z) * 0.5f
-	};
+	triplet_t pos = rect_extent_3d_center(entity->rect_extent);
 
 	if(entity->pos_diff_count)
 	{

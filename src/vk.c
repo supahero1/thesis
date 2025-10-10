@@ -782,7 +782,7 @@ vk_init_options(
 	printf("- shadow_value: %.2f\n", vk->options.shadow_value);
 
 	vk->options.lambert_start_angle =
-		options_get_f32(global_options, "vk_lambert_start_angle", 0.0f, 90.0f, 80.0f);
+		options_get_f32(global_options, "vk_lambert_start_angle", 0.0f, 90.0f, 85.0f);
 	printf("- lambert_start_angle: %.1f\n", vk->options.lambert_start_angle);
 
 	vk->options.enable_ssao =

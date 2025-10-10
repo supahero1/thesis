@@ -24,7 +24,7 @@ layout(constant_id = 0) const bool enable_depth_shadows = true;
 layout(constant_id = 1) const bool enable_backface_shadows = true;
 layout(constant_id = 2) const bool enable_specular = true;
 layout(constant_id = 3) const float shadow_value = 0.2;
-layout(constant_id = 4) const float lambert_start_angle = 80.0;
+layout(constant_id = 4) const float lambert_start_angle = 85.0;
 
 layout(push_constant) uniform Constants
 {

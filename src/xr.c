@@ -820,7 +820,7 @@ xr_init_options(
 	printf("- shadow_value: %.2f\n", xr->options.shadow_value);
 
 	xr->options.lambert_start_angle =
-		options_get_f32(global_options, "vk_lambert_start_angle", 0.0f, 90.0f, 80.0f);
+		options_get_f32(global_options, "vk_lambert_start_angle", 0.0f, 90.0f, 85.0f);
 	printf("- lambert_start_angle: %.1f\n", xr->options.lambert_start_angle);
 
 	xr->options.enable_ssao =

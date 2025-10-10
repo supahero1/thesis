@@ -182,6 +182,21 @@ half_to_rect_3d_extent(
 }
 
 
+triplet_t
+rect_extent_3d_center(
+	rect_extent_3d_t extent
+	)
+{
+	return
+	(triplet_t)
+	{
+		.x = (extent.max_x + extent.min_x) * 0.5f,
+		.y = (extent.max_y + extent.min_y) * 0.5f,
+		.z = (extent.max_z + extent.min_z) * 0.5f
+	};
+}
+
+
 half_extent_3d_t
 rect_to_half_3d_extent(
 	rect_extent_3d_t extent
@@ -190,9 +205,7 @@ rect_to_half_3d_extent(
 	return
 	(half_extent_3d_t)
 	{
-		.x = (extent.max_x + extent.min_x) * 0.5f,
-		.y = (extent.max_y + extent.min_y) * 0.5f,
-		.z = (extent.max_z + extent.min_z) * 0.5f,
+		.pos = rect_extent_3d_center(extent),
 		.w = (extent.max_x - extent.min_x) * 0.5f,
 		.h = (extent.max_y - extent.min_y) * 0.5f,
 		.d = (extent.max_z - extent.min_z) * 0.5f

@@ -201,6 +201,12 @@ half_to_rect_3d_extent(
 	);
 
 
+extern triplet_t
+rect_extent_3d_center(
+	rect_extent_3d_t extent
+	);
+
+
 extern half_extent_3d_t
 rect_to_half_3d_extent(
 	rect_extent_3d_t extent
