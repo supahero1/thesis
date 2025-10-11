@@ -8702,10 +8702,12 @@ xr_draw(
 	simulation_eye_pose_t left_eye_pose;
 	(void) memcpy(&left_eye_pose.rotation, &left_eye.orientation, sizeof(XrQuaternionf));
 	(void) memcpy(&left_eye_pose.position, &left_eye.position, sizeof(XrVector3f));
+	(void) memcpy(&left_eye_pose.fov, &views[0].fov, sizeof(XrFovf));
 
 	simulation_eye_pose_t right_eye_pose;
 	(void) memcpy(&right_eye_pose.rotation, &right_eye.orientation, sizeof(XrQuaternionf));
 	(void) memcpy(&right_eye_pose.position, &right_eye.position, sizeof(XrVector3f));
+	(void) memcpy(&right_eye_pose.fov, &views[1].fov, sizeof(XrFovf));
 
 	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(
 		xr->simulation, xr->vk.screen_extent.pair, left_eye_pose, right_eye_pose);

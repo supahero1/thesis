@@ -518,9 +518,15 @@ simulation_get_vr_transform(
 	simulation_vr_transform_t transform;
 
 	glm_mat4_zero(transform.projection[0]);
-	float f = 1.0f / tanf(simulation->camera.fov * 0.5f);
-	transform.projection[0][0][0] = f / (extent.w / extent.h);
-	transform.projection[0][1][1] = f;
+	float tan_left = tanf(left_eye.fov[0]);
+	float tan_right = tanf(left_eye.fov[1]);
+	float tan_up = tanf(left_eye.fov[2]);
+	float tan_down = tanf(left_eye.fov[3]);
+
+	transform.projection[0][0][0] = 2.0f / (tan_right - tan_left);
+	transform.projection[0][1][1] = 2.0f / (tan_up - tan_down);
+	transform.projection[0][2][0] = (tan_right + tan_left) / (tan_right - tan_left);
+	transform.projection[0][2][1] = (tan_up + tan_down) / (tan_up - tan_down);
 	transform.projection[0][2][3] = 1.0f;
 	transform.projection[0][3][2] = simulation->camera.near;
 
@@ -539,9 +545,17 @@ simulation_get_vr_transform(
 
 	glm_mat4_inv(transform.view[0], transform.inverse_view[0]);
 
+	// Right eye projection using OpenXR FOV (infinite far plane)
 	glm_mat4_zero(transform.projection[1]);
-	transform.projection[1][0][0] = f / (extent.w / extent.h);
-	transform.projection[1][1][1] = f;
+	tan_left = tanf(right_eye.fov[0]);
+	tan_right = tanf(right_eye.fov[1]);
+	tan_up = tanf(right_eye.fov[2]);
+	tan_down = tanf(right_eye.fov[3]);
+
+	transform.projection[1][0][0] = 2.0f / (tan_right - tan_left);
+	transform.projection[1][1][1] = 2.0f / (tan_up - tan_down);
+	transform.projection[1][2][0] = (tan_right + tan_left) / (tan_right - tan_left);
+	transform.projection[1][2][1] = (tan_up + tan_down) / (tan_up - tan_down);
 	transform.projection[1][2][3] = 1.0f;
 	transform.projection[1][3][2] = simulation->camera.near;
 
