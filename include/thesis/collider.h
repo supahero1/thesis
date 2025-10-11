@@ -80,6 +80,12 @@ collider_free(
 	);
 
 
+extern float
+collider_get_scale(
+	collider_t collider
+	);
+
+
 extern void
 collider_add(
 	collider_t collider,

@@ -799,6 +799,17 @@ simulation_get_skybox_path(
 }
 
 
+float
+simulation_get_scale(
+	simulation_t simulation
+	)
+{
+	assert_not_null(simulation);
+
+	return collider_get_scale(simulation->collider);
+}
+
+
 void
 simulation_modify_position(
 	simulation_t simulation,

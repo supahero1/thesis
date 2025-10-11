@@ -221,6 +221,12 @@ simulation_get_skybox_path(
 	);
 
 
+extern float
+simulation_get_scale(
+	simulation_t simulation
+	);
+
+
 extern void
 simulation_modify_position(
 	simulation_t simulation,

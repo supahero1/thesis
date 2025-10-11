@@ -48,8 +48,6 @@
 #define VK_WINDOW_SENSITIVITY 0.003f
 #define VK_WINDOW_SPEED 500.0f
 
-#define XR_COORDINATE_SCALE 100.0f
-
 
 typedef enum vk_image_type
 {
@@ -7991,26 +7989,21 @@ xr_get_eye_poses(
 	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT, 0);
 	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT, 0);
 
-	XrVector3f head_pos =
-	{
-		(local_views[0].pose.position.x + local_views[1].pose.position.x) * 0.5f,
-		(local_views[0].pose.position.y + local_views[1].pose.position.y) * 0.5f,
-		(local_views[0].pose.position.z + local_views[1].pose.position.z) * 0.5f
-	};
+	float scale = simulation_get_scale(xr->simulation);
 
 	if(left_pose)
 	{
-		left_pose->position.x = (local_views[0].pose.position.x - head_pos.x) * XR_COORDINATE_SCALE;
-		left_pose->position.y = (local_views[0].pose.position.y - head_pos.y) * XR_COORDINATE_SCALE;
-		left_pose->position.z = (local_views[0].pose.position.z - head_pos.z) * XR_COORDINATE_SCALE;
+		left_pose->position.x = local_views[0].pose.position.x * scale;
+		left_pose->position.y = local_views[0].pose.position.y * scale;
+		left_pose->position.z = local_views[0].pose.position.z * scale;
 		left_pose->orientation = local_views[0].pose.orientation;
 	}
 
 	if(right_pose)
 	{
-		right_pose->position.x = (local_views[1].pose.position.x - head_pos.x) * XR_COORDINATE_SCALE;
-		right_pose->position.y = (local_views[1].pose.position.y - head_pos.y) * XR_COORDINATE_SCALE;
-		right_pose->position.z = (local_views[1].pose.position.z - head_pos.z) * XR_COORDINATE_SCALE;
+		right_pose->position.x = local_views[1].pose.position.x * scale;
+		right_pose->position.y = local_views[1].pose.position.y * scale;
+		right_pose->position.z = local_views[1].pose.position.z * scale;
 		right_pose->orientation = local_views[1].pose.orientation;
 	}
 

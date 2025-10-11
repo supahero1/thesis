@@ -21,6 +21,7 @@
 #include <thesis/octree.h>
 
 #include <math.h>
+#include <stdio.h>
 #include <stddef.h>
 
 #define COLLIDER_MAP_SIZE 1000000.0f
@@ -119,6 +120,17 @@ collider_free(
 }
 
 
+float
+collider_get_scale(
+	collider_t collider
+	)
+{
+	assert_not_null(collider);
+
+	return collider->ball_radius / 0.1213f;
+}
+
+
 void
 collider_add(
 	collider_t collider,
@@ -144,6 +156,8 @@ collider_add(
 		collider->ball_radius = (entity->rect_extent.max.x - entity->rect_extent.min.x) * 0.5f;
 		collider->ball_diameter = collider->ball_radius * 2.0f;
 		collider->ball_moment_inertia = 0.4f * collider->ball_mass * collider->ball_radius * collider->ball_radius;
+
+		printf("Basketball radius: %.02f\n", collider->ball_radius);
 	}
 
 	assert_lt(collider->ball_radius - (entity->rect_extent.max.x - entity->rect_extent.min.x) * 0.5f, 0.01f);
