@@ -471,6 +471,11 @@ collider_ball_resolve(
 
 	pos = triplet_add(pos, triplet_scale(entity->v, collider->delta));
 
+	if(pos.y < -1000.0f)
+	{
+		pos = (triplet_t){{ -1000.0f, 300.0f, -100.0f }};
+	}
+
 	entity->rect_extent =
 	(rect_extent_3d_t)
 	{

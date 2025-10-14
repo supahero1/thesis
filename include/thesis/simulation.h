@@ -47,6 +47,7 @@ typedef struct simulation_camera
 {
 	vec3 pos;
 	vec3 angle;
+	vec4 quat;
 	float fov;
 	float near;
 }
@@ -229,6 +230,13 @@ simulation_get_scale(
 
 extern void
 simulation_modify_velocity(
+	simulation_t simulation,
+	vec3 velocity
+	);
+
+
+extern void
+simulation_set_velocity(
 	simulation_t simulation,
 	vec3 velocity
 	);

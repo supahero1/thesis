@@ -8301,11 +8301,12 @@ vk_draw(
 		frame_time += output_time;
 	}
 
-	simulation_update(vk->simulation);
 	uint64_t start_time = time_get();
 
 	simulation_camera_t camera = simulation_get_camera(vk->simulation);
 	simulation_transform_t transform = simulation_get_transform(vk->simulation, vk->screen_extent.pair);
+
+	simulation_update(vk->simulation);
 
 	vk_entities_per_model_t* entity_data = vk_init_entities_per_model(vk);
 

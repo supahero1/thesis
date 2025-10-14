@@ -112,6 +112,7 @@ simulation_init(
 	camera.angle[0] = glm_rad(camera.angle[0]);
 	camera.angle[1] = glm_rad(camera.angle[1]);
 	camera.angle[2] = glm_rad(camera.angle[2]);
+	glm_vec4_copy(GLM_QUAT_IDENTITY, camera.quat);
 	simulation->camera = camera;
 
 	simulation->light = light;
@@ -529,6 +530,8 @@ simulation_get_vr_transform(
 {
 	assert_not_null(simulation);
 
+	glm_quat_slerp(left_eye.rotation, right_eye.rotation, 0.5f, simulation->camera.quat);
+
 	simulation_vr_transform_t transform;
 
 	glm_mat4_zero(transform.projection[0]);
@@ -835,9 +838,29 @@ simulation_modify_velocity(
 	{
 		velocity[1] = 0.0f;
 	}
-
 	velocity[1] *= SIMULATION_JUMP_SPEED;
+
 	simulation->v = triplet_add(simulation->v, *(triplet_t*) velocity);
+}
+
+
+void
+simulation_set_velocity(
+	simulation_t simulation,
+	vec3 velocity
+	)
+{
+	assert_not_null(simulation);
+
+	if(simulation->camera.pos[1] > 0.0f)
+	{
+		velocity[1] = 0.0f;
+	}
+	velocity[1] *= SIMULATION_JUMP_SPEED;
+
+	simulation->v.x = velocity[0];
+	simulation->v.y += velocity[1];
+	simulation->v.z = velocity[2];
 }
 
 
@@ -905,15 +928,25 @@ simulation_update(
 
 	triplet_t v = triplet_scale(simulation->v, SIMULATION_MOVEMENT_SPEED * delta);
 
-	float yaw = simulation->camera.angle[1];
-	float cos_yaw = cosf(yaw);
-	float sin_yaw = sinf(yaw);
+	bool using_quat = memcmp(simulation->camera.quat, GLM_QUAT_IDENTITY, sizeof(vec4)) != 0;
+	if(using_quat)
+	{
+		float y = v.y;
+		glm_quat_rotatev(simulation->camera.quat, (void*) &v, (void*) &v);
+		v.y = y;
+	}
+	else
+	{
+		float yaw = simulation->camera.angle[1];
+		float cos_yaw = cosf(yaw);
+		float sin_yaw = sinf(yaw);
 
-	float new_x = v.x * cos_yaw + v.z * sin_yaw;
-	float new_z = -v.x * sin_yaw + v.z * cos_yaw;
+		float new_x = v.x * cos_yaw + v.z * sin_yaw;
+		float new_z = -v.x * sin_yaw + v.z * cos_yaw;
 
-	v.x = new_x;
-	v.z = new_z;
+		v.x = new_x;
+		v.z = new_z;
+	}
 
 	glm_vec3_add(simulation->camera.pos, (void*) &v, simulation->camera.pos);
 	simulation->camera.pos[1] = MACRO_MAX(simulation->camera.pos[1], 0.0f);

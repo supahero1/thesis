@@ -41,7 +41,9 @@
 #define VK_MAX_INSTANCES 128
 #define VK_POOL_SIZE 16
 #define VK_COMMANDS 8
+
 #define XR_STAGING_BUFFER_SIZE 1 * 1024 * 1024
+#define XR_JOYSTICK_DEADZONE 0.1f
 
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
@@ -412,6 +414,14 @@ typedef struct vk_descriptor_set_layout
 }
 vk_descriptor_set_layout_t;
 
+typedef struct xr_controller
+{
+	XrPath path;
+	XrSpace space;
+	bool active;
+}
+xr_controller_t;
+
 struct xr
 {
 	simulation_t simulation;
@@ -421,7 +431,6 @@ struct xr
 	{
 		bool xr_enable;
 		str_t xr_runtime;
-		bool xr_monado;
 
 		uint32_t max_msaa_samples;
 		bool sample_shading;
@@ -468,15 +477,12 @@ struct xr
 	XrViewConfigurationView* view_configs;
 	uint32_t view_count;
 
-	XrHandTrackerEXT hand_tracker_left;
-	XrHandTrackerEXT hand_tracker_right;
+	xr_controller_t controllers[2];
 
-	PFN_xrLocateHandJointsEXT xrLocateHandJointsEXT;
-
-	XrHandJointLocationEXT hand_joints_left[XR_HAND_JOINT_COUNT_EXT];
-	XrHandJointLocationEXT hand_joints_right[XR_HAND_JOINT_COUNT_EXT];
-	bool hand_joints_left_active;
-	bool hand_joints_right_active;
+	XrActionSet action_set;
+	XrAction action_pose;
+	XrAction action_joystick;
+	XrAction action_joystick_click;
 
 	XrTime predicted_display_time;
 
@@ -652,7 +658,6 @@ private const char* xr_xr_instance_extensions[] =
 #endif
 	XR_KHR_VULKAN_ENABLE_EXTENSION_NAME,
 	XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
-	XR_EXT_HAND_TRACKING_EXTENSION_NAME,
 };
 
 private const char* xr_xr_instance_layers[] =
@@ -770,11 +775,6 @@ xr_init_options(
 	xr->options.xr_runtime =
 		options_get_str(global_options, "xr_runtime", "monado");
 	printf("- xr_runtime: %s\n", (char*) xr->options.xr_runtime->str);
-
-	str_t monado = str_init_move_cstr("monado");
-	xr->options.xr_monado = str_cmp(xr->options.xr_runtime, monado);
-	str_reset(monado);
-	str_free(monado);
 
 	xr->options.max_msaa_samples =
 		options_get_i64(global_options, "vk_max_msaa_samples", 1, 64, 4);
@@ -1027,11 +1027,6 @@ xr_xr_get_instance_extensions(
 	const char* const* instance_extension = xr_xr_instance_extensions;
 	const char* const* instance_extension_end = instance_extension + MACRO_ARRAY_LEN(xr_xr_instance_extensions);
 
-	if(xr->options.xr_monado)
-	{
-		--instance_extension_end;
-	}
-
 	while(instance_extension < instance_extension_end)
 	{
 		bool found = false;
@@ -1216,27 +1211,10 @@ xr_init_xr_instance(
 	result = xrGetSystem(xr->instance, &system_info, &xr->system);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	XrSystemHandTrackingPropertiesEXT hand_tracking_properties =
-	{
-		.type = XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT,
-		.next = NULL,
-		.supportsHandTracking = false
-	};
-
 	XrSystemProperties system_properties = {XR_TYPE_SYSTEM_PROPERTIES};
-
-	if(!xr->options.xr_monado)
-	{
-		system_properties.next = &hand_tracking_properties;
-	}
 
 	result = xrGetSystemProperties(xr->instance, xr->system, &system_properties);
 	hard_assert_eq(result, XR_SUCCESS);
-
-	if(!xr->options.xr_monado)
-	{
-		hard_assert_true(hand_tracking_properties.supportsHandTracking);
-	}
 
 	printf("\nXR system: %s\n", system_properties.systemName);
 	printf("XR system vendor: %u\n", system_properties.vendorId);
@@ -7856,102 +7834,148 @@ xr_device_wait_idle(
 
 
 private void
-xr_update_hand_tracking(
+xr_update_controller(
+	xr_t xr,
+	xr_controller_t* controller
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(controller);
+
+	XrActionStateGetInfo get_info =
+	{
+		.type = XR_TYPE_ACTION_STATE_GET_INFO,
+		.next = NULL,
+		.action = xr->action_pose,
+		.subactionPath = controller->path
+	};
+
+	XrActionStatePose state = {XR_TYPE_ACTION_STATE_POSE};
+	XrResult result = xrGetActionStatePose(xr->session, &get_info, &state);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	controller->active = state.isActive;
+}
+
+
+private void
+xr_update_controllers(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
-	if(xr->options.xr_monado)
+	XrActiveActionSet active_action_set =
+	{
+		.actionSet = xr->action_set,
+		.subactionPath = XR_NULL_PATH
+	};
+
+	XrActionsSyncInfo sync_info =
+	{
+		.type = XR_TYPE_ACTIONS_SYNC_INFO,
+		.next = NULL,
+		.countActiveActionSets = 1,
+		.activeActionSets = &active_action_set
+	};
+
+	XrResult result = xrSyncActions(xr->session, &sync_info);
+	if(result == XR_SESSION_NOT_FOCUSED)
 	{
 		return;
 	}
+	hard_assert_eq(result, XR_SUCCESS);
 
-	{
-		XrHandJointLocationsEXT locations =
-		{
-			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
-			.next = NULL,
-			.jointCount = XR_HAND_JOINT_COUNT_EXT,
-			.jointLocations = xr->hand_joints_left
-		};
-
-		XrHandJointsLocateInfoEXT locate_info =
-		{
-			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
-			.next = NULL,
-			.baseSpace = xr->space,
-			.time = xr->predicted_display_time
-		};
-
-		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_left, &locate_info, &locations);
-		xr->hand_joints_left_active = (result == XR_SUCCESS && locations.isActive);
-	}
-
-	{
-		XrHandJointLocationsEXT locations =
-		{
-			.type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
-			.next = NULL,
-			.jointCount = XR_HAND_JOINT_COUNT_EXT,
-			.jointLocations = xr->hand_joints_right
-		};
-
-		XrHandJointsLocateInfoEXT locate_info =
-		{
-			.type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
-			.next = NULL,
-			.baseSpace = xr->space,
-			.time = xr->predicted_display_time
-		};
-
-		XrResult result = xr->xrLocateHandJointsEXT(xr->hand_tracker_right, &locate_info, &locations);
-		xr->hand_joints_right_active = (result == XR_SUCCESS && locations.isActive);
-	}
+	xr_update_controller(xr, &xr->controllers[0]);
+	xr_update_controller(xr, &xr->controllers[1]);
 }
 
 
 private void
-xr_get_hand_pose(
+xr_get_controller_pose(
 	xr_t xr,
-	XrHandTrackerEXT hand_tracker,
+	xr_controller_t* controller,
 	XrPosef* pose
 	)
 {
 	assert_not_null(xr);
+	assert_not_null(controller);
 	assert_not_null(pose);
 
-	if(xr->options.xr_monado)
+	if(!controller->active)
 	{
-		*pose = (XrPosef){0};
 		return;
 	}
 
-	XrHandJointLocationEXT* joints;
-	bool active;
+	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
+	XrResult result = xrLocateSpace(controller->space, xr->space, xr->predicted_display_time, &location);
+	hard_assert_eq(result, XR_SUCCESS);
 
-	if(hand_tracker == xr->hand_tracker_left)
+	if(
+		(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) == 0 ||
+		(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) == 0
+		)
 	{
-		joints = xr->hand_joints_left;
-		active = xr->hand_joints_left_active;
-	}
-	else if(hand_tracker == xr->hand_tracker_right)
-	{
-		joints = xr->hand_joints_right;
-		active = xr->hand_joints_right_active;
-	}
-	else
-	{
-		hard_assert_unreachable();
+		controller->active = false;
+		return;
 	}
 
-	hard_assert_true(active);
+	float scale = simulation_get_scale(xr->simulation);
+	pose->position.x = location.pose.position.x * scale;
+	pose->position.y = location.pose.position.y * scale;
+	pose->position.z = location.pose.position.z * scale;
+	pose->orientation = location.pose.orientation;
+}
 
-	XrHandJointLocationEXT palm = joints[XR_HAND_JOINT_PALM_EXT];
-	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT, 0);
-	hard_assert_neq(palm.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT, 0);
 
-	*pose = palm.pose;
+private void
+xr_get_controller_joystick(
+	xr_t xr,
+	xr_controller_t* controller,
+	XrVector2f* joystick,
+	bool* joystick_click
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(controller);
+	assert_not_null(joystick);
+	assert_not_null(joystick_click);
+
+	if(!controller->active)
+	{
+		return;
+	}
+
+	XrActionStateGetInfo get_info =
+	{
+		.type = XR_TYPE_ACTION_STATE_GET_INFO,
+		.next = NULL,
+		.action = xr->action_joystick,
+		.subactionPath = controller->path
+	};
+
+	XrActionStateVector2f state = {XR_TYPE_ACTION_STATE_VECTOR2F};
+	XrResult result = xrGetActionStateVector2f(xr->session, &get_info, &state);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	*joystick = state.currentState;
+
+	if(fabsf(joystick->x) < XR_JOYSTICK_DEADZONE)
+	{
+		joystick->x = 0.0f;
+	}
+	if(fabsf(joystick->y) < XR_JOYSTICK_DEADZONE)
+	{
+		joystick->y = 0.0f;
+	}
+
+	get_info.action = xr->action_joystick_click;
+
+	XrActionStateBoolean click_state = {XR_TYPE_ACTION_STATE_BOOLEAN};
+	result = xrGetActionStateBoolean(xr->session, &get_info, &click_state);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	*joystick_click = click_state.currentState && click_state.isActive;
 }
 
 
@@ -7986,8 +8010,18 @@ xr_get_eye_poses(
 	hard_assert_eq(result, XR_SUCCESS);
 	hard_assert_eq(view_count, 2);
 
-	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT, 0);
-	hard_assert_neq(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT, 0);
+	if(
+		(view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 ||
+		(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0
+		)
+	{
+		puts("Eye poses not valid");
+		glm_vec4_copy(GLM_QUAT_IDENTITY, (void*) &left_pose->orientation);
+		glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, (void*) &left_pose->position);
+		glm_vec4_copy(GLM_QUAT_IDENTITY, (void*) &right_pose->orientation);
+		glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, (void*) &right_pose->position);
+		return;
+	}
 
 	float scale = simulation_get_scale(xr->simulation);
 
@@ -8685,7 +8719,6 @@ xr_draw(
 		frame_time += output_time;
 	}
 
-	simulation_update(xr->simulation);
 	uint64_t start_time = time_get();
 
 	XrPosef left_eye;
@@ -8702,8 +8735,21 @@ xr_draw(
 	(void) memcpy(&right_eye_pose.position, &right_eye.position, sizeof(XrVector3f));
 	(void) memcpy(&right_eye_pose.fov, &views[1].fov, sizeof(XrFovf));
 
+	if(xr->controllers[1].active)
+	{
+		XrVector2f vec;
+		bool clicked;
+
+		xr_get_controller_joystick(xr, &xr->controllers[1], &vec, &clicked);
+
+		vec3 velocity = { vec.x, clicked, -vec.y };
+		simulation_set_velocity(xr->simulation, velocity);
+	}
+
 	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(
 		xr->simulation, xr->vk.screen_extent.pair, left_eye_pose, right_eye_pose);
+
+	simulation_update(xr->simulation);
 
 	vk_entities_per_model_t* entity_data = xr_init_entities_per_model(xr);
 
@@ -8952,63 +8998,161 @@ xr_free_xr_views(
 
 
 private void
-xr_init_xr_hand_tracking(
+xr_init_xr_controllers(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
-	if(xr->options.xr_monado)
-	{
-		xr->hand_tracker_left = XR_NULL_HANDLE;
-		xr->hand_tracker_right = XR_NULL_HANDLE;
-		xr->xrLocateHandJointsEXT = NULL;
-		xr->hand_joints_left_active = false;
-		xr->hand_joints_right_active = false;
-		return;
-	}
+	xrStringToPath(xr->instance, "/user/hand/left", &xr->controllers[0].path);
+	xrStringToPath(xr->instance, "/user/hand/right", &xr->controllers[1].path);
+	XrPath paths[] = { xr->controllers[0].path, xr->controllers[1].path };
 
-	xr->xrLocateHandJointsEXT = xr_xr_load_func(xr, "xrLocateHandJointsEXT");
-	PFN_xrCreateHandTrackerEXT xrCreateHandTrackerEXT = xr_xr_load_func(xr, "xrCreateHandTrackerEXT");
-
-	XrHandTrackerCreateInfoEXT hand_tracker_info =
+	XrActionSetCreateInfo action_set_info =
 	{
-		.type = XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT,
+		.type = XR_TYPE_ACTION_SET_CREATE_INFO,
 		.next = NULL,
-		.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT
+		.priority = 0
+	};
+	(void) strcpy(action_set_info.actionSetName, "gameplay");
+	(void) strcpy(action_set_info.localizedActionSetName, "Gameplay");
+
+	XrResult result = xrCreateActionSet(xr->instance, &action_set_info, &xr->action_set);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	XrActionCreateInfo pose_action_info =
+	{
+		.type = XR_TYPE_ACTION_CREATE_INFO,
+		.next = NULL,
+		.actionType = XR_ACTION_TYPE_POSE_INPUT,
+		.countSubactionPaths = 2,
+		.subactionPaths = paths
+	};
+	(void) strcpy(pose_action_info.actionName, "hand_pose");
+	(void) strcpy(pose_action_info.localizedActionName, "Hand Pose");
+
+	result = xrCreateAction(xr->action_set, &pose_action_info, &xr->action_pose);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	XrActionCreateInfo action_info =
+	{
+		.type = XR_TYPE_ACTION_CREATE_INFO,
+		.next = NULL,
+		.actionType = XR_ACTION_TYPE_VECTOR2F_INPUT,
+		.countSubactionPaths = 2,
+		.subactionPaths = paths
+	};
+	(void) strcpy(action_info.actionName, "joystick");
+	(void) strcpy(action_info.localizedActionName, "Joystick");
+
+	result = xrCreateAction(xr->action_set, &action_info, &xr->action_joystick);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	action_info =
+	(XrActionCreateInfo)
+	{
+		.type = XR_TYPE_ACTION_CREATE_INFO,
+		.next = NULL,
+		.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT,
+		.countSubactionPaths = 2,
+		.subactionPaths = paths
+	};
+	(void) strcpy(action_info.actionName, "joystick_click");
+	(void) strcpy(action_info.localizedActionName, "Joystick Click");
+
+	result = xrCreateAction(xr->action_set, &action_info, &xr->action_joystick_click);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	XrActionSuggestedBinding bindings[6];
+
+	xrStringToPath(xr->instance, "/user/hand/left/input/grip/pose", &bindings[0].binding);
+	bindings[0].action = xr->action_pose;
+
+	xrStringToPath(xr->instance, "/user/hand/left/input/thumbstick", &bindings[1].binding);
+	bindings[1].action = xr->action_joystick;
+
+	xrStringToPath(xr->instance, "/user/hand/left/input/thumbstick/click", &bindings[2].binding);
+	bindings[2].action = xr->action_joystick_click;
+
+	xrStringToPath(xr->instance, "/user/hand/right/input/grip/pose", &bindings[3].binding);
+	bindings[3].action = xr->action_pose;
+
+	xrStringToPath(xr->instance, "/user/hand/right/input/thumbstick", &bindings[4].binding);
+	bindings[4].action = xr->action_joystick;
+
+	xrStringToPath(xr->instance, "/user/hand/right/input/thumbstick/click", &bindings[5].binding);
+	bindings[5].action = xr->action_joystick_click;
+
+	XrPath profile_path;
+	xrStringToPath(xr->instance, "/interaction_profiles/oculus/touch_controller", &profile_path);
+
+	XrInteractionProfileSuggestedBinding suggested_bindings =
+	{
+		.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING,
+		.next = NULL,
+		.interactionProfile = profile_path,
+		.countSuggestedBindings = MACRO_ARRAY_LEN(bindings),
+		.suggestedBindings = bindings
 	};
 
-	hand_tracker_info.hand = XR_HAND_LEFT_EXT;
-	XrResult result = xrCreateHandTrackerEXT(xr->session, &hand_tracker_info, &xr->hand_tracker_left);
+	result = xrSuggestInteractionProfileBindings(xr->instance, &suggested_bindings);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	hand_tracker_info.hand = XR_HAND_RIGHT_EXT;
-	result = xrCreateHandTrackerEXT(xr->session, &hand_tracker_info, &xr->hand_tracker_right);
+	XrSessionActionSetsAttachInfo attach_info =
+	{
+		.type = XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO,
+		.next = NULL,
+		.countActionSets = 1,
+		.actionSets = &xr->action_set
+	};
+
+	result = xrAttachSessionActionSets(xr->session, &attach_info);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	xr->hand_joints_left_active = false;
-	xr->hand_joints_right_active = false;
+	XrActionSpaceCreateInfo action_space_info =
+	{
+		.type = XR_TYPE_ACTION_SPACE_CREATE_INFO,
+		.next = NULL,
+		.action = xr->action_pose,
+		.poseInActionSpace = {
+			.orientation = { 0.0f, 0.0f, 0.0f, 1.0f },
+			.position = { 0.0f, 0.0f, 0.0f }
+		},
+	};
+
+	for(uint32_t i = 0; i < 2; ++i)
+	{
+		action_space_info.subactionPath = xr->controllers[i].path;
+
+		result = xrCreateActionSpace(xr->session, &action_space_info, &xr->controllers[i].space);
+		hard_assert_eq(result, XR_SUCCESS);
+	}
 }
 
 
 private void
-xr_free_xr_hand_tracking(
+xr_free_xr_controllers(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
-	if(xr->options.xr_monado)
+	for(uint32_t i = 0; i < 2; ++i)
 	{
-		return;
+		XrResult result = xrDestroySpace(xr->controllers[i].space);
+		hard_assert_eq(result, XR_SUCCESS);
 	}
 
-	PFN_xrDestroyHandTrackerEXT xrDestroyHandTrackerEXT = xr_xr_load_func(xr, "xrDestroyHandTrackerEXT");
-
-	XrResult result = xrDestroyHandTrackerEXT(xr->hand_tracker_left);
+	XrResult result = xrDestroyAction(xr->action_joystick_click);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	result = xrDestroyHandTrackerEXT(xr->hand_tracker_right);
+	result = xrDestroyAction(xr->action_joystick);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	result = xrDestroyAction(xr->action_pose);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	result = xrDestroyActionSet(xr->action_set);
 	hard_assert_eq(result, XR_SUCCESS);
 }
 
@@ -9111,6 +9255,12 @@ xr_poll_events(
 				break;
 			}
 
+			case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
+			case XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB:
+			{
+				break;
+			}
+
 			default:
 			{
 				printf("XR unknown event type %d\n", event_buffer.type);
@@ -9147,7 +9297,7 @@ xr_process_frame(
 	}
 	previous_display_time = xr->predicted_display_time;
 
-	xr_update_hand_tracking(xr);
+	xr_update_controllers(xr);
 
 	XrCompositionLayerProjection projection_layer =
 	{
@@ -9304,7 +9454,7 @@ xr_init_xr(
 	xr_init_xr_session(xr);
 	xr_init_vk_capabilities(xr);
 	xr_init_xr_swapchain(xr);
-	xr_init_xr_hand_tracking(xr);
+	xr_init_xr_controllers(xr);
 	xr_init_commands(xr);
 	xr_init_sets(xr);
 	xr_init_pipelines(xr);
@@ -9335,7 +9485,7 @@ xr_free_xr(
 	xr_free_pipelines(xr);
 	xr_free_sets(xr);
 	xr_free_commands(xr);
-	xr_free_xr_hand_tracking(xr);
+	xr_free_xr_controllers(xr);
 	xr_free_xr_swapchain(xr);
 	xr_free_xr_session(xr);
 	xr_free_xr_views(xr);
