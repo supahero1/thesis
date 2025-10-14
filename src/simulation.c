@@ -27,6 +27,8 @@
 #include <stdatomic.h>
 
 #define SIMULATION_STATS_SIZE 64
+#define SIMULATION_MOVEMENT_SPEED 12.0f
+#define SIMULATION_JUMP_SPEED 1.2f
 
 
 typedef struct simulation_texture_info
@@ -53,6 +55,9 @@ struct simulation
 
 	simulation_camera_t camera;
 	simulation_light_t light;
+
+	triplet_t a;
+	triplet_t v;
 
 	simulation_model_info_t info;
 	hash_table_t model_table;
@@ -110,6 +115,9 @@ simulation_init(
 	simulation->camera = camera;
 
 	simulation->light = light;
+
+	simulation->a = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+	simulation->v = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
 
 	simulation->model_table = hash_table_init(8, NULL, (void*) simulation_model_table_value_free_fn);
 
@@ -480,8 +488,14 @@ simulation_get_transform(
 
 	glm_mat4_identity(transform.view);
 	glm_euler_xyz(simulation->camera.angle, transform.view);
-	glm_translate(transform.view, (vec3){ -simulation->camera.pos[0],
-		-simulation->camera.pos[1], -simulation->camera.pos[2] });
+	glm_translate(transform.view,
+		(vec3)
+		{
+			-simulation->camera.pos[0],
+			-simulation->camera.pos[1] - simulation_get_scale(simulation) * 1.7,
+			-simulation->camera.pos[2]
+		}
+		);
 
 	glm_mat4_inv(transform.view, transform.inverse_view);
 
@@ -545,7 +559,6 @@ simulation_get_vr_transform(
 
 	glm_mat4_inv(transform.view[0], transform.inverse_view[0]);
 
-	// Right eye projection using OpenXR FOV (infinite far plane)
 	glm_mat4_zero(transform.projection[1]);
 	tan_left = tanf(right_eye.fov[0]);
 	tan_right = tanf(right_eye.fov[1]);
@@ -811,23 +824,20 @@ simulation_get_scale(
 
 
 void
-simulation_modify_position(
+simulation_modify_velocity(
 	simulation_t simulation,
-	vec3 pos
+	vec3 velocity
 	)
 {
 	assert_not_null(simulation);
 
-	mat4 rotation;
-	glm_mat4_identity(rotation);
+	if(simulation->camera.pos[1] > 0.0f)
+	{
+		velocity[1] = 0.0f;
+	}
 
-	glm_rotate(rotation, simulation->camera.angle[1], (vec3){ 0.0f, 1.0f, 0.0f });
-	glm_rotate(rotation, simulation->camera.angle[0], (vec3){ 1.0f, 0.0f, 0.0f });
-
-	vec3 rotated_pos;
-	glm_mat4_mulv3(rotation, pos, 1.0f, rotated_pos);
-
-	glm_vec3_add(simulation->camera.pos, rotated_pos, simulation->camera.pos);
+	velocity[1] *= SIMULATION_JUMP_SPEED;
+	simulation->v = triplet_add(simulation->v, *(triplet_t*) velocity);
 }
 
 
@@ -884,6 +894,29 @@ simulation_update(
 
 	float delta = (float)(now - simulation->last_update) / time_ms_to_ns(1) / 16.66667f;
 	simulation->last_update = now;
+
+	triplet_t a = (triplet_t){{ 0.0f, -0.1f, 0.0f }};
+	simulation->v = triplet_add(simulation->v, triplet_scale(a, delta));
+
+	if(simulation->camera.pos[1] == 0.0f)
+	{
+		simulation->v.y = MACRO_MAX(simulation->v.y, 0.0f);
+	}
+
+	triplet_t v = triplet_scale(simulation->v, SIMULATION_MOVEMENT_SPEED * delta);
+
+	float yaw = simulation->camera.angle[1];
+	float cos_yaw = cosf(yaw);
+	float sin_yaw = sinf(yaw);
+
+	float new_x = v.x * cos_yaw + v.z * sin_yaw;
+	float new_z = -v.x * sin_yaw + v.z * cos_yaw;
+
+	v.x = new_x;
+	v.z = new_z;
+
+	glm_vec3_add(simulation->camera.pos, (void*) &v, simulation->camera.pos);
+	simulation->camera.pos[1] = MACRO_MAX(simulation->camera.pos[1], 0.0f);
 
 	collider_update(simulation->collider, delta);
 

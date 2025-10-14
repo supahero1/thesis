@@ -42,7 +42,6 @@
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
 #define VK_WINDOW_SENSITIVITY 0.003f
-#define VK_WINDOW_SPEED 500.0f
 
 
 typedef enum vk_image_type
@@ -8700,6 +8699,55 @@ vk_window_key_down_fn(
 	{
 		window_toggle_fullscreen(vk->window.handle);
 	}
+
+
+	if(event_data->repeat)
+	{
+		return;
+	}
+
+	vec3 vel = { 0.0f, 0.0f, 0.0f };
+
+
+	switch(event_data->key)
+	{
+
+	case WINDOW_KEY_W:
+	{
+		vel[2] = 1.0f;
+		break;
+	}
+
+	case WINDOW_KEY_S:
+	{
+		vel[2] = -1.0f;
+		break;
+	}
+
+	case WINDOW_KEY_A:
+	{
+		vel[0] = 1.0f;
+		break;
+	}
+
+	case WINDOW_KEY_D:
+	{
+		vel[0] = -1.0f;
+		break;
+	}
+
+	case WINDOW_KEY_SPACE:
+	{
+		vel[1] = 1.0f;
+		break;
+	}
+
+	default: break;
+
+	}
+
+
+	simulation_modify_velocity(vk->simulation, vel);
 }
 
 
@@ -8711,7 +8759,7 @@ vk_window_key_up_fn(
 {
 	assert_not_null(vk);
 
-	vec3 pos = { 0.0f, 0.0f, 0.0f };
+	vec3 vel = { 0.0f, 0.0f, 0.0f };
 
 
 	switch(event_data->key)
@@ -8719,25 +8767,25 @@ vk_window_key_up_fn(
 
 	case WINDOW_KEY_W:
 	{
-		pos[2] = VK_WINDOW_SPEED;
+		vel[2] = -1.0f;
 		break;
 	}
 
 	case WINDOW_KEY_S:
 	{
-		pos[2] = -VK_WINDOW_SPEED;
+		vel[2] = 1.0f;
 		break;
 	}
 
 	case WINDOW_KEY_A:
 	{
-		pos[0] = VK_WINDOW_SPEED;
+		vel[0] = -1.0f;
 		break;
 	}
 
 	case WINDOW_KEY_D:
 	{
-		pos[0] = -VK_WINDOW_SPEED;
+		vel[0] = 1.0f;
 		break;
 	}
 
@@ -8746,7 +8794,7 @@ vk_window_key_up_fn(
 	}
 
 
-	simulation_modify_position(vk->simulation, pos);
+	simulation_modify_velocity(vk->simulation, vel);
 }
 
 

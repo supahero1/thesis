@@ -228,9 +228,9 @@ simulation_get_scale(
 
 
 extern void
-simulation_modify_position(
+simulation_modify_velocity(
 	simulation_t simulation,
-	vec3 pos
+	vec3 velocity
 	);
 
 

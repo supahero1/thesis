@@ -23,7 +23,11 @@
 
 	#include <valgrind/valgrind.h>
 #endif
-#define ALLOC_DEBUG
+
+#ifndef NDEBUG
+	#define ALLOC_DEBUG
+#endif
+
 #ifdef ALLOC_DEBUG
 	#include <stdlib.h>
 #else
