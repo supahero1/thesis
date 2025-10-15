@@ -18,13 +18,14 @@
 #include <thesis/hash.h>
 #include <thesis/time.h>
 #include <thesis/debug.h>
+#include <thesis/atomic.h>
 #include <thesis/collider.h>
 #include <thesis/alloc_ext.h>
 #include <thesis/simulation.h>
 
 #include <vips/vips.h>
 
-#include <stdatomic.h>
+#include <signal.h>
 
 #define SIMULATION_STATS_SIZE 64
 #define SIMULATION_MOVEMENT_SPEED 12.0f
@@ -70,10 +71,41 @@ struct simulation
 	stats_t stats;
 	collider_t collider;
 
-	atomic_flag stopped;
+	_Atomic bool stopped;
 
 	simulation_event_table_t event_table;
 };
+
+
+private _Atomic bool is_running;
+private pthread_once_t once = PTHREAD_ONCE_INIT;
+
+private void
+simulation_signal_handler(
+	int signum
+	)
+{
+	if(signum == SIGINT)
+	{
+		atomic_store_rel(&is_running, false);
+	}
+}
+
+
+private void
+simulation_init_once(
+	void
+	)
+{
+	atomic_store_rel(&is_running, true);
+
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGINT);
+	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+
+	signal(SIGINT, simulation_signal_handler);
+}
 
 
 private void
@@ -100,6 +132,8 @@ simulation_init(
 	const char* skybox_path
 	)
 {
+	pthread_once(&once, simulation_init_once);
+
 	int status = VIPS_INIT("thesis");
 	hard_assert_false(status);
 
@@ -129,7 +163,7 @@ simulation_init(
 
 	stats_add(simulation->stats, "simulation_update", SIMULATION_STATS_SIZE);
 
-	atomic_flag_clear(&simulation->stopped);
+	atomic_store_rel(&simulation->stopped, false);
 
 	event_target_init(&simulation->event_table.free_target);
 
@@ -877,6 +911,31 @@ simulation_modify_angle(
 }
 
 
+bool
+simulation_is_running(
+	simulation_t simulation
+	)
+{
+	assert_not_null(simulation);
+
+	return !atomic_load_acq(&simulation->stopped);
+}
+
+
+void
+simulation_check_signal(
+	simulation_t simulation
+	)
+{
+	assert_not_null(simulation);
+
+	if(!is_running)
+	{
+		simulation_stop(simulation);
+	}
+}
+
+
 void
 simulation_stop(
 	simulation_t simulation
@@ -884,7 +943,7 @@ simulation_stop(
 {
 	assert_not_null(simulation);
 
-	bool stopped = atomic_flag_test_and_set(&simulation->stopped);
+	bool stopped = atomic_exchange_acq_rel(&simulation->stopped, false, true);
 	if(stopped)
 	{
 		return;

@@ -475,7 +475,6 @@ struct vk
 	window;
 
 	thread_t thread;
-	_Atomic bool is_running;
 
 	PFN_vkGetInstanceProcAddr proc_addr_fn;
 
@@ -8457,9 +8456,10 @@ vk_thread_fn(
 {
 	assert_not_null(vk);
 
-	while(atomic_load_acq(&vk->is_running))
+	while(simulation_is_running(vk->simulation))
 	{
 		vk_draw(vk);
+		simulation_check_signal(vk->simulation);
 	}
 }
 
@@ -8470,8 +8470,6 @@ vk_init_thread(
 	)
 {
 	assert_not_null(vk);
-
-	atomic_init(&vk->is_running, true);
 
 	thread_data_t thread_data =
 	{
@@ -8489,9 +8487,7 @@ vk_free_thread(
 {
 	assert_not_null(vk);
 
-	atomic_store_rel(&vk->is_running, false);
 	thread_join(vk->thread);
-
 	thread_free(&vk->thread);
 }
 
@@ -8694,7 +8690,7 @@ vk_window_key_down_fn(
 			event_data->key == WINDOW_KEY_ESCAPE
 		)
 	{
-		window_close(vk->window.handle);
+		simulation_stop(vk->simulation);
 	}
 	else if(event_data->key == WINDOW_KEY_F11)
 	{

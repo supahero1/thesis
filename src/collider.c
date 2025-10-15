@@ -23,6 +23,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #define COLLIDER_MAP_SIZE 1000000.0f
 #define COLLIDER_STATS_SIZE 64
@@ -474,6 +475,11 @@ collider_ball_resolve(
 	if(pos.y < -1000.0f)
 	{
 		pos = (triplet_t){{ -1000.0f, 300.0f, -100.0f }};
+
+		triplet_t v = {{ (float) rand() / RAND_MAX - 0.5f,
+			(float) rand() / RAND_MAX - 0.5f,
+			(float) rand() / RAND_MAX - 0.5f }};
+		entity->v = triplet_scale(triplet_normalize(v), 10.0f);
 	}
 
 	entity->rect_extent =

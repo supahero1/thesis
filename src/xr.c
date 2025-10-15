@@ -31,7 +31,6 @@
 #define XR_USE_GRAPHICS_API_VULKAN
 #include <openxr/openxr_platform.h>
 
-#include <signal.h>
 #include <string.h>
 
 #define VK_STATS_SIZE 64
@@ -743,20 +742,6 @@ private VkPipelineColorBlendAttachmentState xr_vk_blending_attachment =
 	.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
 		VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
 };
-
-
-private _Atomic bool is_running;
-
-
-private void
-xr_signal_handler(
-	int signum
-	)
-{
-	(void) signum;
-
-	atomic_store_rel(&is_running, false);
-}
 
 
 private void
@@ -7891,7 +7876,7 @@ xr_update_controllers(
 }
 
 
-private void
+private bool
 xr_get_controller_pose(
 	xr_t xr,
 	xr_controller_t* controller,
@@ -7904,7 +7889,7 @@ xr_get_controller_pose(
 
 	if(!controller->active)
 	{
-		return;
+		return false;
 	}
 
 	XrSpaceLocation location = {XR_TYPE_SPACE_LOCATION};
@@ -7917,7 +7902,7 @@ xr_get_controller_pose(
 		)
 	{
 		controller->active = false;
-		return;
+		return false;
 	}
 
 	float scale = simulation_get_scale(xr->simulation);
@@ -7925,10 +7910,12 @@ xr_get_controller_pose(
 	pose->position.y = location.pose.position.y * scale;
 	pose->position.z = location.pose.position.z * scale;
 	pose->orientation = location.pose.orientation;
+
+	return true;
 }
 
 
-private void
+private bool
 xr_get_controller_joystick(
 	xr_t xr,
 	xr_controller_t* controller,
@@ -7943,7 +7930,7 @@ xr_get_controller_joystick(
 
 	if(!controller->active)
 	{
-		return;
+		return false;
 	}
 
 	XrActionStateGetInfo get_info =
@@ -7976,10 +7963,12 @@ xr_get_controller_joystick(
 	hard_assert_eq(result, XR_SUCCESS);
 
 	*joystick_click = click_state.currentState && click_state.isActive;
+
+	return true;
 }
 
 
-private void
+private bool
 xr_get_eye_poses(
 	xr_t xr,
 	XrPosef* left_pose,
@@ -8015,12 +8004,7 @@ xr_get_eye_poses(
 		(view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0
 		)
 	{
-		puts("Eye poses not valid");
-		glm_vec4_copy(GLM_QUAT_IDENTITY, (void*) &left_pose->orientation);
-		glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, (void*) &left_pose->position);
-		glm_vec4_copy(GLM_QUAT_IDENTITY, (void*) &right_pose->orientation);
-		glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, (void*) &right_pose->position);
-		return;
+		return false;
 	}
 
 	float scale = simulation_get_scale(xr->simulation);
@@ -8046,6 +8030,8 @@ xr_get_eye_poses(
 		views[0] = local_views[0];
 		views[1] = local_views[1];
 	}
+
+	return true;
 }
 
 
@@ -8723,7 +8709,11 @@ xr_draw(
 
 	XrPosef left_eye;
 	XrPosef right_eye;
-	xr_get_eye_poses(xr, &left_eye, &right_eye, views);
+	bool ok = xr_get_eye_poses(xr, &left_eye, &right_eye, views);
+	if(!ok)
+	{
+		goto goto_skip;
+	}
 
 	simulation_eye_pose_t left_eye_pose;
 	(void) memcpy(&left_eye_pose.rotation, &left_eye.orientation, sizeof(XrQuaternionf));
@@ -8740,7 +8730,11 @@ xr_draw(
 		XrVector2f vec;
 		bool clicked;
 
-		xr_get_controller_joystick(xr, &xr->controllers[1], &vec, &clicked);
+		bool ok = xr_get_controller_joystick(xr, &xr->controllers[1], &vec, &clicked);
+		if(!ok)
+		{
+			goto goto_skip;
+		}
 
 		vec3 velocity = { vec.x, clicked, -vec.y };
 		simulation_set_velocity(xr->simulation, velocity);
@@ -8859,6 +8853,8 @@ xr_draw(
 
 	result = xr->vk.table.vkQueueSubmit(xr->vk.queue, 1, &submit_info, xr->vk.barrier->fence);
 	hard_assert_eq(result, VK_SUCCESS);
+
+	goto_skip:;
 
 	XrSwapchainImageReleaseInfo release_info = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
 	xr_result = xrReleaseSwapchainImage(xr->vk.swapchain, &release_info);
@@ -9183,7 +9179,7 @@ xr_poll_events(
 			case XR_ERROR_VALIDATION_FAILURE:
 			{
 				printf("XR error %d, shutting down\n", result);
-				atomic_store_rel(&is_running, false);
+				simulation_stop(xr->simulation);
 				return;
 			}
 
@@ -9238,7 +9234,7 @@ xr_poll_events(
 					case XR_SESSION_STATE_LOSS_PENDING:
 					{
 						puts("XR session exiting or loss pending");
-						atomic_store_rel(&is_running, false);
+						simulation_stop(xr->simulation);
 						break;
 					}
 
@@ -9251,7 +9247,7 @@ xr_poll_events(
 			case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
 			{
 				puts("XR instance loss pending");
-				atomic_store_rel(&is_running, false);
+				simulation_stop(xr->simulation);
 				break;
 			}
 
@@ -9318,7 +9314,12 @@ xr_process_frame(
 
 	if(frame_state.shouldRender)
 	{
-		xr_get_eye_poses(xr, NULL, NULL, views);
+		bool ok = xr_get_eye_poses(xr, NULL, NULL, views);
+		if(!ok)
+		{
+			frame_state.shouldRender = false;
+			goto goto_skip;
+		}
 
 		xr_draw(xr, views);
 
@@ -9362,6 +9363,8 @@ xr_process_frame(
 		projection_layer.views = projection_views;
 	}
 
+	goto_skip:;
+
 	XrFrameEndInfo end_info =
 	{
 		.type = XR_TYPE_FRAME_END_INFO,
@@ -9383,20 +9386,12 @@ xr_session_thread_fn(
 {
 	assert_not_null(xr);
 
-	sigset_t set;
-	sigemptyset(&set);
-	sigaddset(&set, SIGINT);
-	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
-
-	signal(SIGINT, xr_signal_handler);
-
-	while(atomic_load_acq(&is_running))
+	while(simulation_is_running(xr->simulation))
 	{
 		xr_poll_events(xr);
 		xr_process_frame(xr);
+		simulation_check_signal(xr->simulation);
 	}
-
-	simulation_stop(xr->simulation);
 }
 
 
@@ -9406,13 +9401,6 @@ xr_init_xr_thread(
 	)
 {
 	assert_not_null(xr);
-
-	sigset_t set;
-	sigemptyset(&set);
-	sigaddset(&set, SIGINT);
-	pthread_sigmask(SIG_BLOCK, &set, NULL);
-
-	atomic_store_rel(&is_running, true);
 
 	thread_data_t data =
 	{
@@ -9430,9 +9418,7 @@ xr_free_xr_thread(
 {
 	assert_not_null(xr);
 
-	atomic_store_rel(&is_running, false);
 	thread_join(xr->thread);
-
 	thread_free(&xr->thread);
 }
 

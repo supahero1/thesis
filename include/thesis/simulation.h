@@ -249,6 +249,18 @@ simulation_modify_angle(
 	);
 
 
+extern bool
+simulation_is_running(
+	simulation_t simulation
+	);
+
+
+extern void
+simulation_check_signal(
+	simulation_t simulation
+	);
+
+
 extern void
 simulation_stop(
 	simulation_t simulation
