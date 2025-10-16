@@ -30,23 +30,14 @@
 #define COLLIDER_RESTITUTION 0.8f
 #define COLLISION_IMPULSE_FACTOR -(1.0f + COLLIDER_RESTITUTION)
 #define COLLIDER_VELOCITY_LIMIT 15.0f
+#define COLLIDER_FRICTION 0.4f
+#define COLLIDER_ANGULAR_DAMPING 0.995f
+#define COLLIDER_LOW_SPEED_THRESHOLD 0.5f
+#define COLLIDER_LOW_ANGULAR_THRESHOLD 0.1f
+#define COLLIDER_LOW_SPEED_DAMPING 0.99f
+#define COLLIDER_ROLL_ALIGN_FACTOR 0.1f
+#define COLLIDER_MAGNUS_FACTOR 0.001f
 
-
-typedef enum collider_contact_type
-{
-	COLLIDER_CONTACT_TYPE_VERTEX,
-	COLLIDER_CONTACT_TYPE_EDGE,
-	COLLIDER_CONTACT_TYPE_FACE,
-	MACRO_ENUM_BITS(COLLIDER_CONTACT_TYPE)
-}
-collider_contact_type_t;
-
-typedef struct collider_triangle_contact
-{
-	triplet_t point;
-	collider_contact_type_t type;
-}
-collider_triangle_contact_t;
 
 struct collider
 {
@@ -66,6 +57,7 @@ struct collider
 	float ball_radius;
 	float ball_diameter;
 	float ball_moment_inertia;
+	float inv_ball_moment_inertia;
 };
 
 
@@ -157,6 +149,7 @@ collider_add(
 		collider->ball_radius = (entity->rect_extent.max.x - entity->rect_extent.min.x) * 0.5f;
 		collider->ball_diameter = collider->ball_radius * 2.0f;
 		collider->ball_moment_inertia = 0.4f * collider->ball_mass * collider->ball_radius * collider->ball_radius;
+		collider->inv_ball_moment_inertia = 1.0f / collider->ball_moment_inertia;
 
 		printf("Basketball radius: %.02f\n", collider->ball_radius);
 	}
@@ -231,7 +224,7 @@ collider_query(
 }
 
 
-private collider_triangle_contact_t
+private triplet_t
 collider_closest_point_on_triangle(
 	triplet_t p,
 	triplet_t a,
@@ -247,7 +240,7 @@ collider_closest_point_on_triangle(
 	float d2 = triplet_dot(ac, ap);
 	if(d1 <= 0.0f && d2 <= 0.0f)
 	{
-		return (collider_triangle_contact_t){ .point = a, .type = COLLIDER_CONTACT_TYPE_VERTEX };
+		return a;
 	}
 
 	triplet_t bp = triplet_sub(p, b);
@@ -256,7 +249,7 @@ collider_closest_point_on_triangle(
 	float d4 = triplet_dot(ac, bp);
 	if(d3 >= 0.0f && d4 <= d3)
 	{
-		return (collider_triangle_contact_t){ .point = b, .type = COLLIDER_CONTACT_TYPE_VERTEX };
+		return b;
 	}
 
 	triplet_t cp = triplet_sub(p, c);
@@ -265,39 +258,35 @@ collider_closest_point_on_triangle(
 	float d6 = triplet_dot(ac, cp);
 	if(d6 >= 0.0f && d5 <= d6)
 	{
-		return (collider_triangle_contact_t){ .point = c, .type = COLLIDER_CONTACT_TYPE_VERTEX };
+		return c;
 	}
 
 	float vc = d1 * d4 - d3 * d2;
 	if(vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
 	{
 		float v = d1 / (d1 - d3);
-		triplet_t point = triplet_add(a, triplet_scale(ab, v));
-		return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_EDGE };
+		return triplet_add(a, triplet_scale(ab, v));
 	}
 
 	float vb = d5 * d2 - d1 * d6;
 	if(vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
 	{
 		float v = d2 / (d2 - d6);
-		triplet_t point = triplet_add(a, triplet_scale(ac, v));
-		return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_EDGE };
+		return triplet_add(a, triplet_scale(ac, v));
 	}
 
 	float va = d3 * d6 - d5 * d4;
 	if(va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
 	{
 		float v = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-		triplet_t point = triplet_add(b, triplet_scale(triplet_sub(c, b), v));
-		return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_EDGE };
+		return triplet_add(b, triplet_scale(triplet_sub(c, b), v));
 	}
 
 	float denom = 1.0f / (va + vb + vc);
 	float v = vb * denom;
 	float w = vc * denom;
-	triplet_t point = triplet_add(a, triplet_add(triplet_scale(ab, v), triplet_scale(ac, w)));
 
-	return (collider_triangle_contact_t){ .point = point, .type = COLLIDER_CONTACT_TYPE_FACE };
+	return triplet_add(a, triplet_add(triplet_scale(ab, v), triplet_scale(ac, w)));
 }
 
 
@@ -334,10 +323,10 @@ collider_ball_collide_entity(
 
 	if(entity_b->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
 	{
-		collider_triangle_contact_t contact = collider_closest_point_on_triangle(
+		triplet_t contact = collider_closest_point_on_triangle(
 			center_a, entity_b->v0, entity_b->v1, entity_b->v2);
 
-		triplet_t to_center = triplet_sub(center_a, contact.point);
+		triplet_t to_center = triplet_sub(center_a, contact);
 		float distance = triplet_length(to_center);
 
 		if(distance >= collider->ball_radius)
@@ -347,55 +336,56 @@ collider_ball_collide_entity(
 
 		entity_a->hit = true;
 
-		triplet_t collision_normal;
-
-		if(contact.type == COLLIDER_CONTACT_TYPE_FACE)
-		{
-			triplet_t ab = triplet_sub(entity_b->v1, entity_b->v0);
-			triplet_t ac = triplet_sub(entity_b->v2, entity_b->v0);
-			collision_normal = triplet_normalize(triplet_cross(ab, ac));
-			if(triplet_dot(collision_normal, to_center) < 0.0f)
-			{
-				collision_normal = triplet_negate(collision_normal);
-			}
-		}
-		else
-		{
-			collision_normal = triplet_normalize(to_center);
-		}
-
+		triplet_t collision_normal = triplet_normalize(to_center);
 		float penetration_depth = collider->ball_radius - distance;
-
-		float relative_velocity = triplet_dot(entity_a->v, collision_normal);
-
 		entity_a->pos_diff = triplet_add(entity_a->pos_diff, triplet_scale(collision_normal, penetration_depth));
 		++entity_a->pos_diff_count;
 
-		if(relative_velocity < 0.0f)
+		triplet_t relative_surface_vel = collider_get_surface_velocity(center_a, entity_a->v, entity_a->w, contact);
+		float relative_normal_vel = triplet_dot(relative_surface_vel, collision_normal);
+
+		if(relative_normal_vel >= 0.0f)
 		{
-			triplet_t impulse = triplet_scale(collision_normal, COLLISION_IMPULSE_FACTOR * relative_velocity);
-			entity_a->v_force = triplet_add(entity_a->v_force, impulse);
-			++entity_a->force_count;
+			return;
 		}
+
+		float impulse_j = COLLISION_IMPULSE_FACTOR * relative_normal_vel;
+		triplet_t normal_impulse_vec = triplet_scale(collision_normal, impulse_j);
+
+		triplet_t tangential_vel = triplet_sub(relative_surface_vel, triplet_scale(collision_normal, relative_normal_vel));
+		float tangential_speed = triplet_length(tangential_vel);
+		triplet_t friction_impulse_vec = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+
+		if(tangential_speed > 0.000001f)
+		{
+			triplet_t tangent_dir = triplet_scale(tangential_vel, 1.0f / tangential_speed);
+			float max_friction_j = COLLIDER_FRICTION * fabsf(impulse_j);
+			float friction_j = fminf(max_friction_j, tangential_speed);
+			friction_impulse_vec = triplet_scale(tangent_dir, -friction_j);
+		}
+
+		triplet_t total_impulse = triplet_add(normal_impulse_vec, friction_impulse_vec);
+		entity_a->v_force = triplet_add(entity_a->v_force, total_impulse);
+
+		triplet_t radius_vec = triplet_scale(collision_normal, -collider->ball_radius);
+		triplet_t torque_impulse = triplet_cross(radius_vec, friction_impulse_vec);
+		entity_a->w_force = triplet_add(entity_a->w_force, triplet_scale(torque_impulse, collider->inv_ball_moment_inertia));
+
+		++entity_a->force_count;
 	}
 	else /* COLLIDER_ENTITY_TYPE_SPHERE */
 	{
 		triplet_t center_b = rect_extent_3d_center(entity_b->rect_extent);
-
 		triplet_t penetration = triplet_sub(center_a, center_b);
-
 		float distance = triplet_length(penetration);
+
 		if(distance >= collider->ball_diameter)
 		{
 			return;
 		}
 
 		triplet_t normal = triplet_normalize(penetration);
-
 		float penetration_depth = collider->ball_diameter - distance;
-
-		triplet_t velocity_diff = triplet_sub(entity_a->v, entity_b->v);
-		float relative_velocity = triplet_dot(velocity_diff, normal);
 
 		float vel_a = fabsf(triplet_dot(entity_a->v, normal));
 		float vel_b = fabsf(triplet_dot(entity_b->v, normal));
@@ -405,28 +395,55 @@ collider_ball_collide_entity(
 		float ratio_b = 0.5f;
 		if(total_vel > 0.0001f)
 		{
-			ratio_a = vel_a / total_vel;
-			ratio_b = vel_b / total_vel;
+			ratio_a = vel_b / total_vel;
+			ratio_b = vel_a / total_vel;
 		}
 
 		triplet_t pos_diff_a = triplet_scale(normal, penetration_depth * ratio_a);
 		triplet_t pos_diff_b = triplet_scale(normal, penetration_depth * ratio_b);
-
 		entity_a->pos_diff = triplet_add(entity_a->pos_diff, pos_diff_a);
 		++entity_a->pos_diff_count;
-
 		entity_b->pos_diff = triplet_sub(entity_b->pos_diff, pos_diff_b);
 		++entity_b->pos_diff_count;
 
-		if(relative_velocity >= 0.0f)
+		triplet_t r_a = triplet_scale(normal, -collider->ball_radius);
+		triplet_t r_b = triplet_scale(normal, collider->ball_radius);
+		triplet_t v_a_contact = triplet_add(entity_a->v, triplet_cross(entity_a->w, r_a));
+		triplet_t v_b_contact = triplet_add(entity_b->v, triplet_cross(entity_b->w, r_b));
+		triplet_t relative_surface_vel = triplet_sub(v_a_contact, v_b_contact);
+
+		float relative_normal_vel = triplet_dot(relative_surface_vel, normal);
+		if(relative_normal_vel >= 0.0f)
 		{
 			return;
 		}
 
-		triplet_t v_force = triplet_scale(normal, COLLISION_IMPULSE_FACTOR * relative_velocity * 0.5f);
-		entity_a->v_force = triplet_add(entity_a->v_force, v_force);
+		float impulse_j = COLLISION_IMPULSE_FACTOR * relative_normal_vel;
+		triplet_t normal_impulse_vec = triplet_scale(normal, impulse_j * 0.5f);
+
+		triplet_t tangential_vel = triplet_sub(relative_surface_vel, triplet_scale(normal, relative_normal_vel));
+		float tangential_speed = triplet_length(tangential_vel);
+		triplet_t friction_impulse_vec = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+
+		if(tangential_speed > 0.000001f)
+		{
+			triplet_t tangent_dir = triplet_scale(tangential_vel, 1.0f / tangential_speed);
+			float max_friction_j = COLLIDER_FRICTION * fabsf(impulse_j);
+			float friction_j = fminf(max_friction_j, tangential_speed);
+			friction_impulse_vec = triplet_scale(tangent_dir, -friction_j * 0.5f);
+		}
+
+		triplet_t total_impulse_a = triplet_add(normal_impulse_vec, friction_impulse_vec);
+		entity_a->v_force = triplet_add(entity_a->v_force, total_impulse_a);
+		entity_b->v_force = triplet_sub(entity_b->v_force, total_impulse_a);
+
+		triplet_t torque_impulse_a = triplet_cross(r_a, friction_impulse_vec);
+		triplet_t torque_impulse_b = triplet_cross(r_b, triplet_negate(friction_impulse_vec));
+
+		entity_a->w_force = triplet_add(entity_a->w_force, triplet_scale(torque_impulse_a, collider->inv_ball_moment_inertia));
+		entity_b->w_force = triplet_add(entity_b->w_force, triplet_scale(torque_impulse_b, collider->inv_ball_moment_inertia));
+
 		++entity_a->force_count;
-		entity_b->v_force = triplet_sub(entity_b->v_force, v_force);
 		++entity_b->force_count;
 	}
 }
@@ -454,20 +471,51 @@ collider_ball_resolve(
 
 	if(entity->force_count)
 	{
-		entity->v_force = triplet_scale(entity->v_force, 1.0f / entity->force_count);
+		float inv_force_count = 1.0f / entity->force_count;
+		entity->v_force = triplet_scale(entity->v_force, inv_force_count);
+		entity->w_force = triplet_scale(entity->w_force, inv_force_count);
 		entity->force_count = 0;
 	}
 
 	entity->v = triplet_add(entity->v, entity->v_force);
+	entity->w = triplet_add(entity->w, entity->w_force);
 	entity->v_force = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+	entity->w_force = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+
+	if(entity->hit)
+	{
+		if(triplet_length(entity->w) > COLLIDER_LOW_ANGULAR_THRESHOLD)
+		{
+			triplet_t ideal_roll_axis = triplet_cross((triplet_t){{ 0.0f, 1.0f, 0.0f }}, entity->v);
+			triplet_t ideal_w = triplet_scale(ideal_roll_axis, 1.0f / collider->ball_radius);
+
+			entity->w = triplet_add(
+				triplet_scale(entity->w, 1.0f - COLLIDER_ROLL_ALIGN_FACTOR),
+				triplet_scale(ideal_w, COLLIDER_ROLL_ALIGN_FACTOR));
+		}
+	}
+	else
+	{
+		triplet_t magnus_force = triplet_cross(entity->w, entity->v);
+		entity->v = triplet_add(entity->v, triplet_scale(magnus_force, COLLIDER_MAGNUS_FACTOR));
+	}
 
 	triplet_t a = (triplet_t){{ 0.0f, -0.1f, 0.0f }};
 	entity->v = triplet_add(entity->v, triplet_scale(a, collider->delta));
+	entity->w = triplet_scale(entity->w, COLLIDER_ANGULAR_DAMPING);
 
 	float speed = triplet_length(entity->v);
 	if(speed > COLLIDER_VELOCITY_LIMIT)
 	{
 		entity->v = triplet_scale(entity->v, COLLIDER_VELOCITY_LIMIT / speed);
+	}
+	else if(
+		speed < COLLIDER_LOW_SPEED_THRESHOLD &&
+		triplet_length(entity->w) < COLLIDER_LOW_ANGULAR_THRESHOLD
+		)
+	{
+		entity->v = triplet_scale(entity->v, COLLIDER_LOW_SPEED_DAMPING);
+		entity->w = triplet_scale(entity->w, COLLIDER_LOW_SPEED_DAMPING);
 	}
 
 	pos = triplet_add(pos, triplet_scale(entity->v, collider->delta));
@@ -480,6 +528,8 @@ collider_ball_resolve(
 			(float) rand() / RAND_MAX - 0.5f,
 			(float) rand() / RAND_MAX - 0.5f }};
 		entity->v = triplet_scale(triplet_normalize(v), 10.0f);
+
+		entity->w = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
 	}
 
 	entity->rect_extent =

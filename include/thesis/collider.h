@@ -48,6 +48,7 @@ typedef struct collider_entity
 			uint32_t force_count;
 			triplet_t pos_diff;
 			triplet_t v_force;
+			triplet_t w_force;
 			triplet_t v;
 			triplet_t w;
 			bool hit;
