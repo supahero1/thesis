@@ -26,6 +26,7 @@
 #include <stdlib.h>
 
 #define COLLIDER_MAP_SIZE 1000000.0f
+#define COLLIDER_FIST_SIZE 2.0f
 #define COLLIDER_STATS_SIZE 64
 #define COLLIDER_RESTITUTION 0.8f
 #define COLLISION_IMPULSE_FACTOR -(1.0f + COLLIDER_RESTITUTION)
@@ -46,7 +47,8 @@ struct collider
 	float delta;
 
 	collider_entity_t* balls;
-	uint32_t balls_count;
+	uint32_t balls_used;
+	uint32_t balls_size;
 
 	collider_entity_t** query_entities;
 	uint32_t query_entities_used;
@@ -58,6 +60,11 @@ struct collider
 	float ball_diameter;
 	float ball_moment_inertia;
 	float inv_ball_moment_inertia;
+
+	float fist_radius;
+	triplet_t fist_pos;
+	triplet_t fist_v;
+	bool fist;
 };
 
 
@@ -101,7 +108,7 @@ collider_free(
 
 	alloc_free(collider->query_entities, collider->query_entities_size);
 
-	alloc_free(collider->balls, collider->balls_count);
+	alloc_free(collider->balls, collider->balls_size);
 
 	stats_del(collider->stats, "collider_resolve");
 	stats_del(collider->stats, "collider_collide");
@@ -139,10 +146,22 @@ collider_add(
 		return;
 	}
 
-	collider->balls = alloc_remalloc(collider->balls, collider->balls_count, collider->balls_count + 1);
-	assert_not_null(collider->balls);
+	if(collider->balls_used >= collider->balls_size)
+	{
+		uint32_t new_size = (collider->balls_size << 1) | 1;
 
-	collider->balls[collider->balls_count++] = *entity;
+		collider->balls = alloc_remalloc(collider->balls, collider->balls_size, new_size);
+		assert_not_null(collider->balls);
+
+		collider->balls_size = new_size;
+	}
+
+	collider->balls[collider->balls_used++] = *entity;
+
+	if(entity->type == COLLIDER_ENTITY_TYPE_FIST)
+	{
+		return;
+	}
 
 	if(collider->ball_radius == 0.0f)
 	{
@@ -150,6 +169,8 @@ collider_add(
 		collider->ball_diameter = collider->ball_radius * 2.0f;
 		collider->ball_moment_inertia = 0.4f * collider->ball_mass * collider->ball_radius * collider->ball_radius;
 		collider->inv_ball_moment_inertia = 1.0f / collider->ball_moment_inertia;
+
+		collider->fist_radius = collider->ball_radius * COLLIDER_FIST_SIZE;
 
 		printf("Basketball radius: %.02f\n", collider->ball_radius);
 	}
@@ -321,7 +342,11 @@ collider_ball_collide_entity(
 
 	triplet_t center_a = rect_extent_3d_center(entity_a->rect_extent);
 
-	if(entity_b->type == COLLIDER_ENTITY_TYPE_TRIANGLE)
+
+	switch(entity_b->type)
+	{
+
+	case  COLLIDER_ENTITY_TYPE_TRIANGLE:
 	{
 		triplet_t contact = collider_closest_point_on_triangle(
 			center_a, entity_b->v0, entity_b->v1, entity_b->v2);
@@ -331,7 +356,7 @@ collider_ball_collide_entity(
 
 		if(distance >= collider->ball_radius)
 		{
-			return;
+			break;
 		}
 
 		entity_a->hit = true;
@@ -346,7 +371,7 @@ collider_ball_collide_entity(
 
 		if(relative_normal_vel >= 0.0f)
 		{
-			return;
+			break;
 		}
 
 		float impulse_j = COLLISION_IMPULSE_FACTOR * relative_normal_vel;
@@ -372,8 +397,11 @@ collider_ball_collide_entity(
 		entity_a->w_force = triplet_add(entity_a->w_force, triplet_scale(torque_impulse, collider->inv_ball_moment_inertia));
 
 		++entity_a->force_count;
+
+		break;
 	}
-	else /* COLLIDER_ENTITY_TYPE_SPHERE */
+
+	case COLLIDER_ENTITY_TYPE_SPHERE:
 	{
 		triplet_t center_b = rect_extent_3d_center(entity_b->rect_extent);
 		triplet_t penetration = triplet_sub(center_a, center_b);
@@ -381,7 +409,7 @@ collider_ball_collide_entity(
 
 		if(distance >= collider->ball_diameter)
 		{
-			return;
+			break;
 		}
 
 		triplet_t normal = triplet_normalize(penetration);
@@ -415,7 +443,7 @@ collider_ball_collide_entity(
 		float relative_normal_vel = triplet_dot(relative_surface_vel, normal);
 		if(relative_normal_vel >= 0.0f)
 		{
-			return;
+			break;
 		}
 
 		float impulse_j = COLLISION_IMPULSE_FACTOR * relative_normal_vel;
@@ -445,6 +473,71 @@ collider_ball_collide_entity(
 
 		++entity_a->force_count;
 		++entity_b->force_count;
+
+		break;
+	}
+
+	case COLLIDER_ENTITY_TYPE_FIST:
+	{
+		triplet_t center_b = rect_extent_3d_center(entity_b->rect_extent);
+		triplet_t penetration = triplet_sub(center_a, center_b);
+		float distance = triplet_length(penetration);
+		float collision_distance = collider->ball_radius + collider->fist_radius;
+
+		if(distance >= collision_distance)
+		{
+			break;
+		}
+
+		entity_a->hit = true;
+
+		triplet_t collision_normal = triplet_normalize(penetration);
+		float penetration_depth = collision_distance - distance;
+
+		entity_a->pos_diff = triplet_add(entity_a->pos_diff, triplet_scale(collision_normal, penetration_depth));
+		++entity_a->pos_diff_count;
+
+		triplet_t contact_point = triplet_sub(center_a, triplet_scale(collision_normal, collider->ball_radius));
+		triplet_t v_a_contact = collider_get_surface_velocity(center_a, entity_a->v, entity_a->w, contact_point);
+		triplet_t v_b_contact = entity_b->v;
+		triplet_t relative_surface_vel = triplet_sub(v_a_contact, v_b_contact);
+
+		float relative_normal_vel = triplet_dot(relative_surface_vel, collision_normal);
+
+		if(relative_normal_vel >= 0.0f)
+		{
+			break;
+		}
+
+		float impulse_j = COLLISION_IMPULSE_FACTOR * relative_normal_vel;
+		triplet_t normal_impulse_vec = triplet_scale(collision_normal, impulse_j);
+
+		triplet_t tangential_vel = triplet_sub(relative_surface_vel, triplet_scale(collision_normal, relative_normal_vel));
+		float tangential_speed = triplet_length(tangential_vel);
+		triplet_t friction_impulse_vec = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+
+		if(tangential_speed > 0.000001f)
+		{
+			triplet_t tangent_dir = triplet_scale(tangential_vel, 1.0f / tangential_speed);
+			float max_friction_j = COLLIDER_FRICTION * fabsf(impulse_j);
+			float friction_j = fminf(max_friction_j, tangential_speed);
+			friction_impulse_vec = triplet_scale(tangent_dir, -friction_j);
+		}
+
+		triplet_t total_impulse = triplet_add(normal_impulse_vec, friction_impulse_vec);
+		entity_a->v_force = triplet_add(entity_a->v_force, total_impulse);
+
+		triplet_t radius_vec = triplet_scale(collision_normal, -collider->ball_radius);
+		triplet_t torque_impulse = triplet_cross(radius_vec, friction_impulse_vec);
+		entity_a->w_force = triplet_add(entity_a->w_force, triplet_scale(torque_impulse, collider->inv_ball_moment_inertia));
+
+		++entity_a->force_count;
+
+		break;
+	}
+
+	default: assert_unreachable();
+
 	}
 }
 
@@ -566,7 +659,7 @@ collider_collide(
 	assert_not_null(collider);
 
 	collider_entity_t* ball = collider->balls;
-	collider_entity_t* ball_end = ball + collider->balls_count;
+	collider_entity_t* ball_end = ball + collider->balls_used;
 
 	while(ball != ball_end)
 	{
@@ -601,7 +694,7 @@ collider_resolve(
 	assert_not_null(collider);
 
 	collider_entity_t* ball = collider->balls;
-	collider_entity_t* ball_end = ball + collider->balls_count;
+	collider_entity_t* ball_end = ball + collider->balls_used;
 
 	while(ball != ball_end)
 	{
@@ -609,6 +702,43 @@ collider_resolve(
 
 		++ball;
 	}
+}
+
+
+private void
+collider_add_fist(
+	collider_t collider
+	)
+{
+	assert_not_null(collider);
+
+	half_extent_3d_t extent =
+	{
+		.pos = collider->fist_pos,
+		.size = {{ collider->fist_radius, collider->fist_radius, collider->fist_radius }}
+	};
+
+	collider_entity_t entity =
+	{
+		.type = COLLIDER_ENTITY_TYPE_FIST,
+
+		.rect_extent = half_to_rect_3d_extent(extent),
+
+		.v = collider->fist_v
+	};
+
+	collider_add(collider, &entity);
+}
+
+
+private void
+collider_del_fist(
+	collider_t collider
+	)
+{
+	assert_not_null(collider);
+
+	--collider->balls_used;
 }
 
 
@@ -620,6 +750,11 @@ collider_update(
 {
 	collider->delta = delta;
 
+	if(collider->fist)
+	{
+		collider_add_fist(collider);
+	}
+
 	uint64_t start = time_get();
 	octree_normalize(&collider->octree);
 	stats_log(collider->stats, "collider_normalize", time_get() - start);
@@ -628,7 +763,27 @@ collider_update(
 	collider_collide(collider);
 	stats_log(collider->stats, "collider_collide", time_get() - start);
 
+	if(collider->fist)
+	{
+		collider_del_fist(collider);
+	}
+
 	start = time_get();
 	collider_resolve(collider);
 	stats_log(collider->stats, "collider_resolve", time_get() - start);
+}
+
+
+void
+collider_set_fist(
+	collider_t collider,
+	triplet_t pos,
+	bool fist
+	)
+{
+	assert_not_null(collider);
+
+	collider->fist_v = triplet_sub(pos, collider->fist_pos);
+	collider->fist_pos = pos;
+	collider->fist = fist;
 }

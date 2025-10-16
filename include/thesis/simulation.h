@@ -271,3 +271,11 @@ extern void
 simulation_update(
 	simulation_t simulation
 	);
+
+
+extern void
+simulation_set_fist(
+	simulation_t simulation,
+	vec3 pos,
+	bool fist
+	);

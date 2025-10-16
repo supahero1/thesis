@@ -43,6 +43,7 @@
 
 #define XR_STAGING_BUFFER_SIZE 1 * 1024 * 1024
 #define XR_JOYSTICK_DEADZONE 0.1f
+#define XR_ACTIVATION_VALUE_THRESHOLD 0.75f
 
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
@@ -480,6 +481,8 @@ struct xr
 
 	XrActionSet action_set;
 	XrAction action_pose;
+	XrAction action_squeeze;
+	XrAction action_trigger;
 	XrAction action_joystick;
 	XrAction action_joystick_click;
 
@@ -7969,6 +7972,45 @@ xr_get_controller_joystick(
 
 
 private bool
+xr_get_controller_fist(
+	xr_t xr,
+	xr_controller_t* controller
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(controller);
+
+	if(!controller->active)
+	{
+		return false;
+	}
+
+	XrActionStateGetInfo get_info =
+	{
+		.type = XR_TYPE_ACTION_STATE_GET_INFO,
+		.next = NULL,
+		.action = xr->action_squeeze,
+		.subactionPath = controller->path
+	};
+
+	XrActionStateFloat state = {XR_TYPE_ACTION_STATE_FLOAT};
+	XrResult result = xrGetActionStateFloat(xr->session, &get_info, &state);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	if(state.currentState < XR_ACTIVATION_VALUE_THRESHOLD)
+	{
+		return false;
+	}
+
+	get_info.action = xr->action_trigger;
+	result = xrGetActionStateFloat(xr->session, &get_info, &state);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	return state.currentState >= XR_ACTIVATION_VALUE_THRESHOLD;
+}
+
+
+private bool
 xr_get_eye_poses(
 	xr_t xr,
 	XrPosef* left_pose,
@@ -8725,6 +8767,9 @@ xr_draw(
 	(void) memcpy(&right_eye_pose.position, &right_eye.position, sizeof(XrVector3f));
 	(void) memcpy(&right_eye_pose.fov, &views[1].fov, sizeof(XrFovf));
 
+	vec3 fist_pos;
+	bool fist = false;
+
 	if(xr->controllers[1].active)
 	{
 		XrVector2f vec;
@@ -8736,12 +8781,24 @@ xr_draw(
 			goto goto_skip;
 		}
 
+		XrPosef pose;
+		ok = xr_get_controller_pose(xr, &xr->controllers[1], &pose);
+		if(!ok)
+		{
+			goto goto_skip;
+		}
+
 		vec3 velocity = { vec.x, clicked, -vec.y };
 		simulation_set_velocity(xr->simulation, velocity);
+
+		(void) memcpy(fist_pos, &pose.position.x, sizeof(fist_pos));
+		fist = xr_get_controller_fist(xr, &xr->controllers[1]);
 	}
 
 	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(
 		xr->simulation, xr->vk.screen_extent.pair, left_eye_pose, right_eye_pose);
+
+	simulation_set_fist(xr->simulation, fist_pos, fist);
 
 	simulation_update(xr->simulation);
 
@@ -8838,6 +8895,8 @@ xr_draw(
 	glm_mat4_mul(skybox_vert_ubo_data.transform[1], view_right, skybox_vert_ubo_data.transform[1]);
 	xr_copy_to_buffer(xr, &frame->output.vert_ubo.buffer, &skybox_vert_ubo_data, 1);
 
+	goto_skip:;
+
 	VkSubmitInfo submit_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -8853,8 +8912,6 @@ xr_draw(
 
 	result = xr->vk.table.vkQueueSubmit(xr->vk.queue, 1, &submit_info, xr->vk.barrier->fence);
 	hard_assert_eq(result, VK_SUCCESS);
-
-	goto_skip:;
 
 	XrSwapchainImageReleaseInfo release_info = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
 	xr_result = xrReleaseSwapchainImage(xr->vk.swapchain, &release_info);
@@ -9016,7 +9073,7 @@ xr_init_xr_controllers(
 	XrResult result = xrCreateActionSet(xr->instance, &action_set_info, &xr->action_set);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	XrActionCreateInfo pose_action_info =
+	XrActionCreateInfo action_info =
 	{
 		.type = XR_TYPE_ACTION_CREATE_INFO,
 		.next = NULL,
@@ -9024,13 +9081,44 @@ xr_init_xr_controllers(
 		.countSubactionPaths = 2,
 		.subactionPaths = paths
 	};
-	(void) strcpy(pose_action_info.actionName, "hand_pose");
-	(void) strcpy(pose_action_info.localizedActionName, "Hand Pose");
+	(void) strcpy(action_info.actionName, "hand_pose");
+	(void) strcpy(action_info.localizedActionName, "Hand Pose");
 
-	result = xrCreateAction(xr->action_set, &pose_action_info, &xr->action_pose);
+	result = xrCreateAction(xr->action_set, &action_info, &xr->action_pose);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	XrActionCreateInfo action_info =
+	action_info =
+	(XrActionCreateInfo)
+	{
+		.type = XR_TYPE_ACTION_CREATE_INFO,
+		.next = NULL,
+		.actionType = XR_ACTION_TYPE_FLOAT_INPUT,
+		.countSubactionPaths = 2,
+		.subactionPaths = paths
+	};
+	(void) strcpy(action_info.actionName, "squeeze");
+	(void) strcpy(action_info.localizedActionName, "Squeeze");
+
+	result = xrCreateAction(xr->action_set, &action_info, &xr->action_squeeze);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	action_info =
+	(XrActionCreateInfo)
+	{
+		.type = XR_TYPE_ACTION_CREATE_INFO,
+		.next = NULL,
+		.actionType = XR_ACTION_TYPE_FLOAT_INPUT,
+		.countSubactionPaths = 2,
+		.subactionPaths = paths
+	};
+	(void) strcpy(action_info.actionName, "trigger");
+	(void) strcpy(action_info.localizedActionName, "Trigger");
+
+	result = xrCreateAction(xr->action_set, &action_info, &xr->action_trigger);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	action_info =
+	(XrActionCreateInfo)
 	{
 		.type = XR_TYPE_ACTION_CREATE_INFO,
 		.next = NULL,
@@ -9059,25 +9147,37 @@ xr_init_xr_controllers(
 	result = xrCreateAction(xr->action_set, &action_info, &xr->action_joystick_click);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	XrActionSuggestedBinding bindings[6];
+	XrActionSuggestedBinding bindings[10];
 
 	xrStringToPath(xr->instance, "/user/hand/left/input/grip/pose", &bindings[0].binding);
 	bindings[0].action = xr->action_pose;
 
-	xrStringToPath(xr->instance, "/user/hand/left/input/thumbstick", &bindings[1].binding);
-	bindings[1].action = xr->action_joystick;
+	xrStringToPath(xr->instance, "/user/hand/left/input/squeeze/value", &bindings[1].binding);
+	bindings[1].action = xr->action_squeeze;
 
-	xrStringToPath(xr->instance, "/user/hand/left/input/thumbstick/click", &bindings[2].binding);
-	bindings[2].action = xr->action_joystick_click;
+	xrStringToPath(xr->instance, "/user/hand/left/input/trigger/value", &bindings[2].binding);
+	bindings[2].action = xr->action_trigger;
 
-	xrStringToPath(xr->instance, "/user/hand/right/input/grip/pose", &bindings[3].binding);
-	bindings[3].action = xr->action_pose;
+	xrStringToPath(xr->instance, "/user/hand/left/input/thumbstick", &bindings[3].binding);
+	bindings[3].action = xr->action_joystick;
 
-	xrStringToPath(xr->instance, "/user/hand/right/input/thumbstick", &bindings[4].binding);
-	bindings[4].action = xr->action_joystick;
+	xrStringToPath(xr->instance, "/user/hand/left/input/thumbstick/click", &bindings[4].binding);
+	bindings[4].action = xr->action_joystick_click;
 
-	xrStringToPath(xr->instance, "/user/hand/right/input/thumbstick/click", &bindings[5].binding);
-	bindings[5].action = xr->action_joystick_click;
+	xrStringToPath(xr->instance, "/user/hand/right/input/grip/pose", &bindings[5].binding);
+	bindings[5].action = xr->action_pose;
+
+	xrStringToPath(xr->instance, "/user/hand/right/input/squeeze/value", &bindings[6].binding);
+	bindings[6].action = xr->action_squeeze;
+
+	xrStringToPath(xr->instance, "/user/hand/right/input/trigger/value", &bindings[7].binding);
+	bindings[7].action = xr->action_trigger;
+
+	xrStringToPath(xr->instance, "/user/hand/right/input/thumbstick", &bindings[8].binding);
+	bindings[8].action = xr->action_joystick;
+
+	xrStringToPath(xr->instance, "/user/hand/right/input/thumbstick/click", &bindings[9].binding);
+	bindings[9].action = xr->action_joystick_click;
 
 	XrPath profile_path;
 	xrStringToPath(xr->instance, "/interaction_profiles/oculus/touch_controller", &profile_path);
@@ -9143,6 +9243,12 @@ xr_free_xr_controllers(
 	hard_assert_eq(result, XR_SUCCESS);
 
 	result = xrDestroyAction(xr->action_joystick);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	result = xrDestroyAction(xr->action_trigger);
+	hard_assert_eq(result, XR_SUCCESS);
+
+	result = xrDestroyAction(xr->action_squeeze);
 	hard_assert_eq(result, XR_SUCCESS);
 
 	result = xrDestroyAction(xr->action_pose);

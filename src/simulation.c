@@ -383,10 +383,10 @@ simulation_add_collider_entity(
 		.pos_external = (void*) &entity->translation,
 		.rotation_external = (void*) &entity->rotation,
 		.pos_diff_count = 0,
-		// .vw_diff_count = 0,
+		.force_count = 0,
 		.pos_diff = {{ 0.0f, 0.0f, 0.0f }},
 		.v_force = {{ 0.0f, 0.0f, 0.0f }},
-		// .w_diff = {{ 0.0f, 0.0f, 0.0f }},
+		.w_force = {{ 0.0f, 0.0f, 0.0f }},
 		.v = v,
 		.w = w
 	};
@@ -1015,4 +1015,19 @@ simulation_update(
 	stats_log(simulation->stats, "simulation_update", time_get() - now);
 
 	sync_mtx_unlock(&simulation->mutex);
+}
+
+
+void
+simulation_set_fist(
+	simulation_t simulation,
+	vec3 pos,
+	bool fist
+	)
+{
+	assert_not_null(simulation);
+
+	triplet_t actual_pos = triplet_add(*(triplet_t*) pos, *(triplet_t*) simulation->camera.pos);
+
+	collider_set_fist(simulation->collider, actual_pos, fist);
 }

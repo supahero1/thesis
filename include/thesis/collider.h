@@ -28,6 +28,7 @@ typedef enum collider_entity_type
 {
 	COLLIDER_ENTITY_TYPE_TRIANGLE,
 	COLLIDER_ENTITY_TYPE_SPHERE,
+	COLLIDER_ENTITY_TYPE_FIST,
 	MACRO_ENUM_BITS(COLLIDER_ENTITY_TYPE)
 }
 collider_entity_type_t;
@@ -98,4 +99,12 @@ extern void
 collider_update(
 	collider_t collider,
 	float delta
+	);
+
+
+extern void
+collider_set_fist(
+	collider_t collider,
+	triplet_t pos,
+	bool fist
 	);
