@@ -7991,7 +7991,7 @@ xr_get_controller_hand_state(
 	{
 		.type = XR_TYPE_ACTION_STATE_GET_INFO,
 		.next = NULL,
-		.action = xr->action_trigger,
+		.action = xr->action_squeeze,
 		.subactionPath = controller->path
 	};
 
@@ -8001,7 +8001,7 @@ xr_get_controller_hand_state(
 
 	if(state.currentState >= XR_ACTIVATION_VALUE_THRESHOLD)
 	{
-		get_info.action = xr->action_squeeze;
+		get_info.action = xr->action_trigger;
 		result = xrGetActionStateFloat(xr->session, &get_info, &state);
 		hard_assert_eq(result, XR_SUCCESS);
 

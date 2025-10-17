@@ -977,7 +977,7 @@ simulation_update(
 	float delta = (float)(now - simulation->last_update) / time_ms_to_ns(1) / 16.66667f;
 	simulation->last_update = now;
 
-	triplet_t a = (triplet_t){{ 0.0f, -0.1f, 0.0f }};
+	triplet_t a = (triplet_t){{ 0.0f, -0.08f, 0.0f }};
 	simulation->v = triplet_add(simulation->v, triplet_scale(a, delta));
 
 	if(simulation->camera.pos[1] == 0.0f)

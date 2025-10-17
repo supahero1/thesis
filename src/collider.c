@@ -27,7 +27,9 @@
 #include <stdlib.h>
 
 #define COLLIDER_MAP_SIZE 1000000.0f
-#define COLLIDER_FIST_SIZE 2.0f
+#define COLLIDER_HAND_SIZE 2.0f
+#define COLLIDER_HAND_V_COUNT 10
+#define COLLIDER_HAND_V_MULTIPLIER 2.0f
 #define COLLIDER_STATS_SIZE 64
 #define COLLIDER_RESTITUTION 0.8f
 #define COLLISION_IMPULSE_FACTOR -(1.0f + COLLIDER_RESTITUTION)
@@ -64,7 +66,10 @@ struct collider
 
 	float hand_radius;
 	triplet_t hand_pos;
+	triplet_t hand_vs[COLLIDER_HAND_V_COUNT];
 	triplet_t hand_v;
+	uint32_t hand_v_count;
+	uint32_t hand_v_index;
 	bool fist;
 	bool grab;
 };
@@ -172,7 +177,7 @@ collider_add(
 		collider->ball_moment_inertia = 0.4f * collider->ball_mass * collider->ball_radius * collider->ball_radius;
 		collider->inv_ball_moment_inertia = 1.0f / collider->ball_moment_inertia;
 
-		collider->hand_radius = collider->ball_radius * COLLIDER_FIST_SIZE;
+		collider->hand_radius = collider->ball_radius * COLLIDER_HAND_SIZE;
 
 		printf("Basketball radius: %.02f\n", collider->ball_radius);
 	}
@@ -856,7 +861,23 @@ collider_set_hand(
 {
 	assert_not_null(collider);
 
-	collider->hand_v = triplet_sub(pos, collider->hand_pos);
+	collider->hand_vs[collider->hand_v_index] = triplet_scale(triplet_sub(pos, collider->hand_pos), COLLIDER_HAND_V_MULTIPLIER);
+	collider->hand_v_index = (collider->hand_v_index + 1) % COLLIDER_HAND_V_COUNT;
+	collider->hand_v_count = MACRO_MIN(collider->hand_v_count + 1, COLLIDER_HAND_V_COUNT);
+
+	triplet_t avg_v = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+	for(uint32_t i = 0; i < COLLIDER_HAND_V_COUNT; ++i)
+	{
+		avg_v = triplet_add(avg_v, collider->hand_vs[i]);
+	}
+
+	if(collider->hand_v_count > 0)
+	{
+		avg_v = triplet_scale(avg_v, 1.0f / collider->hand_v_count);
+	}
+
+	collider->hand_v = avg_v;
+
 	collider->hand_pos = pos;
 	collider->fist = fist;
 	collider->grab = grab;
