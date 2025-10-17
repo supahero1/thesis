@@ -103,17 +103,6 @@ app_init(
 			.near = 100.0f,
 			.far = 20000.0f
 		},
-		// (simulation_light_t)
-		// {
-		// 	.pos = { 2500.0f, 500.0f, 5000.0f },
-		// 	.target = { 0.0f, 0.0f, 0.0f },
-		// 	.left = -5000.0f,
-		// 	.right = 1000.0f,
-		// 	.bottom = -800.0f,
-		// 	.top = 500.0f,
-		// 	.near = 100.0f,
-		// 	.far = 20000.0f
-		// },
 		"assets/skybox-clouds-in-the-sky-spatial-io"
 		);
 
@@ -125,11 +114,9 @@ app_init(
 		(simulation_entity_init_t)
 		{
 			.model_path = "assets/basketball_court_set/scene.gltf",
-			// .model_path = "assets/basketball_court__low-poly/scene.gltf",
 			.translation = { 0.0f, 0.0f, 0.0f },
 			.rotation = { 0.0f, 0.0f, 0.0f },
 			.scale = 1.0f,
-			// .scale = 1000.0f,
 			.dynamic = false
 		}
 		);

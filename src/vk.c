@@ -827,7 +827,7 @@ vk_init_options(
 	printf("- ssao_debug: %d\n", vk->options.ssao_debug);
 
 	vk->options.ssao_scale =
-		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 1.0f);
+		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 0.4f);
 	printf("- ssao_scale: %.2f\n", vk->options.ssao_scale);
 
 	vk->options.ssao_blur_radius =
