@@ -8911,6 +8911,12 @@ xr_draw(
 
 	goto_skip:;
 
+	if(!xr->vk.recorded_commands)
+	{
+		xr_record_all_command_buffers(xr, entity_data);
+		xr->vk.recorded_commands = true;
+	}
+
 	VkSubmitInfo submit_info =
 	{
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
