@@ -43,7 +43,7 @@
 
 #define XR_STAGING_BUFFER_SIZE 1 * 1024 * 1024
 #define XR_JOYSTICK_DEADZONE 0.1f
-#define XR_ACTIVATION_VALUE_THRESHOLD 0.75f
+#define XR_ACTIVATION_VALUE_THRESHOLD 0.8f
 
 #define VK_WINDOW_WIDTH 1280
 #define VK_WINDOW_HEIGHT 720
@@ -7972,9 +7972,11 @@ xr_get_controller_joystick(
 
 
 private bool
-xr_get_controller_fist(
+xr_get_controller_hand_state(
 	xr_t xr,
-	xr_controller_t* controller
+	xr_controller_t* controller,
+	bool* fist,
+	bool* grab
 	)
 {
 	assert_not_null(xr);
@@ -7989,7 +7991,7 @@ xr_get_controller_fist(
 	{
 		.type = XR_TYPE_ACTION_STATE_GET_INFO,
 		.next = NULL,
-		.action = xr->action_squeeze,
+		.action = xr->action_trigger,
 		.subactionPath = controller->path
 	};
 
@@ -7997,16 +7999,22 @@ xr_get_controller_fist(
 	XrResult result = xrGetActionStateFloat(xr->session, &get_info, &state);
 	hard_assert_eq(result, XR_SUCCESS);
 
-	if(state.currentState < XR_ACTIVATION_VALUE_THRESHOLD)
+	if(state.currentState >= XR_ACTIVATION_VALUE_THRESHOLD)
 	{
-		return false;
+		get_info.action = xr->action_squeeze;
+		result = xrGetActionStateFloat(xr->session, &get_info, &state);
+		hard_assert_eq(result, XR_SUCCESS);
+
+		*fist = state.currentState >= XR_ACTIVATION_VALUE_THRESHOLD;
+		*grab = !*fist;
+	}
+	else
+	{
+		*fist = false;
+		*grab = false;
 	}
 
-	get_info.action = xr->action_trigger;
-	result = xrGetActionStateFloat(xr->session, &get_info, &state);
-	hard_assert_eq(result, XR_SUCCESS);
-
-	return state.currentState >= XR_ACTIVATION_VALUE_THRESHOLD;
+	return true;
 }
 
 
@@ -8767,8 +8775,9 @@ xr_draw(
 	(void) memcpy(&right_eye_pose.position, &right_eye.position, sizeof(XrVector3f));
 	(void) memcpy(&right_eye_pose.fov, &views[1].fov, sizeof(XrFovf));
 
-	vec3 fist_pos;
+	vec3 hand_pos;
 	bool fist = false;
+	bool grab = false;
 
 	if(xr->controllers[1].active)
 	{
@@ -8788,17 +8797,22 @@ xr_draw(
 			goto goto_skip;
 		}
 
+		ok = xr_get_controller_hand_state(xr, &xr->controllers[1], &fist, &grab);
+		if(!ok)
+		{
+			goto goto_skip;
+		}
+
 		vec3 velocity = { vec.x, clicked, -vec.y };
 		simulation_set_velocity(xr->simulation, velocity);
 
-		(void) memcpy(fist_pos, &pose.position.x, sizeof(fist_pos));
-		fist = xr_get_controller_fist(xr, &xr->controllers[1]);
+		(void) memcpy(hand_pos, &pose.position.x, sizeof(hand_pos));
 	}
 
 	simulation_vr_transform_t vr_transform = simulation_get_vr_transform(
 		xr->simulation, xr->vk.screen_extent.pair, left_eye_pose, right_eye_pose);
 
-	simulation_set_fist(xr->simulation, fist_pos, fist);
+	simulation_set_hand(xr->simulation, hand_pos, fist, grab);
 
 	simulation_update(xr->simulation);
 

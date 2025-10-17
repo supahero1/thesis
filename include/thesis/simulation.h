@@ -274,8 +274,9 @@ simulation_update(
 
 
 extern void
-simulation_set_fist(
+simulation_set_hand(
 	simulation_t simulation,
 	vec3 pos,
-	bool fist
+	bool fist,
+	bool grab
 	);

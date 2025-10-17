@@ -21,6 +21,7 @@
 #include <thesis/octree.h>
 
 #include <math.h>
+#include <float.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -61,10 +62,11 @@ struct collider
 	float ball_moment_inertia;
 	float inv_ball_moment_inertia;
 
-	float fist_radius;
-	triplet_t fist_pos;
-	triplet_t fist_v;
+	float hand_radius;
+	triplet_t hand_pos;
+	triplet_t hand_v;
 	bool fist;
+	bool grab;
 };
 
 
@@ -170,7 +172,7 @@ collider_add(
 		collider->ball_moment_inertia = 0.4f * collider->ball_mass * collider->ball_radius * collider->ball_radius;
 		collider->inv_ball_moment_inertia = 1.0f / collider->ball_moment_inertia;
 
-		collider->fist_radius = collider->ball_radius * COLLIDER_FIST_SIZE;
+		collider->hand_radius = collider->ball_radius * COLLIDER_FIST_SIZE;
 
 		printf("Basketball radius: %.02f\n", collider->ball_radius);
 	}
@@ -482,7 +484,7 @@ collider_ball_collide_entity(
 		triplet_t center_b = rect_extent_3d_center(entity_b->rect_extent);
 		triplet_t penetration = triplet_sub(center_a, center_b);
 		float distance = triplet_length(penetration);
-		float collision_distance = collider->ball_radius + collider->fist_radius;
+		float collision_distance = collider->ball_radius + collider->hand_radius;
 
 		if(distance >= collision_distance)
 		{
@@ -714,8 +716,8 @@ collider_add_fist(
 
 	half_extent_3d_t extent =
 	{
-		.pos = collider->fist_pos,
-		.size = {{ collider->fist_radius, collider->fist_radius, collider->fist_radius }}
+		.pos = collider->hand_pos,
+		.size = {{ collider->hand_radius, collider->hand_radius, collider->hand_radius }}
 	};
 
 	collider_entity_t entity =
@@ -724,7 +726,7 @@ collider_add_fist(
 
 		.rect_extent = half_to_rect_3d_extent(extent),
 
-		.v = collider->fist_v
+		.v = collider->hand_v
 	};
 
 	collider_add(collider, &entity);
@@ -739,6 +741,71 @@ collider_del_fist(
 	assert_not_null(collider);
 
 	--collider->balls_used;
+}
+
+
+private void
+collider_grab_ball(
+	collider_t collider
+	)
+{
+	assert_not_null(collider);
+
+	if(!collider->grab)
+	{
+		return;
+	}
+
+	collider_entity_t* closest_ball = NULL;
+	float min_dist_sq = FLT_MAX;
+
+	collider_entity_t* ball = collider->balls;
+	collider_entity_t* ball_end = ball + collider->balls_used;
+
+	while(ball != ball_end)
+	{
+		triplet_t center = rect_extent_3d_center(ball->rect_extent);
+		triplet_t to_hand = triplet_sub(collider->hand_pos, center);
+		float dist_sq = triplet_dot(to_hand, to_hand);
+
+		if(dist_sq < min_dist_sq)
+		{
+			min_dist_sq = dist_sq;
+			closest_ball = ball;
+		}
+
+		++ball;
+	}
+
+	float radius = collider->hand_radius + collider->ball_radius;
+	if(!closest_ball || min_dist_sq > radius * radius)
+	{
+		return;
+	}
+
+	closest_ball->v = collider->hand_v;
+	closest_ball->w = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+
+	closest_ball->rect_extent =
+	(rect_extent_3d_t)
+	{
+		.min = {{ collider->hand_pos.x - collider->ball_radius,
+			collider->hand_pos.y - collider->ball_radius,
+			collider->hand_pos.z - collider->ball_radius }},
+		.max = {{ collider->hand_pos.x + collider->ball_radius,
+			collider->hand_pos.y + collider->ball_radius,
+			collider->hand_pos.z + collider->ball_radius }}
+	};
+
+	if(closest_ball->pos_external)
+	{
+		*closest_ball->pos_external = collider->hand_pos;
+	}
+
+	if(closest_ball->rotation_external)
+	{
+		*closest_ball->rotation_external = (triplet_t){{ 0.0f, 0.0f, 0.0f }};
+	}
 }
 
 
@@ -771,19 +838,26 @@ collider_update(
 	start = time_get();
 	collider_resolve(collider);
 	stats_log(collider->stats, "collider_resolve", time_get() - start);
+
+	if(collider->grab)
+	{
+		collider_grab_ball(collider);
+	}
 }
 
 
 void
-collider_set_fist(
+collider_set_hand(
 	collider_t collider,
 	triplet_t pos,
-	bool fist
+	bool fist,
+	bool grab
 	)
 {
 	assert_not_null(collider);
 
-	collider->fist_v = triplet_sub(pos, collider->fist_pos);
-	collider->fist_pos = pos;
+	collider->hand_v = triplet_sub(pos, collider->hand_pos);
+	collider->hand_pos = pos;
 	collider->fist = fist;
+	collider->grab = grab;
 }

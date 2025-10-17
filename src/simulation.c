@@ -1019,15 +1019,16 @@ simulation_update(
 
 
 void
-simulation_set_fist(
+simulation_set_hand(
 	simulation_t simulation,
 	vec3 pos,
-	bool fist
+	bool fist,
+	bool grab
 	)
 {
 	assert_not_null(simulation);
 
 	triplet_t actual_pos = triplet_add(*(triplet_t*) pos, *(triplet_t*) simulation->camera.pos);
 
-	collider_set_fist(simulation->collider, actual_pos, fist);
+	collider_set_hand(simulation->collider, actual_pos, fist, grab);
 }

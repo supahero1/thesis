@@ -103,8 +103,9 @@ collider_update(
 
 
 extern void
-collider_set_fist(
+collider_set_hand(
 	collider_t collider,
 	triplet_t pos,
-	bool fist
+	bool fist,
+	bool grab
 	);
