@@ -84,7 +84,7 @@ main()
 		offset /= offset.w;
 		vec2 offsetNDC = offset.xy * 0.5 + 0.5;
 
-		float sampleDepth = texture(inViewPosition, offsetNDC).w;
+		float sampleDepth = texture(inViewPosition, offsetNDC).z;
 		float rangeCheck = smoothstep(0.0, ssao_range_check, ssao_radius / abs(fragPos.z - sampleDepth));
 		occlusion += (sampleDepth < samplePos.z - ssao_bias ? 1.0 : 0.0) * rangeCheck;
 	}

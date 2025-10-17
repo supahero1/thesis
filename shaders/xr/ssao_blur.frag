@@ -20,8 +20,8 @@
 
 layout(constant_id = 0) const bool enable_ssao = true;
 layout(constant_id = 1) const float ssao_blur_radius = 5.0;
-layout(constant_id = 2) const float ssao_blur_falloff = 1.9;
-layout(constant_id = 3) const float ssao_blur_depth_tolerance = 256.0;
+layout(constant_id = 2) const float ssao_blur_falloff = 2.0;
+layout(constant_id = 3) const float ssao_blur_depth_tolerance = 2.0;
 
 layout(set = 0, binding = 0) uniform sampler2DArray inViewPosition;
 layout(set = 0, binding = 1) uniform sampler2DArray inViewNormal;
@@ -69,4 +69,11 @@ main()
 	}
 
 	outOcclusion = sum / max(wsum, 1e-6);
+
+	outOcclusion = 1.0 - outOcclusion;
+	for(int i = 0; i < 3; ++i)
+	{
+		outOcclusion *= outOcclusion;
+		outOcclusion = 1.0 - outOcclusion;
+	}
 }

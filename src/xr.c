@@ -813,7 +813,7 @@ xr_init_options(
 	printf("- lambert_start_angle: %.1f\n", xr->options.lambert_start_angle);
 
 	xr->options.enable_ssao =
-		options_get_boolean(global_options, "vk_enable_ssao", true);
+		options_get_boolean(global_options, "vk_enable_ssao", false);
 	printf("- enable_ssao: %d\n", xr->options.enable_ssao);
 
 	xr->options.ssao_kernel_size =
@@ -857,11 +857,11 @@ xr_init_options(
 	printf("- ssao_scale: %.2f\n", xr->options.ssao_scale);
 
 	xr->options.ssao_blur_radius =
-		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 4.0f);
+		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 3.0f);
 	printf("- ssao_blur_radius: %.2f\n", xr->options.ssao_blur_radius);
 
 	xr->options.ssao_blur_falloff =
-		options_get_f32(global_options, "vk_ssao_blur_falloff", 0.0f, 4.0f, 1.9f);
+		options_get_f32(global_options, "vk_ssao_blur_falloff", 0.0f, 16.0f, 2.0f);
 	printf("- ssao_blur_falloff: %.2f\n", xr->options.ssao_blur_falloff);
 
 	xr->options.ssao_blur_depth_tolerance =

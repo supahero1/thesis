@@ -134,7 +134,7 @@ app_init(
 		}
 		);
 
-	for(uint32_t i = 0; i < 1; ++i)
+	for(uint32_t i = 0; i < 100; ++i)
 	{
 	simulation_add_entity(
 		app->simulation,

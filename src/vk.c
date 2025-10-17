@@ -787,7 +787,7 @@ vk_init_options(
 	printf("- lambert_start_angle: %.1f\n", vk->options.lambert_start_angle);
 
 	vk->options.enable_ssao =
-		options_get_boolean(global_options, "vk_enable_ssao", true);
+		options_get_boolean(global_options, "vk_enable_ssao", false);
 	printf("- enable_ssao: %d\n", vk->options.enable_ssao);
 
 	vk->options.ssao_kernel_size =
@@ -827,19 +827,19 @@ vk_init_options(
 	printf("- ssao_debug: %d\n", vk->options.ssao_debug);
 
 	vk->options.ssao_scale =
-		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 0.5f);
+		options_get_f32(global_options, "vk_ssao_scale", 0.0f, 1.0f, 1.0f);
 	printf("- ssao_scale: %.2f\n", vk->options.ssao_scale);
 
 	vk->options.ssao_blur_radius =
-		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 5.0f);
+		options_get_f32(global_options, "vk_ssao_blur_radius", 0.0f, 16.0f, 3.0f);
 	printf("- ssao_blur_radius: %.2f\n", vk->options.ssao_blur_radius);
 
 	vk->options.ssao_blur_falloff =
-		options_get_f32(global_options, "vk_ssao_blur_falloff", 0.0f, 4.0f, 1.9f);
+		options_get_f32(global_options, "vk_ssao_blur_falloff", 0.0f, 16.0f, 2.0f);
 	printf("- ssao_blur_falloff: %.2f\n", vk->options.ssao_blur_falloff);
 
 	vk->options.ssao_blur_depth_tolerance =
-		options_get_f32(global_options, "vk_ssao_blur_depth_tolerance", 0.0f, 1024.0f, 256.0f);
+		options_get_f32(global_options, "vk_ssao_blur_depth_tolerance", 0.0f, 16.0f, 2.0f);
 	printf("- ssao_blur_depth_tolerance: %.2f\n", vk->options.ssao_blur_depth_tolerance);
 }
 
