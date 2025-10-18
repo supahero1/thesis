@@ -42,13 +42,9 @@
 #define VK_COMMANDS 8
 
 #define XR_STAGING_BUFFER_SIZE 1 * 1024 * 1024
+#define XR_OCTREE_MAX_VERTICES 512 * 1024
 #define XR_JOYSTICK_DEADZONE 0.1f
 #define XR_ACTIVATION_VALUE_THRESHOLD 0.8f
-
-#define VK_WINDOW_WIDTH 1280
-#define VK_WINDOW_HEIGHT 720
-#define VK_WINDOW_SENSITIVITY 0.003f
-#define VK_WINDOW_SPEED 500.0f
 
 
 typedef enum vk_image_type
@@ -134,6 +130,17 @@ typedef struct vk_scene_vert_ubo_data
 }
 vk_scene_vert_ubo_data_t;
 
+typedef struct vk_scene_frag_constant_data
+{
+	vec4 diffuse;
+	vec4 ambient;
+	float shininess;
+	float shininess_strength;
+
+	float near;
+}
+vk_scene_frag_constant_data_t;
+
 typedef struct vk_mesh_vertex_data
 {
 	vec3 position;
@@ -150,17 +157,6 @@ typedef struct vk_material_constant_data
 	float shininess_strength;
 }
 vk_material_constant_data_t;
-
-typedef struct vk_scene_frag_constant_data
-{
-	vec4 diffuse;
-	vec4 ambient;
-	float shininess;
-	float shininess_strength;
-
-	float near;
-}
-vk_scene_frag_constant_data_t;
 
 typedef struct vk_ssao_frag_ubo_data
 {
@@ -185,6 +181,18 @@ typedef struct vk_skybox_vertex_data
 	vec3 position;
 }
 vk_skybox_vertex_data_t;
+
+typedef struct vk_octree_vert_ubo_data
+{
+	mat4 transform[2];
+}
+vk_octree_vert_ubo_data_t;
+
+typedef struct vk_octree_vertex_data
+{
+	vec3 position;
+}
+vk_octree_vertex_data_t;
 
 typedef struct vk_material
 {
@@ -265,9 +273,9 @@ typedef struct frame
 	{
 		vk_frame_buffer_t vert_ubo;
 
-		vk_frame_image_t position_ms;
-		vk_frame_image_t normal_ms;
-		vk_frame_image_t map_ms;
+		vk_image_t position_ms;
+		vk_image_t normal_ms;
+		vk_image_t map_ms;
 
 		vk_frame_image_t position;
 		vk_frame_image_t normal;
@@ -297,6 +305,20 @@ typedef struct frame
 		VkFramebuffer framebuffer;
 	}
 	ssao_blur;
+
+	struct
+	{
+		vk_frame_buffer_t vert_ubo;
+		vk_buffer_t vertex_buffer;
+		vk_buffer_t indirect_buffer;
+
+		vk_image_t map_ms;
+
+		vk_frame_image_t map;
+
+		VkFramebuffer framebuffer;
+	}
+	octree;
 
 	struct
 	{
@@ -333,6 +355,7 @@ typedef enum vk_barrier_timing_idx
 	VK_BARRIER_TIMING_IDX_SCENE,
 	VK_BARRIER_TIMING_IDX_SSAO,
 	VK_BARRIER_TIMING_IDX_SSAO_BLUR,
+	VK_BARRIER_TIMING_IDX_OCTREE,
 	VK_BARRIER_TIMING_IDX_OUTPUT,
 	MACRO_ENUM_BITS(VK_BARRIER_TIMING_IDX)
 }
@@ -355,6 +378,7 @@ typedef enum vk_preview
 	VK_PREVIEW_SCENE_MAP,
 	VK_PREVIEW_SSAO_MAP,
 	VK_PREVIEW_SSAO_BLUR_MAP,
+	VK_PREVIEW_OCTREE_MAP,
 	MACRO_ENUM_BITS(VK_PREVIEW)
 }
 vk_preview_t;
@@ -461,6 +485,8 @@ struct xr
 		float ssao_blur_radius;
 		float ssao_blur_falloff;
 		float ssao_blur_depth_tolerance;
+
+		bool enable_octree_visualization;
 	}
 	options;
 
@@ -594,6 +620,18 @@ struct xr
 			};
 		}
 		ssao_blur;
+
+		struct
+		{
+			VkRenderPass render_pass;
+
+			struct
+			{
+				VkPipelineLayout pipeline_layout;
+				VkPipeline pipeline;
+			};
+		}
+		octree;
 
 		struct
 		{
@@ -867,6 +905,10 @@ xr_init_options(
 	xr->options.ssao_blur_depth_tolerance =
 		options_get_f32(global_options, "vk_ssao_blur_depth_tolerance", 0.0f, 16.0f, 2.0f);
 	printf("- ssao_blur_depth_tolerance: %.2f\n", xr->options.ssao_blur_depth_tolerance);
+
+	xr->options.enable_octree_visualization =
+		options_get_boolean(global_options, "vk_enable_octree_visualization", false);
+	printf("- enable_octree_visualization: %d\n", xr->options.enable_octree_visualization);
 }
 
 
@@ -883,6 +925,7 @@ xr_init_stats(
 	stats_add(xr->stats, "xr_frame_scene", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_frame_ssao", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_frame_ssao_blur", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_octree", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_frame_output", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_frame_all", VK_STATS_SIZE);
 	stats_add(xr->stats, "xr_frame_delta_time", VK_STATS_SIZE);
@@ -901,6 +944,7 @@ xr_free_stats(
 	stats_del(xr->stats, "xr_frame_delta_time");
 	stats_del(xr->stats, "xr_frame_all");
 	stats_del(xr->stats, "xr_frame_output");
+	stats_del(xr->stats, "xr_frame_octree");
 	stats_del(xr->stats, "xr_frame_ssao_blur");
 	stats_del(xr->stats, "xr_frame_ssao");
 	stats_del(xr->stats, "xr_frame_scene");
@@ -2741,6 +2785,22 @@ xr_init_index_buffer(
 
 
 private void
+xr_init_indirect_buffer(
+	xr_t xr,
+	VkDeviceSize size,
+	vk_buffer_t* buffer
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(buffer);
+
+	VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+	VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	xr_init_buffer(xr, sizeof(VkDrawIndexedIndirectCommand) * size, usage, flags, buffer);
+}
+
+
+private void
 xr_init_ubo_buffer(
 	xr_t xr,
 	VkDeviceSize size,
@@ -4481,7 +4541,7 @@ xr_init_scene_render_pass(
 			.format = VK_FORMAT_D32_SFLOAT,
 			.samples = xr->vk.samples,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -4524,7 +4584,7 @@ xr_init_scene_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -4535,7 +4595,7 @@ xr_init_scene_render_pass(
 			.flags = 0,
 			.format = VK_FORMAT_R8G8B8A8_UNORM,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -4546,7 +4606,7 @@ xr_init_scene_render_pass(
 			.flags = 0,
 			.format = xr->vk.format,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -6051,8 +6111,8 @@ xr_init_ssao_blur_pipeline(
 	const char* pipeline_cache_path = "cache/xr/ssao_blur_pipeline.bin";
 	VkPipelineCache pipeline_cache = xr_init_pipeline_cache(xr, pipeline_cache_path);
 
-	result = xr->vk.table.vkCreateGraphicsPipelines(
-		xr->vk.device, pipeline_cache, 1, &pipeline_info, NULL, &xr->vk.ssao_blur.pipeline);
+	result = xr->vk.table.vkCreateGraphicsPipelines(xr->vk.device,
+		pipeline_cache, 1, &pipeline_info, NULL, &xr->vk.ssao_blur.pipeline);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	xr_free_pipeline_cache(xr, pipeline_cache_path, pipeline_cache);
@@ -6117,6 +6177,430 @@ xr_free_ssao_blur(
 	xr_free_ssao_blur_consts(xr);
 	xr_free_ssao_blur_pipeline(xr);
 	xr_free_ssao_blur_pass(xr);
+}
+
+
+private void
+xr_init_octree_render_pass(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	VkAttachmentDescription attachments[] =
+	{
+		{
+			.flags = 0,
+			.format = VK_FORMAT_D32_SFLOAT,
+			.samples = xr->vk.samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+			.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = xr->vk.format,
+			.samples = xr->vk.samples,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		},
+		{
+			.flags = 0,
+			.format = xr->vk.format,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		}
+	};
+
+	VkAttachmentReference color_attachments[] =
+	{
+		{
+			.attachment = 1,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		}
+	};
+
+	VkAttachmentReference depth_attachment =
+	{
+		.attachment = 0,
+		.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+	};
+
+	VkAttachmentReference resolve_attachments[] =
+	{
+		{
+			.attachment = 2,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		}
+	};
+
+	VkSubpassDescription subpasses[] =
+	{
+		{
+			.flags = 0,
+			.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+			.inputAttachmentCount = 0,
+			.pInputAttachments = NULL,
+			.colorAttachmentCount = MACRO_ARRAY_LEN(color_attachments),
+			.pColorAttachments = color_attachments,
+			.pResolveAttachments = resolve_attachments,
+			.pDepthStencilAttachment = &depth_attachment,
+			.preserveAttachmentCount = 0,
+			.pPreserveAttachments = NULL
+		}
+	};
+
+	VkSubpassDependency subpass_dependencies[] =
+	{
+		{
+			.srcSubpass = VK_SUBPASS_EXTERNAL,
+			.dstSubpass = 0,
+			.srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+		},
+		{
+			.srcSubpass = 0,
+			.dstSubpass = VK_SUBPASS_EXTERNAL,
+			.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+		}
+	};
+
+	VkRenderPassCreateInfo render_pass_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.attachmentCount = MACRO_ARRAY_LEN(attachments),
+		.pAttachments = attachments,
+		.subpassCount = MACRO_ARRAY_LEN(subpasses),
+		.pSubpasses = subpasses,
+		.dependencyCount = MACRO_ARRAY_LEN(subpass_dependencies),
+		.pDependencies = subpass_dependencies
+	};
+
+	VkResult result = xr->vk.table.vkCreateRenderPass(xr->vk.device,
+		&render_pass_info, NULL, &xr->vk.octree.render_pass);
+	hard_assert_eq(result, VK_SUCCESS);
+}
+
+
+private void
+xr_free_octree_render_pass(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr->vk.table.vkDestroyRenderPass(xr->vk.device, xr->vk.octree.render_pass, NULL);
+}
+
+
+private void
+xr_init_octree_pass(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr_init_octree_render_pass(xr);
+}
+
+
+private void
+xr_free_octree_pass(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr_free_octree_render_pass(xr);
+}
+
+
+private void
+xr_init_octree_pipeline(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	VkPipelineShaderStageCreateInfo shader_stages[] =
+	{
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_VERTEX_BIT,
+			.module = xr_create_shader(xr, "shaders/xr/octree.vert.spv"),
+			.pName = "main",
+			.pSpecializationInfo = NULL
+		},
+		{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+			.module = xr_create_shader(xr, "shaders/xr/octree.frag.spv"),
+			.pName = "main",
+			.pSpecializationInfo = NULL
+		}
+	};
+
+	VkDynamicState dynamic_states[] =
+	{
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamic_state_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.dynamicStateCount = MACRO_ARRAY_LEN(dynamic_states),
+		.pDynamicStates = dynamic_states
+	};
+
+	VkVertexInputBindingDescription vertex_bindings[] =
+	{
+		{
+			.binding = 0,
+			.stride = sizeof(vk_octree_vertex_data_t),
+			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+		}
+	};
+
+	VkVertexInputAttributeDescription vertex_attributes[] =
+	{
+		{
+			.location = 0,
+			.binding = 0,
+			.format = VK_FORMAT_R32G32B32_SFLOAT,
+			.offset = offsetof(vk_octree_vertex_data_t, position)
+		}
+	};
+
+	VkPipelineVertexInputStateCreateInfo vertex_input_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.vertexBindingDescriptionCount = MACRO_ARRAY_LEN(vertex_bindings),
+		.pVertexBindingDescriptions = vertex_bindings,
+		.vertexAttributeDescriptionCount = MACRO_ARRAY_LEN(vertex_attributes),
+		.pVertexAttributeDescriptions = vertex_attributes
+	};
+
+	VkPipelineInputAssemblyStateCreateInfo input_assembly_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+		.primitiveRestartEnable = VK_FALSE
+	};
+
+	VkPipelineViewportStateCreateInfo viewport_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.viewportCount = 1,
+		.pViewports = NULL,
+		.scissorCount = 1,
+		.pScissors = NULL
+	};
+
+	VkPipelineRasterizationStateCreateInfo rasterization_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.depthClampEnable = VK_FALSE,
+		.rasterizerDiscardEnable = VK_FALSE,
+		.polygonMode = VK_POLYGON_MODE_FILL,
+		.cullMode = VK_CULL_MODE_NONE,
+		.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+		.depthBiasEnable = VK_FALSE,
+		.depthBiasConstantFactor = 0.0f,
+		.depthBiasClamp = 0.0f,
+		.depthBiasSlopeFactor = 0.0f,
+		.lineWidth = 1.0f
+	};
+
+	VkPipelineMultisampleStateCreateInfo multisample_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.rasterizationSamples = xr->vk.samples,
+		.sampleShadingEnable = xr->options.sample_shading,
+		.minSampleShading = xr->options.min_sample_shading,
+		.pSampleMask = NULL,
+		.alphaToCoverageEnable = VK_FALSE,
+		.alphaToOneEnable = VK_FALSE
+	};
+
+	VkPipelineDepthStencilStateCreateInfo depth_stencil_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.depthTestEnable = VK_TRUE,
+		.depthWriteEnable = VK_FALSE,
+		.depthCompareOp = VK_COMPARE_OP_GREATER,
+		.depthBoundsTestEnable = VK_FALSE,
+		.stencilTestEnable = VK_FALSE,
+		.front = {0},
+		.back = {0},
+		.minDepthBounds = 0.0f,
+		.maxDepthBounds = 1.0f
+	};
+
+	VkPipelineColorBlendStateCreateInfo color_blend_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.logicOpEnable = VK_FALSE,
+		.logicOp = VK_LOGIC_OP_CLEAR,
+		.attachmentCount = 1,
+		.pAttachments = &xr_vk_no_blending_attachment,
+		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
+	};
+
+	VkDescriptorSetLayout set_layouts[] =
+	{
+		xr->vk.vert_ubo_set_layout.layout
+	};
+
+	VkPipelineLayoutCreateInfo pipeline_layout_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.setLayoutCount = MACRO_ARRAY_LEN(set_layouts),
+		.pSetLayouts = set_layouts,
+		.pushConstantRangeCount = 0,
+		.pPushConstantRanges = NULL
+	};
+
+	VkResult result = xr->vk.table.vkCreatePipelineLayout(xr->vk.device,
+		&pipeline_layout_info, NULL, &xr->vk.octree.pipeline_layout);
+	hard_assert_eq(result, VK_SUCCESS);
+
+
+	VkGraphicsPipelineCreateInfo pipeline_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.stageCount = MACRO_ARRAY_LEN(shader_stages),
+		.pStages = shader_stages,
+		.pVertexInputState = &vertex_input_info,
+		.pInputAssemblyState = &input_assembly_info,
+		.pTessellationState = NULL,
+		.pViewportState = &viewport_info,
+		.pRasterizationState = &rasterization_info,
+		.pMultisampleState = &multisample_info,
+		.pDepthStencilState = &depth_stencil_info,
+		.pColorBlendState = &color_blend_info,
+		.pDynamicState = &dynamic_state_info,
+		.layout = xr->vk.octree.pipeline_layout,
+		.renderPass = xr->vk.octree.render_pass,
+		.subpass = 0,
+		.basePipelineHandle = VK_NULL_HANDLE,
+		.basePipelineIndex = -1
+	};
+
+	static const char* pipeline_cache_path = "cache/xr/octree_pipeline.bin";
+	VkPipelineCache pipeline_cache = xr_init_pipeline_cache(xr, pipeline_cache_path);
+
+	result = xr->vk.table.vkCreateGraphicsPipelines(xr->vk.device,
+		pipeline_cache, 1, &pipeline_info, NULL, &xr->vk.octree.pipeline);
+	hard_assert_eq(result, VK_SUCCESS);
+
+	xr_free_pipeline_cache(xr, pipeline_cache_path, pipeline_cache);
+
+	for(uint32_t i = 0; i < MACRO_ARRAY_LEN(shader_stages); ++i)
+	{
+		xr_destroy_shader(xr, shader_stages[i].module);
+	}
+}
+
+
+private void
+xr_free_octree_pipeline(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr->vk.table.vkDestroyPipeline(xr->vk.device, xr->vk.octree.pipeline, NULL);
+	xr->vk.table.vkDestroyPipelineLayout(xr->vk.device, xr->vk.octree.pipeline_layout, NULL);
+}
+
+
+private void
+xr_init_octree_consts(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+}
+
+
+private void
+xr_free_octree_consts(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+}
+
+
+private void
+xr_init_octree(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr_init_octree_pass(xr);
+	xr_init_octree_pipeline(xr);
+	xr_init_octree_consts(xr);
+}
+
+
+private void
+xr_free_octree(
+	xr_t xr
+	)
+{
+	assert_not_null(xr);
+
+	xr_free_octree_consts(xr);
+	xr_free_octree_pipeline(xr);
+	xr_free_octree_pass(xr);
 }
 
 
@@ -6493,11 +6977,9 @@ xr_init_skybox_consts(
 	xr_init_frame_image(xr, &xr->vk.output.skybox.sky);
 
 	xr_init_vertex_buffer(xr, sizeof(xr_vk_skybox_vertex_data), &xr->vk.output.skybox.vertex_buffer);
-
 	xr_copy_to_buffer(xr, &xr->vk.output.skybox.vertex_buffer, xr_vk_skybox_vertex_data, MACRO_ARRAY_LEN(xr_vk_skybox_vertex_data));
 
 	xr_init_index_buffer(xr, sizeof(xr_vk_skybox_index_data), &xr->vk.output.skybox.index_buffer);
-
 	xr_copy_to_buffer(xr, &xr->vk.output.skybox.index_buffer, xr_vk_skybox_index_data, MACRO_ARRAY_LEN(xr_vk_skybox_index_data));
 }
 
@@ -6651,6 +7133,7 @@ xr_init_compose_pipeline(
 
 	VkDescriptorSetLayout set_layouts[] =
 	{
+		xr->vk.sampler_set_layout.layout,
 		xr->vk.sampler_set_layout.layout,
 		xr->vk.sampler_set_layout.layout
 	};
@@ -6927,8 +7410,8 @@ xr_init_preview_pipeline(
 
 	VkPipelineCache pipeline_cache = xr_init_pipeline_cache(xr, pipeline_cache_path);
 
-	result = xr->vk.table.vkCreateGraphicsPipelines(
-		xr->vk.device, pipeline_cache, 1, &pipeline_info, NULL, pipeline);
+	result = xr->vk.table.vkCreateGraphicsPipelines(xr->vk.device,
+		pipeline_cache, 1, &pipeline_info, NULL, pipeline);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	xr_free_pipeline_cache(xr, pipeline_cache_path, pipeline_cache);
@@ -7047,6 +7530,7 @@ xr_init_pipelines(
 	xr_init_scene(xr);
 	xr_init_ssao(xr);
 	xr_init_ssao_blur(xr);
+	xr_init_octree(xr);
 	xr_init_output(xr);
 }
 
@@ -7059,6 +7543,7 @@ xr_free_pipelines(
 	assert_not_null(xr);
 
 	xr_free_output(xr);
+	xr_free_octree(xr);
 	xr_free_ssao_blur(xr);
 	xr_free_ssao(xr);
 	xr_free_scene(xr);
@@ -7219,10 +7704,7 @@ xr_init_models(
 		{
 			xr_init_vertex_buffer(xr, sizeof(vk_model_instance_data_t) * VK_MAX_INSTANCES, &model->instance_buffers[i]);
 
-			VkBufferUsageFlags indirect_usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-			VkMemoryPropertyFlags indirect_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-			xr_init_buffer(xr, sizeof(VkDrawIndexedIndirectCommand) * model->mesh_count,
-				indirect_usage, indirect_flags, &model->indirect_buffers[i]);
+			xr_init_indirect_buffer(xr, model->mesh_count, &model->indirect_buffers[i]);
 		}
 
 		++model;
@@ -7447,19 +7929,19 @@ xr_init_scene_framebuffer(
 
 	xr_init_vert_ubo_buffer(xr, sizeof(vk_scene_vert_ubo_data_t), &frame->scene.vert_ubo);
 
-	frame->scene.position_ms.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
-	frame->scene.position_ms.image.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-	xr_init_frame_image(xr, &frame->scene.position_ms);
+	frame->scene.position_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.position_ms.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+	xr_init_image(xr, &frame->scene.position_ms);
 
-	frame->scene.normal_ms.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
-	frame->scene.normal_ms.image.format = VK_FORMAT_R8G8B8A8_UNORM;
-	xr_init_frame_image(xr, &frame->scene.normal_ms);
+	frame->scene.normal_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.normal_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
+	xr_init_image(xr, &frame->scene.normal_ms);
 
-	frame->scene.map_ms.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
-	xr_init_frame_image(xr, &frame->scene.map_ms);
+	frame->scene.map_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	xr_init_image(xr, &frame->scene.map_ms);
 
 	frame->scene.position.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
 		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
@@ -7485,15 +7967,15 @@ xr_init_scene_framebuffer(
 	xr_write_images_to_set(xr, frame->scene.set, images, MACRO_ARRAY_LEN(images));
 
 	frame->scene.depth.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+		VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
 	xr_init_image(xr, &frame->scene.depth);
 
 	VkImageView attachments[] =
 	{
 		frame->scene.depth.view,
-		frame->scene.position_ms.image.view,
-		frame->scene.normal_ms.image.view,
-		frame->scene.map_ms.image.view,
+		frame->scene.position_ms.view,
+		frame->scene.normal_ms.view,
+		frame->scene.map_ms.view,
 		frame->scene.position.image.view,
 		frame->scene.normal.image.view,
 		frame->scene.map.image.view
@@ -7533,9 +8015,9 @@ xr_free_scene_framebuffer(
 	xr_free_frame_image(xr, &frame->scene.map);
 	xr_free_frame_image(xr, &frame->scene.normal);
 	xr_free_frame_image(xr, &frame->scene.position);
-	xr_free_frame_image(xr, &frame->scene.map_ms);
-	xr_free_frame_image(xr, &frame->scene.normal_ms);
-	xr_free_frame_image(xr, &frame->scene.position_ms);
+	xr_free_image(xr, &frame->scene.map_ms);
+	xr_free_image(xr, &frame->scene.normal_ms);
+	xr_free_image(xr, &frame->scene.position_ms);
 	xr_free_ubo_buffer(xr, &frame->scene.vert_ubo);
 }
 
@@ -7662,6 +8144,74 @@ xr_free_ssao_blur_framebuffer(
 
 
 private void
+xr_init_octree_framebuffer(
+	xr_t xr,
+	vk_frame_t* frame
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	xr_init_vert_ubo_buffer(xr, sizeof(vk_octree_vert_ubo_data_t), &frame->octree.vert_ubo);
+
+	xr_init_vertex_buffer(xr, sizeof(vk_octree_vertex_data_t) * XR_OCTREE_MAX_VERTICES, &frame->octree.vertex_buffer);
+	xr_init_indirect_buffer(xr, sizeof(VkDrawIndirectCommand), &frame->octree.indirect_buffer);
+
+	frame->octree.map_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
+		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	xr_init_image(xr, &frame->octree.map_ms);
+
+	frame->octree.map.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT;
+	xr_init_frame_image(xr, &frame->octree.map);
+
+	VkImageView attachments[] =
+	{
+		frame->scene.depth.view,
+		frame->octree.map_ms.view,
+		frame->octree.map.image.view
+	};
+
+	VkFramebufferCreateInfo framebuffer_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.renderPass = xr->vk.octree.render_pass,
+		.attachmentCount = MACRO_ARRAY_LEN(attachments),
+		.pAttachments = attachments,
+		.width = xr->vk.screen_extent.width,
+		.height = xr->vk.screen_extent.height,
+		.layers = 1
+	};
+
+	VkResult result = xr->vk.table.vkCreateFramebuffer(xr->vk.device,
+		&framebuffer_info, NULL, &frame->octree.framebuffer);
+	hard_assert_eq(result, VK_SUCCESS);
+}
+
+
+private void
+xr_free_octree_framebuffer(
+	xr_t xr,
+	vk_frame_t* frame
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	xr->vk.table.vkDestroyFramebuffer(xr->vk.device, frame->octree.framebuffer, NULL);
+
+	xr_free_frame_image(xr, &frame->octree.map);
+	xr_free_image(xr, &frame->octree.map_ms);
+
+	xr_free_buffer(xr, &frame->octree.indirect_buffer);
+	xr_free_buffer(xr, &frame->octree.vertex_buffer);
+
+	xr_free_ubo_buffer(xr, &frame->octree.vert_ubo);
+}
+
+
+private void
 xr_init_output_framebuffer(
 	xr_t xr,
 	vk_frame_t* frame,
@@ -7769,6 +8319,7 @@ xr_init_framebuffers(
 		xr_init_scene_framebuffer(xr, frame);
 		xr_init_ssao_framebuffer(xr, frame);
 		xr_init_ssao_blur_framebuffer(xr, frame);
+		xr_init_octree_framebuffer(xr, frame);
 		xr_init_output_framebuffer(xr, frame, &xr->vk.images[image_idx].image);
 
 
@@ -7799,6 +8350,7 @@ xr_free_framebuffers(
 		xr->vk.table.vkDestroySemaphore(xr->vk.device, frame->semaphore, NULL);
 
 		xr_free_output_framebuffer(xr, frame);
+		xr_free_octree_framebuffer(xr, frame);
 		xr_free_ssao_blur_framebuffer(xr, frame);
 		xr_free_ssao_framebuffer(xr, frame);
 		xr_free_scene_framebuffer(xr, frame);
@@ -8204,15 +8756,6 @@ xr_record_scene(
 		},
 		{
 			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
-		},
-		{
-			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
-		},
-		{
-			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
-		},
-		{
-			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
 		}
 	};
 
@@ -8387,6 +8930,58 @@ xr_record_ssao_blur(
 
 
 private void
+xr_record_octree(
+	xr_t xr,
+	VkCommandBuffer command_buffer,
+	vk_frame_t* frame
+	)
+{
+	assert_not_null(xr);
+	assert_not_null(frame);
+
+	VkClearValue clear_values[] =
+	{
+		{},
+		{
+			.color = { { 0.0f, 0.0f, 0.0f, 0.0f } }
+		}
+	};
+
+	VkRenderPassBeginInfo render_pass_begin_info =
+	{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = xr->vk.octree.render_pass,
+		.framebuffer = frame->octree.framebuffer,
+		.renderArea = xr->vk.screen_extent.scissor,
+		.clearValueCount = MACRO_ARRAY_LEN(clear_values),
+		.pClearValues = clear_values
+	};
+
+	xr->vk.table.vkCmdBeginRenderPass(command_buffer,
+		&render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	xr->vk.table.vkCmdSetViewport(command_buffer, 0, 1, &xr->vk.screen_extent.viewport);
+	xr->vk.table.vkCmdSetScissor(command_buffer, 0, 1, &xr->vk.screen_extent.scissor);
+
+	xr->vk.table.vkCmdBindPipeline(command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.octree.pipeline);
+
+	xr->vk.table.vkCmdBindDescriptorSets(command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.octree.pipeline_layout,
+		0, 1, &frame->octree.vert_ubo.set, 0, NULL);
+
+	xr->vk.table.vkCmdBindVertexBuffers(command_buffer, 0, 1,
+		&frame->octree.vertex_buffer.buffer, (VkDeviceSize[]){0});
+
+	xr->vk.table.vkCmdDrawIndirect(command_buffer,
+		frame->octree.indirect_buffer.buffer, 0, 1, 0);
+
+	xr->vk.table.vkCmdEndRenderPass(command_buffer);
+}
+
+
+private void
 xr_record_output(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
@@ -8416,6 +9011,7 @@ xr_record_output(
 
 	switch(xr->options.preview)
 	{
+
 	case VK_PREVIEW_NONE:
 	{
 		xr->vk.table.vkCmdBindPipeline(command_buffer,
@@ -8445,7 +9041,8 @@ xr_record_output(
 		VkDescriptorSet sets[] =
 		{
 			frame->scene.map.set,
-			frame->ssao_blur.map.set
+			frame->ssao_blur.map.set,
+			frame->octree.map.set
 		};
 
 		xr->vk.table.vkCmdBindDescriptorSets(command_buffer,
@@ -8541,6 +9138,20 @@ xr_record_output(
 		break;
 	}
 
+	case VK_PREVIEW_OCTREE_MAP:
+	{
+		xr->vk.table.vkCmdBindPipeline(command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline);
+
+		xr->vk.table.vkCmdBindDescriptorSets(command_buffer,
+			VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.output.preview.image.pipeline_layout,
+			0, 1, &frame->octree.map.set, 0, NULL);
+
+		xr->vk.table.vkCmdDraw(command_buffer, 6, 1, 0, 0);
+
+		break;
+	}
+
 	default: assert_unreachable();
 
 	}
@@ -8591,6 +9202,10 @@ xr_record_command_buffer(
 	xr_timing_start(xr, timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
 	xr_record_ssao_blur(xr, command_buffer, frame);
 	xr_timing_end(xr, timing, VK_BARRIER_TIMING_IDX_SSAO_BLUR);
+
+	xr_timing_start(xr, timing, VK_BARRIER_TIMING_IDX_OCTREE);
+	xr_record_octree(xr, command_buffer, frame);
+	xr_timing_end(xr, timing, VK_BARRIER_TIMING_IDX_OCTREE);
 
 	xr_timing_start(xr, timing, VK_BARRIER_TIMING_IDX_OUTPUT);
 	xr_record_output(xr, command_buffer, frame);
@@ -8750,6 +9365,10 @@ xr_draw(
 		stats_log(xr->stats, "xr_frame_ssao_blur", ssao_blur_time);
 		frame_time += ssao_blur_time;
 
+		uint64_t octree_time = xr_timing_get(xr, timing, VK_BARRIER_TIMING_IDX_OCTREE);
+		stats_log(xr->stats, "xr_frame_octree", octree_time);
+		frame_time += octree_time;
+
 		uint64_t output_time = xr_timing_get(xr, timing, VK_BARRIER_TIMING_IDX_OUTPUT);
 		stats_log(xr->stats, "xr_frame_output", output_time);
 		frame_time += output_time;
@@ -8908,6 +9527,33 @@ xr_draw(
 	view_right[3][2] = 0.0f;
 	glm_mat4_mul(skybox_vert_ubo_data.transform[1], view_right, skybox_vert_ubo_data.transform[1]);
 	xr_copy_to_buffer(xr, &frame->output.vert_ubo.buffer, &skybox_vert_ubo_data, 1);
+
+	vk_octree_vert_ubo_data_t octree_vert_ubo_data;
+	glm_mat4_copy(vr_transform.projection[0], octree_vert_ubo_data.transform[0]);
+	glm_mat4_mul(octree_vert_ubo_data.transform[0], vr_transform.view[0], octree_vert_ubo_data.transform[0]);
+	glm_mat4_copy(vr_transform.projection[1], octree_vert_ubo_data.transform[1]);
+	glm_mat4_mul(octree_vert_ubo_data.transform[1], vr_transform.view[1], octree_vert_ubo_data.transform[1]);
+	xr_copy_to_buffer(xr, &frame->octree.vert_ubo.buffer, &octree_vert_ubo_data, 1);
+
+	uint32_t octree_data_count = 0;
+	if(xr->options.enable_octree_visualization)
+	{
+		vec3* octree_data = simulation_get_octree_data(xr->simulation, &octree_data_count);
+		hard_assert_lt(octree_data_count, XR_OCTREE_MAX_VERTICES);
+
+		xr_copy_to_buffer(xr, &frame->octree.vertex_buffer, octree_data, octree_data_count);
+
+		alloc_free(octree_data, octree_data_count);
+	}
+
+	VkDrawIndirectCommand octree_command =
+	{
+		.vertexCount = octree_data_count,
+		.instanceCount = 1,
+		.firstVertex = 0,
+		.firstInstance = 0
+	};
+	xr_copy_to_buffer(xr, &frame->octree.indirect_buffer, &octree_command, 1);
 
 	goto_skip:;
 

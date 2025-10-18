@@ -16,21 +16,12 @@
 
 #version 450
 
-layout(set = 0, binding = 0) uniform sampler2D inScene;
-layout(set = 1, binding = 0) uniform sampler2D inSSAO;
-layout(set = 2, binding = 0) uniform sampler2D inOctree;
-
-layout(location = 0) in vec2 inCoords;
+#extension GL_EXT_multiview : require
 
 layout(location = 0) out vec4 outColor;
 
 void
 main()
 {
-	vec4 color = texture(inScene, inCoords);
-	vec4 ssao = texture(inSSAO, inCoords);
-	vec4 octree = texture(inOctree, inCoords);
-
-	color.rgb *= ssao.r;
-	outColor = mix(color, octree, octree.a);
+	outColor = vec4(1.0);
 }

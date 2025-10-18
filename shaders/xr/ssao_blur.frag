@@ -19,7 +19,7 @@
 #extension GL_EXT_multiview : require
 
 layout(constant_id = 0) const bool enable_ssao = true;
-layout(constant_id = 1) const float ssao_blur_radius = 5.0;
+layout(constant_id = 1) const float ssao_blur_radius = 2.0;
 layout(constant_id = 2) const float ssao_blur_falloff = 2.0;
 layout(constant_id = 3) const float ssao_blur_depth_tolerance = 2.0;
 

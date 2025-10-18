@@ -132,6 +132,7 @@ app: shaders
 	[[ -n "$(VK_SSAO_BLUR_RADIUS)" ]] && args="$$args --vk_ssao_blur_radius=$(VK_SSAO_BLUR_RADIUS)"; \
 	[[ -n "$(VK_SSAO_BLUR_FALLOFF)" ]] && args="$$args --vk_ssao_blur_falloff=$(VK_SSAO_BLUR_FALLOFF)"; \
 	[[ -n "$(VK_SSAO_BLUR_DEPTH_TOLERANCE)" ]] && args="$$args --vk_ssao_blur_depth_tolerance=$(VK_SSAO_BLUR_DEPTH_TOLERANCE)"; \
+	[[ -n "$(VK_ENABLE_OCTREE_VISUALIZATION)" ]] && args="$$args --vk_enable_octree_visualization=$(VK_ENABLE_OCTREE_VISUALIZATION)"; \
 	\
 	cd thesis; $(VALGRIND_CALL) ./thesis_app $$args
 

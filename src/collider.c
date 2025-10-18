@@ -26,7 +26,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#define COLLIDER_MAP_SIZE 1000000.0f
+#define COLLIDER_MAP_SIZE 3000.0f
 #define COLLIDER_HAND_SIZE 2.0f
 #define COLLIDER_HAND_V_COUNT 10
 #define COLLIDER_HAND_V_MULTIPLIER 2.0f
@@ -52,6 +52,9 @@ struct collider
 	collider_entity_t* balls;
 	uint32_t balls_used;
 	uint32_t balls_size;
+
+	triplet_t* node_query;
+	uint32_t node_query_count;
 
 	collider_entity_t** query_entities;
 	uint32_t query_entities_used;
@@ -91,6 +94,9 @@ collider_init(
 	collider->octree.half_extent =
 	(half_extent_3d_t)
 	{
+		.x = -1600.0f,
+		.y = 0.0f,
+		.z = 1130.0f,
 		.w = COLLIDER_MAP_SIZE,
 		.h = COLLIDER_MAP_SIZE,
 		.d = COLLIDER_MAP_SIZE,
@@ -135,6 +141,110 @@ collider_get_scale(
 	assert_not_null(collider);
 
 	return collider->ball_radius / 0.1213f;
+}
+
+
+private void
+collider_node_query(
+	collider_t collider,
+	const octree_node_info_t* node_info
+	)
+{
+	assert_not_null(collider);
+	assert_not_null(node_info);
+
+	rect_extent_3d_t extent = half_to_rect_3d_extent(node_info->extent);
+	triplet_t min_p = {{ extent.min.x, extent.min.y, extent.min.z }};
+	triplet_t max_p = {{ extent.max.x, extent.max.y, extent.max.z }};
+
+	triplet_t p_min_x_min_y_max_z = {{ min_p.x, min_p.y, max_p.z }};
+    triplet_t p_min_x_max_y_min_z = {{ min_p.x, max_p.y, min_p.z }};
+    triplet_t p_min_x_max_y_max_z = {{ min_p.x, max_p.y, max_p.z }};
+    triplet_t p_max_x_min_y_min_z = {{ max_p.x, min_p.y, min_p.z }};
+    triplet_t p_max_x_min_y_max_z = {{ max_p.x, min_p.y, max_p.z }};
+    triplet_t p_max_x_max_y_min_z = {{ max_p.x, max_p.y, min_p.z }};
+
+    collider->node_query[collider->node_query_count++] = p_min_x_max_y_min_z;
+    collider->node_query[collider->node_query_count++] = p_min_x_max_y_max_z;
+
+    collider->node_query[collider->node_query_count++] = p_min_x_max_y_min_z;
+    collider->node_query[collider->node_query_count++] = p_max_x_max_y_min_z;
+
+    collider->node_query[collider->node_query_count++] = p_min_x_min_y_max_z;
+    collider->node_query[collider->node_query_count++] = p_min_x_max_y_max_z;
+
+    collider->node_query[collider->node_query_count++] = p_min_x_min_y_max_z;
+    collider->node_query[collider->node_query_count++] = p_max_x_min_y_max_z;
+
+    collider->node_query[collider->node_query_count++] = p_max_x_min_y_min_z;
+    collider->node_query[collider->node_query_count++] = p_max_x_min_y_max_z;
+
+    collider->node_query[collider->node_query_count++] = p_max_x_min_y_min_z;
+    collider->node_query[collider->node_query_count++] = p_max_x_max_y_min_z;
+}
+
+
+private void
+collider_node_query_fn(
+	octree_t* ot,
+	const octree_node_info_t* node_info
+	)
+{
+	assert_not_null(ot);
+	assert_not_null(node_info);
+
+	collider_t collider = MACRO_CONTAINER_OF(ot, struct collider, octree);
+	collider_node_query(collider, node_info);
+}
+
+
+triplet_t*
+collider_get_octree_data(
+	collider_t collider,
+	uint32_t* data_count
+	)
+{
+	assert_not_null(collider);
+	assert_not_null(data_count);
+
+	collider->node_query = alloc_malloc(collider->node_query, (collider->octree.nodes_used + 1) * 12);
+	assert_not_null(collider->node_query);
+
+	collider->node_query_count = 0;
+
+	octree_query_nodes(&collider->octree, collider->octree.rect_extent, collider_node_query_fn);
+
+	rect_extent_3d_t root_extent = collider->octree.rect_extent;
+	triplet_t min_p = {{ root_extent.min.x, root_extent.min.y, root_extent.min.z }};
+	triplet_t max_p = {{ root_extent.max.x, root_extent.max.y, root_extent.max.z }};
+
+	triplet_t p_min_x_min_y_max_z = {{ min_p.x, min_p.y, max_p.z }};
+    triplet_t p_min_x_max_y_min_z = {{ min_p.x, max_p.y, min_p.z }};
+    triplet_t p_min_x_max_y_max_z = {{ min_p.x, max_p.y, max_p.z }};
+    triplet_t p_max_x_min_y_min_z = {{ max_p.x, min_p.y, min_p.z }};
+    triplet_t p_max_x_min_y_max_z = {{ max_p.x, min_p.y, max_p.z }};
+    triplet_t p_max_x_max_y_min_z = {{ max_p.x, max_p.y, min_p.z }};
+
+    collider->node_query[collider->node_query_count++] = min_p;
+    collider->node_query[collider->node_query_count++] = p_max_x_min_y_min_z;
+
+    collider->node_query[collider->node_query_count++] = min_p;
+    collider->node_query[collider->node_query_count++] = p_min_x_max_y_min_z;
+
+    collider->node_query[collider->node_query_count++] = min_p;
+    collider->node_query[collider->node_query_count++] = p_min_x_min_y_max_z;
+
+    collider->node_query[collider->node_query_count++] = max_p;
+    collider->node_query[collider->node_query_count++] = p_max_x_max_y_min_z;
+
+    collider->node_query[collider->node_query_count++] = max_p;
+    collider->node_query[collider->node_query_count++] = p_max_x_min_y_max_z;
+
+    collider->node_query[collider->node_query_count++] = max_p;
+    collider->node_query[collider->node_query_count++] = p_min_x_max_y_max_z;
+
+	*data_count = collider->node_query_count;
+	return collider->node_query;
 }
 
 

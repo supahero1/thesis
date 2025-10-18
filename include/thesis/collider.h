@@ -88,6 +88,13 @@ collider_get_scale(
 	);
 
 
+extern triplet_t*
+collider_get_octree_data(
+	collider_t collider,
+	uint32_t* data_count
+	);
+
+
 extern void
 collider_add(
 	collider_t collider,

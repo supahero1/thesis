@@ -53,18 +53,17 @@ const mat4 toClip = mat4(
 void
 main()
 {
-	uint viewIndex = gl_ViewIndex;
 	vec4 worldPos = inTransform * vec4(inPosition, 1.0);
-	gl_Position = consts.projection[viewIndex] * consts.view[viewIndex] * worldPos;
+	gl_Position = consts.projection[gl_ViewIndex] * consts.view[gl_ViewIndex] * worldPos;
 
 	outPosition = worldPos.xyz;
 	outNormal = mat3(inTransform) * inNormal;
 	outCoords = inCoords;
 
 	outLight = normalize(consts.light_direction.xyz);
-	outView = normalize(consts.camera_position[viewIndex].xyz - worldPos.xyz);
+	outView = normalize(consts.camera_position[gl_ViewIndex].xyz - worldPos.xyz);
 	outShadowCoords = (toClip * consts.light_transform) * worldPos;
 
-	outViewPosition = vec3(consts.view[viewIndex] * worldPos);
-	outViewNormal = mat3(consts.view[viewIndex]) * outNormal;
+	outViewPosition = vec3(consts.view[gl_ViewIndex] * worldPos);
+	outViewNormal = mat3(consts.view[gl_ViewIndex]) * outNormal;
 }

@@ -31,8 +31,7 @@ layout(location = 0) out vec3 outPosition;
 void
 main()
 {
-	uint viewIndex = gl_ViewIndex;
-	gl_Position = consts.transform[viewIndex] * vec4(inPosition, 1.0);
+	gl_Position = consts.transform[gl_ViewIndex] * vec4(inPosition, 1.0);
 	gl_Position.z = gl_Position.w;
 
 	outPosition = inPosition;

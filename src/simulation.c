@@ -481,6 +481,18 @@ simulation_get_entity_data(
 }
 
 
+vec3*
+simulation_get_octree_data(
+	simulation_t simulation,
+	uint32_t* data_count
+	)
+{
+	assert_not_null(simulation);
+
+	return (void*) collider_get_octree_data(simulation->collider, data_count);
+}
+
+
 void
 simulation_free_entity_data(
 	simulation_entity_data_t* data,

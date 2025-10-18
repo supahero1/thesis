@@ -173,6 +173,13 @@ simulation_get_entity_data(
 	);
 
 
+extern vec3*
+simulation_get_octree_data(
+	simulation_t simulation,
+	uint32_t* data_count
+	);
+
+
 extern void
 simulation_free_entity_data(
 	simulation_entity_data_t* data,
