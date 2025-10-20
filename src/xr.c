@@ -33,13 +33,13 @@
 
 #include <string.h>
 
-#define VK_STATS_SIZE 64
-#define VK_QUERY_SIZE 32
-#define VK_MAX_IMAGES 8
-#define VK_MAX_FRAMES 2
-#define VK_MAX_INSTANCES 128
-#define VK_POOL_SIZE 16
-#define VK_COMMANDS 8
+#define XR_STATS_SIZE 64
+#define XR_QUERY_SIZE 32
+#define XR_MAX_IMAGES 8
+#define XR_MAX_FRAMES 2
+#define XR_MAX_INSTANCES 128
+#define XR_POOL_SIZE 16
+#define XR_COMMANDS 8
 
 #define XR_STAGING_BUFFER_SIZE 1 * 1024 * 1024
 #define XR_OCTREE_MAX_VERTICES 512 * 1024
@@ -47,37 +47,37 @@
 #define XR_ACTIVATION_VALUE_THRESHOLD 0.8f
 
 
-typedef enum vk_image_type
+typedef enum xr_image_type
 {
-	VK_IMAGE_TYPE_DEPTH,
-	VK_IMAGE_TYPE_ATTACHMENT,
-	VK_IMAGE_TYPE_SAMPLED,
-	VK_IMAGE_TYPE_MULTISAMPLED,
-	VK_IMAGE_TYPE_TRANSIENT,
-	VK_IMAGE_TYPE_TEXTURE,
-	VK_IMAGE_TYPE_CUBE,
-	VK_IMAGE_TYPE_CUSTOM_FORMAT,
-	VK_IMAGE_TYPE_CUSTOM_SIZE,
-	VK_IMAGE_TYPE_MULTIVIEW,
-	MACRO_ENUM_BITS_EXP(VK_IMAGE_TYPE),
+	XR_IMAGE_TYPE_DEPTH,
+	XR_IMAGE_TYPE_ATTACHMENT,
+	XR_IMAGE_TYPE_SAMPLED,
+	XR_IMAGE_TYPE_MULTISAMPLED,
+	XR_IMAGE_TYPE_TRANSIENT,
+	XR_IMAGE_TYPE_TEXTURE,
+	XR_IMAGE_TYPE_CUBE,
+	XR_IMAGE_TYPE_CUSTOM_FORMAT,
+	XR_IMAGE_TYPE_CUSTOM_SIZE,
+	XR_IMAGE_TYPE_MULTIVIEW,
+	MACRO_ENUM_BITS_EXP(XR_IMAGE_TYPE),
 
-	VK_IMAGE_TYPE_DEPTH_BIT			= MACRO_POWER_OF_2(VK_IMAGE_TYPE_DEPTH),
-	VK_IMAGE_TYPE_ATTACHMENT_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_ATTACHMENT),
-	VK_IMAGE_TYPE_SAMPLED_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_SAMPLED),
-	VK_IMAGE_TYPE_MULTISAMPLED_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_MULTISAMPLED),
-	VK_IMAGE_TYPE_TRANSIENT_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_TRANSIENT),
-	VK_IMAGE_TYPE_TEXTURE_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_TEXTURE),
-	VK_IMAGE_TYPE_CUBE_BIT			= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUBE),
-	VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUSTOM_FORMAT),
-	VK_IMAGE_TYPE_CUSTOM_SIZE_BIT	= MACRO_POWER_OF_2(VK_IMAGE_TYPE_CUSTOM_SIZE),
-	VK_IMAGE_TYPE_MULTIVIEW_BIT		= MACRO_POWER_OF_2(VK_IMAGE_TYPE_MULTIVIEW),
+	XR_IMAGE_TYPE_DEPTH_BIT			= MACRO_POWER_OF_2(XR_IMAGE_TYPE_DEPTH),
+	XR_IMAGE_TYPE_ATTACHMENT_BIT	= MACRO_POWER_OF_2(XR_IMAGE_TYPE_ATTACHMENT),
+	XR_IMAGE_TYPE_SAMPLED_BIT		= MACRO_POWER_OF_2(XR_IMAGE_TYPE_SAMPLED),
+	XR_IMAGE_TYPE_MULTISAMPLED_BIT	= MACRO_POWER_OF_2(XR_IMAGE_TYPE_MULTISAMPLED),
+	XR_IMAGE_TYPE_TRANSIENT_BIT		= MACRO_POWER_OF_2(XR_IMAGE_TYPE_TRANSIENT),
+	XR_IMAGE_TYPE_TEXTURE_BIT		= MACRO_POWER_OF_2(XR_IMAGE_TYPE_TEXTURE),
+	XR_IMAGE_TYPE_CUBE_BIT			= MACRO_POWER_OF_2(XR_IMAGE_TYPE_CUBE),
+	XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT	= MACRO_POWER_OF_2(XR_IMAGE_TYPE_CUSTOM_FORMAT),
+	XR_IMAGE_TYPE_CUSTOM_SIZE_BIT	= MACRO_POWER_OF_2(XR_IMAGE_TYPE_CUSTOM_SIZE),
+	XR_IMAGE_TYPE_MULTIVIEW_BIT		= MACRO_POWER_OF_2(XR_IMAGE_TYPE_MULTIVIEW),
 
-	VK_IMAGE_TYPE_TEXTURE_2D_BITS = VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_TEXTURE_BIT,
-	VK_IMAGE_TYPE_TEXTURE_CUBE_BITS = VK_IMAGE_TYPE_TEXTURE_2D_BITS | VK_IMAGE_TYPE_CUBE_BIT
+	XR_IMAGE_TYPE_TEXTURE_2D_BITS = XR_IMAGE_TYPE_SAMPLED_BIT | XR_IMAGE_TYPE_TEXTURE_BIT,
+	XR_IMAGE_TYPE_TEXTURE_CUBE_BITS = XR_IMAGE_TYPE_TEXTURE_2D_BITS | XR_IMAGE_TYPE_CUBE_BIT
 }
-vk_image_type_t;
+xr_image_type_t;
 
-typedef struct vk_image
+typedef struct xr_image
 {
 	str_t path;
 
@@ -89,7 +89,7 @@ typedef struct vk_image
 	uint32_t layers;
 
 	VkFormat format;
-	vk_image_type_t type;
+	xr_image_type_t type;
 
 	VkImage image;
 	VkImageView view;
@@ -99,28 +99,28 @@ typedef struct vk_image
 	VkImageUsageFlags usage;
 	VkSampleCountFlagBits samples;
 }
-vk_image_t;
+xr_image_t;
 
-typedef struct vk_buffer
+typedef struct xr_buffer
 {
 	VkBuffer buffer;
 	VkDeviceMemory memory;
 }
-vk_buffer_t;
+xr_buffer_t;
 
-typedef struct vk_shadow_vert_constant_data
+typedef struct xr_shadow_vert_constant_data
 {
 	mat4 transform;
 }
-vk_shadow_vert_constant_data_t;
+xr_shadow_vert_constant_data_t;
 
-typedef struct vk_shadow_vertex_data
+typedef struct xr_shadow_vertex_data
 {
 	vec3 position;
 }
-vk_shadow_vertex_data_t;
+xr_shadow_vertex_data_t;
 
-typedef struct vk_scene_vert_ubo_data
+typedef struct xr_scene_vert_ubo_data
 {
 	mat4 projection[2];
 	mat4 view[2];
@@ -128,9 +128,9 @@ typedef struct vk_scene_vert_ubo_data
 	vec4 light_direction;
 	vec4 camera_position[2];
 }
-vk_scene_vert_ubo_data_t;
+xr_scene_vert_ubo_data_t;
 
-typedef struct vk_scene_frag_constant_data
+typedef struct xr_scene_frag_constant_data
 {
 	vec4 diffuse;
 	vec4 ambient;
@@ -139,98 +139,98 @@ typedef struct vk_scene_frag_constant_data
 
 	float near;
 }
-vk_scene_frag_constant_data_t;
+xr_scene_frag_constant_data_t;
 
-typedef struct vk_mesh_vertex_data
+typedef struct xr_mesh_vertex_data
 {
 	vec3 position;
 	vec3 normal;
 	vec2 coords;
 }
-vk_mesh_vertex_data_t;
+xr_mesh_vertex_data_t;
 
-typedef struct vk_material_constant_data
+typedef struct xr_material_constant_data
 {
 	vec4 diffuse;
 	vec4 ambient;
 	float shininess;
 	float shininess_strength;
 }
-vk_material_constant_data_t;
+xr_material_constant_data_t;
 
-typedef struct vk_ssao_frag_ubo_data
+typedef struct xr_ssao_frag_ubo_data
 {
 	mat4 projection;
 }
-vk_ssao_frag_ubo_data_t;
+xr_ssao_frag_ubo_data_t;
 
-typedef struct vk_ssao_frag_kernel_ubo_data
+typedef struct xr_ssao_frag_kernel_ubo_data
 {
 	vec4 samples[];
 }
-vk_ssao_frag_kernel_ubo_data_t;
+xr_ssao_frag_kernel_ubo_data_t;
 
-typedef struct vk_skybox_constant_data
+typedef struct xr_skybox_constant_data
 {
 	mat4 transform[2];
 }
-vk_skybox_constant_data_t;
+xr_skybox_constant_data_t;
 
-typedef struct vk_skybox_vertex_data
+typedef struct xr_skybox_vertex_data
 {
 	vec3 position;
 }
-vk_skybox_vertex_data_t;
+xr_skybox_vertex_data_t;
 
-typedef struct vk_octree_vert_ubo_data
+typedef struct xr_octree_vert_ubo_data
 {
 	mat4 transform[2];
 }
-vk_octree_vert_ubo_data_t;
+xr_octree_vert_ubo_data_t;
 
-typedef struct vk_octree_vertex_data
+typedef struct xr_octree_vertex_data
 {
 	vec3 position;
 }
-vk_octree_vertex_data_t;
+xr_octree_vertex_data_t;
 
-typedef struct vk_material
+typedef struct xr_material
 {
-	vk_image_t texture;
-	vk_material_constant_data_t constant_data;
+	xr_image_t texture;
+	xr_material_constant_data_t constant_data;
 	VkDescriptorSet set;
 }
-vk_material_t;
+xr_material_t;
 
-typedef struct vk_mesh
+typedef struct xr_mesh
 {
 	uint32_t material_idx;
 	uint32_t vertex_count;
 	uint32_t index_count;
 
-	vk_buffer_t shadow_vertex_buffer;
-	vk_buffer_t scene_vertex_buffer;
-	vk_buffer_t index_buffer;
+	xr_buffer_t shadow_vertex_buffer;
+	xr_buffer_t scene_vertex_buffer;
+	xr_buffer_t index_buffer;
 }
-vk_mesh_t;
+xr_mesh_t;
 
-typedef struct vk_model
+typedef struct xr_model
 {
-	vk_mesh_t* meshes;
+	xr_mesh_t* meshes;
 	uint32_t mesh_count;
 
-	vk_buffer_t instance_buffers[VK_MAX_IMAGES];
-	vk_buffer_t indirect_buffers[VK_MAX_IMAGES];
+	xr_buffer_t instance_buffers[XR_MAX_IMAGES];
+	xr_buffer_t indirect_buffers[XR_MAX_IMAGES];
 }
-vk_model_t;
+xr_model_t;
 
-typedef struct vk_model_instance_data
+typedef struct xr_model_instance_data
 {
 	mat4 transform;
 }
-vk_model_instance_data_t;
+xr_model_instance_data_t;
 
-typedef struct vk_entities_per_model
+typedef struct xr_entities_per_model
 {
 	simulation_entity_data_t* original_entities;
 	uint32_t original_entity_count;
@@ -239,31 +239,31 @@ typedef struct vk_entities_per_model
 	uint32_t entities_used;
 	uint32_t entities_size;
 }
-vk_entities_per_model_t;
+xr_entities_per_model_t;
 
-typedef struct vk_frame_image
+typedef struct xr_frame_image
 {
-	vk_image_t image;
+	xr_image_t image;
 	VkDescriptorSet set;
 }
-vk_frame_image_t;
+xr_frame_image_t;
 
-typedef struct vk_frame_buffer
+typedef struct xr_frame_buffer
 {
-	vk_buffer_t buffer;
+	xr_buffer_t buffer;
 	VkDescriptorSet set;
 }
-vk_frame_buffer_t;
+xr_frame_buffer_t;
 
-typedef struct barrier vk_barrier_t;
+typedef struct xr_barrier xr_barrier_t;
 
-typedef struct frame
+typedef struct xr_frame
 {
 	struct
 	{
-		vk_frame_buffer_t vert_ubo;
+		xr_frame_buffer_t vert_ubo;
 
-		vk_frame_image_t map;
+		xr_frame_image_t map;
 
 		VkFramebuffer framebuffer;
 	}
@@ -271,28 +271,28 @@ typedef struct frame
 
 	struct
 	{
-		vk_frame_buffer_t vert_ubo;
+		xr_frame_buffer_t vert_ubo;
 
-		vk_image_t position_ms;
-		vk_image_t normal_ms;
-		vk_image_t map_ms;
+		xr_image_t position_ms;
+		xr_image_t normal_ms;
+		xr_image_t map_ms;
 
-		vk_frame_image_t position;
-		vk_frame_image_t normal;
+		xr_frame_image_t position;
+		xr_frame_image_t normal;
 		VkDescriptorSet set;
 
-		vk_frame_image_t map;
+		xr_frame_image_t map;
 
-		vk_image_t depth;
+		xr_image_t depth;
 		VkFramebuffer framebuffer;
 	}
 	scene;
 
 	struct
 	{
-		vk_frame_buffer_t frag_ubo;
+		xr_frame_buffer_t frag_ubo;
 
-		vk_frame_image_t map;
+		xr_frame_image_t map;
 
 		VkFramebuffer framebuffer;
 	}
@@ -300,7 +300,7 @@ typedef struct frame
 
 	struct
 	{
-		vk_frame_image_t map;
+		xr_frame_image_t map;
 
 		VkFramebuffer framebuffer;
 	}
@@ -308,13 +308,13 @@ typedef struct frame
 
 	struct
 	{
-		vk_frame_buffer_t vert_ubo;
-		vk_buffer_t vertex_buffer;
-		vk_buffer_t indirect_buffer;
+		xr_frame_buffer_t vert_ubo;
+		xr_buffer_t vertex_buffer;
+		xr_buffer_t indirect_buffer;
 
-		vk_image_t map_ms;
+		xr_image_t map_ms;
 
-		vk_frame_image_t map;
+		xr_frame_image_t map;
 
 		VkFramebuffer framebuffer;
 	}
@@ -322,7 +322,7 @@ typedef struct frame
 
 	struct
 	{
-		vk_frame_buffer_t vert_ubo;
+		xr_frame_buffer_t vert_ubo;
 
 		VkImage image;
 		VkImageView image_view;
@@ -331,25 +331,25 @@ typedef struct frame
 	output;
 
 	VkSemaphore semaphore;
-	vk_barrier_t* barrier;
+	xr_barrier_t* barrier;
 }
-vk_frame_t;
+xr_frame_t;
 
-typedef struct vk_timing
+typedef struct xr_timing
 {
 	VkCommandBuffer command_buffer;
 	VkQueryPool pool;
 	VkSemaphore semaphore;
-	vk_buffer_t buffer;
+	xr_buffer_t buffer;
 	uint64_t* results;
 	uint32_t* index_map;
 	uint32_t count;
 	uint32_t current;
 	bool first_reset;
 }
-vk_timing_t;
+xr_timing_t;
 
-typedef enum vk_barrier_timing_idx
+typedef enum xr_barrier_timing_idx
 {
 	VK_BARRIER_TIMING_IDX_SHADOW,
 	VK_BARRIER_TIMING_IDX_SCENE,
@@ -359,17 +359,17 @@ typedef enum vk_barrier_timing_idx
 	VK_BARRIER_TIMING_IDX_OUTPUT,
 	MACRO_ENUM_BITS(VK_BARRIER_TIMING_IDX)
 }
-vk_barrier_timing_idx_t;
+xr_barrier_timing_idx_t;
 
-struct barrier
+struct xr_barrier
 {
 	VkSemaphore semaphore;
 	VkFence fence;
-	VkCommandBuffer command_buffers[VK_MAX_IMAGES];
-	vk_timing_t timings[VK_MAX_IMAGES];
+	VkCommandBuffer command_buffers[XR_MAX_IMAGES];
+	xr_timing_t timings[XR_MAX_IMAGES];
 };
 
-typedef enum vk_preview
+typedef enum xr_preview
 {
 	VK_PREVIEW_NONE,
 	VK_PREVIEW_SHADOW_MAP,
@@ -381,9 +381,9 @@ typedef enum vk_preview
 	VK_PREVIEW_OCTREE_MAP,
 	MACRO_ENUM_BITS(VK_PREVIEW)
 }
-vk_preview_t;
+xr_preview_t;
 
-typedef struct vk_extent
+typedef struct xr_extent
 {
 	uint32_t width;
 	uint32_t height;
@@ -393,50 +393,50 @@ typedef struct vk_extent
 	VkViewport viewport;
 	VkRect2D scissor;
 }
-vk_extent_t;
+xr_extent_t;
 
-typedef struct vk_command
+typedef struct xr_command
 {
 	VkCommandBuffer buffer;
 	VkFence fence;
 	bool waited;
 	bool using_temp;
 
-	vk_buffer_t staging_buffer;
-	vk_buffer_t temp_staging_buffer;
+	xr_buffer_t staging_buffer;
+	xr_buffer_t temp_staging_buffer;
 }
-vk_command_t;
+xr_command_t;
 
-typedef struct vk_descriptor_pool vk_descriptor_pool_t;
+typedef struct xr_descriptor_pool xr_descriptor_pool_t;
 
-struct vk_descriptor_pool
+struct xr_descriptor_pool
 {
-	vk_descriptor_pool_t* next;
-	vk_descriptor_pool_t* prev;
-	vk_descriptor_pool_t* free_next;
-	vk_descriptor_pool_t* free_prev;
+	xr_descriptor_pool_t* next;
+	xr_descriptor_pool_t* prev;
+	xr_descriptor_pool_t* free_next;
+	xr_descriptor_pool_t* free_prev;
 
 	VkDescriptorPool pool;
 	uint32_t allocations;
 };
 
-typedef struct vk_descriptor_set_pool
+typedef struct xr_descriptor_set_pool
 {
-	vk_descriptor_pool_t* head;
-	vk_descriptor_pool_t* free_head;
+	xr_descriptor_pool_t* head;
+	xr_descriptor_pool_t* free_head;
 	VkDescriptorPoolSize* sizes;
 	uint32_t size_count;
 	uint32_t refs;
 }
-vk_descriptor_set_pool_t;
+xr_descriptor_set_pool_t;
 
-typedef struct vk_descriptor_set_layout
+typedef struct xr_descriptor_set_layout
 {
 	VkDescriptorSetLayout layout;
-	vk_descriptor_set_pool_t* set_pool;
+	xr_descriptor_set_pool_t* set_pool;
 	uint32_t multiplier;
 }
-vk_descriptor_set_layout_t;
+xr_descriptor_set_layout_t;
 
 typedef struct xr_controller
 {
@@ -461,7 +461,7 @@ struct xr
 		float min_sample_shading;
 		uint32_t mipmap_levels;
 		float max_anisotropy;
-		vk_preview_t preview;
+		xr_preview_t preview;
 
 		uint32_t shadow_map_size;
 		bool enable_depth_shadows;
@@ -551,21 +551,21 @@ struct xr
 		VkImageView* image_views;
 		uint32_t image_count;
 
-		vk_extent_t screen_extent;
-		vk_extent_t shadow_extent;
-		vk_extent_t ssao_extent;
+		xr_extent_t screen_extent;
+		xr_extent_t shadow_extent;
+		xr_extent_t ssao_extent;
 
 		VkCommandPool command_pool;
-		vk_command_t commands[VK_COMMANDS];
-		vk_command_t* command;
+		xr_command_t commands[XR_COMMANDS];
+		xr_command_t* command;
 
-		vk_descriptor_set_pool_t** set_pools;
+		xr_descriptor_set_pool_t** set_pools;
 		uint32_t set_pool_count;
 
-		vk_descriptor_set_layout_t sampler_set_layout;
-		vk_descriptor_set_layout_t vert_ubo_set_layout;
-		vk_descriptor_set_layout_t frag_ubo_set_layout;
-		vk_descriptor_set_layout_t scene_set_layout;
+		xr_descriptor_set_layout_t sampler_set_layout;
+		xr_descriptor_set_layout_t vert_ubo_set_layout;
+		xr_descriptor_set_layout_t frag_ubo_set_layout;
+		xr_descriptor_set_layout_t scene_set_layout;
 
 		VkSampler depth_sampler;
 		VkSampler image_sampler;
@@ -603,8 +603,8 @@ struct xr
 				VkPipelineLayout pipeline_layout;
 				VkPipeline pipeline;
 
-				vk_frame_image_t noise;
-				vk_frame_buffer_t kernel_ubo;
+				xr_frame_image_t noise;
+				xr_frame_buffer_t kernel_ubo;
 			};
 		}
 		ssao;
@@ -642,10 +642,10 @@ struct xr
 				VkPipelineLayout pipeline_layout;
 				VkPipeline pipeline;
 
-				vk_frame_image_t sky;
+				xr_frame_image_t sky;
 
-				vk_buffer_t vertex_buffer;
-				vk_buffer_t index_buffer;
+				xr_buffer_t vertex_buffer;
+				xr_buffer_t index_buffer;
 			}
 			skybox;
 
@@ -676,14 +676,14 @@ struct xr
 		}
 		output;
 
-		vk_material_t* materials;
-		vk_model_t* models;
+		xr_material_t* materials;
+		xr_model_t* models;
 		uint32_t material_count;
 		uint32_t model_count;
 
-		vk_frame_t frames[VK_MAX_IMAGES];
-		vk_barrier_t barriers[VK_MAX_FRAMES];
-		vk_barrier_t* barrier;
+		xr_frame_t frames[XR_MAX_IMAGES];
+		xr_barrier_t barriers[XR_MAX_FRAMES];
+		xr_barrier_t* barrier;
 
 		bool recorded_commands;
 	}
@@ -734,7 +734,7 @@ private const char* xr_vk_device_layers[] =
 };
 
 
-private vk_skybox_vertex_data_t xr_vk_skybox_vertex_data[] =
+private xr_skybox_vertex_data_t xr_skybox_vertex_data[] =
 {
 	{ { -1.0f, -1.0f, -1.0f } },
 	{ { -1.0f, -1.0f,  1.0f } },
@@ -746,7 +746,7 @@ private vk_skybox_vertex_data_t xr_vk_skybox_vertex_data[] =
 	{ {  1.0f,  1.0f,  1.0f } },
 };
 
-private uint16_t xr_vk_skybox_index_data[] =
+private uint16_t xr_skybox_index_data[] =
 {
 	0, 1, 2, 2, 1, 3,
 	4, 6, 5, 5, 6, 7,
@@ -757,7 +757,7 @@ private uint16_t xr_vk_skybox_index_data[] =
 };
 
 
-private VkPipelineColorBlendAttachmentState xr_vk_no_blending_attachment =
+private VkPipelineColorBlendAttachmentState xr_no_blending_attachment =
 {
 	.blendEnable = VK_FALSE,
 	.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
@@ -771,7 +771,7 @@ private VkPipelineColorBlendAttachmentState xr_vk_no_blending_attachment =
 };
 
 
-private VkPipelineColorBlendAttachmentState xr_vk_blending_attachment =
+private VkPipelineColorBlendAttachmentState xr_blending_attachment =
 {
 	.blendEnable = VK_TRUE,
 	.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
@@ -921,15 +921,15 @@ xr_init_stats(
 
 	xr->stats = simulation_get_stats(xr->simulation);
 
-	stats_add(xr->stats, "xr_frame_shadow", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_scene", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_ssao", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_ssao_blur", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_octree", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_output", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_all", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_frame_delta_time", VK_STATS_SIZE);
-	stats_add(xr->stats, "xr_command_all", VK_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_shadow", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_scene", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_ssao", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_ssao_blur", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_octree", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_output", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_all", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_frame_delta_time", XR_STATS_SIZE);
+	stats_add(xr->stats, "xr_command_all", XR_STATS_SIZE);
 }
 
 
@@ -1550,13 +1550,13 @@ xr_free_vk_instance(
 
 
 private void
-xr_init_vk_physical_device(
+xr_init_physical_device(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
-	XrVulkanGraphicsDeviceGetInfoKHR xr_vk_device_info =
+	XrVulkanGraphicsDeviceGetInfoKHR device_info =
 	{
 		.type = XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR,
 		.next = NULL,
@@ -1567,39 +1567,38 @@ xr_init_vk_physical_device(
 	PFN_xrGetVulkanGraphicsDevice2KHR xrGetVulkanGraphicsDevice2KHR =
 		xr_xr_load_func(xr, "xrGetVulkanGraphicsDevice2KHR");
 
-	XrResult xr_result = xrGetVulkanGraphicsDevice2KHR(xr->instance, &xr_vk_device_info, &xr->vk.physical_device);
-	assert_eq(xr_result, XR_SUCCESS);
+	XrResult result = xrGetVulkanGraphicsDevice2KHR(xr->instance, &device_info, &xr->vk.physical_device);
+	assert_eq(result, XR_SUCCESS);
 
-	uint32_t vk_queue_family_count = 0;
-	vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &vk_queue_family_count, NULL);
-	assert_gt(vk_queue_family_count, 0);
+	uint32_t queue_family_count = 0;
+	vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &queue_family_count, NULL);
+	assert_gt(queue_family_count, 0);
 
-	VkQueueFamilyProperties vk_queue_family_properties[vk_queue_family_count];
+	VkQueueFamilyProperties queue_family_properties[queue_family_count];
 
-	vkGetPhysicalDeviceQueueFamilyProperties(
-		xr->vk.physical_device, &vk_queue_family_count, vk_queue_family_properties);
-	assert_gt(vk_queue_family_count, 0);
+	vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &queue_family_count, queue_family_properties);
+	assert_gt(queue_family_count, 0);
 
-	VkQueueFamilyProperties* vk_queue_family_property = vk_queue_family_properties;
-	VkQueueFamilyProperties* vk_queue_family_property_end = vk_queue_family_property + vk_queue_family_count;
+	VkQueueFamilyProperties* queue_family_property = queue_family_properties;
+	VkQueueFamilyProperties* queue_family_property_end = queue_family_property + queue_family_count;
 
-	while(vk_queue_family_property < vk_queue_family_property_end)
+	while(queue_family_property < queue_family_property_end)
 	{
-		if(vk_queue_family_property->queueFlags & VK_QUEUE_GRAPHICS_BIT)
+		if(queue_family_property->queueFlags & VK_QUEUE_GRAPHICS_BIT)
 		{
 			break;
 		}
 
-		vk_queue_family_property++;
+		queue_family_property++;
 	}
 
-	assert_lt(vk_queue_family_property, vk_queue_family_property_end);
-	xr->vk.queue_id = vk_queue_family_property - vk_queue_family_properties;
+	assert_lt(queue_family_property, queue_family_property_end);
+	xr->vk.queue_id = queue_family_property - queue_family_properties;
 }
 
 
 private void
-xr_free_vk_physical_device(
+xr_free_physical_device(
 	xr_t xr
 	)
 {
@@ -1610,7 +1609,7 @@ xr_free_vk_physical_device(
 
 
 private const char**
-xr_vk_get_device_extensions(
+xr_get_device_extensions(
 	xr_t xr,
 	const char** extension
 	)
@@ -1673,16 +1672,15 @@ xr_vk_get_device_extensions(
 	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensionsKHR =
 		xr_xr_load_func(xr, "xrGetVulkanDeviceExtensionsKHR");
 
-	XrResult xr_result = xrGetVulkanDeviceExtensionsKHR(
-		xr->instance, xr->system, 0, &device_extension_count, NULL);
-	assert_eq(xr_result, XR_SUCCESS);
+	XrResult result = xrGetVulkanDeviceExtensionsKHR(xr->instance, xr->system, 0, &device_extension_count, NULL);
+	assert_eq(result, XR_SUCCESS);
 
 	char device_extensions_str[device_extension_count + 1];
 	device_extensions_str[device_extension_count] = '\0';
 
-	xr_result = xrGetVulkanDeviceExtensionsKHR(xr->instance, xr->system,
+	result = xrGetVulkanDeviceExtensionsKHR(xr->instance, xr->system,
 		device_extension_count, &device_extension_count, device_extensions_str);
-	assert_eq(xr_result, XR_SUCCESS);
+	assert_eq(result, XR_SUCCESS);
 
 	char* strtok_r_state = NULL;
 	const char* extension_name = strtok_r(device_extensions_str, " ", &strtok_r_state);
@@ -1715,7 +1713,7 @@ xr_vk_get_device_extensions(
 
 
 private const char**
-xr_vk_get_device_layers(
+xr_get_device_layers(
 	xr_t xr,
 	const char** layer
 	)
@@ -1776,18 +1774,18 @@ xr_vk_get_device_layers(
 
 
 private void
-xr_init_vk_logical_device(
+xr_init_logical_device(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
 	const char* vk_device_extensions[64];
-	const char** vk_device_extension = xr_vk_get_device_extensions(xr, vk_device_extensions);
+	const char** vk_device_extension = xr_get_device_extensions(xr, vk_device_extensions);
 	assert_lt(vk_device_extension, vk_device_extensions + MACRO_ARRAY_LEN(vk_device_extensions));
 
 	const char* vk_device_layers[64];
-	const char** vk_device_layer = xr_vk_get_device_layers(xr, vk_device_layers);
+	const char** vk_device_layer = xr_get_device_layers(xr, vk_device_layers);
 	assert_lt(vk_device_layer, vk_device_layers + MACRO_ARRAY_LEN(vk_device_layers));
 
 	float vk_queue_priority = 1.0f;
@@ -1869,7 +1867,7 @@ xr_init_vk_logical_device(
 
 
 private void
-xr_free_vk_logical_device(
+xr_free_logical_device(
 	xr_t xr
 	)
 {
@@ -1880,7 +1878,7 @@ xr_free_vk_logical_device(
 
 
 private void
-xr_init_vk_device_properties(
+xr_init_device_properties(
 	xr_t xr
 	)
 {
@@ -1944,7 +1942,7 @@ xr_init_vk_device_properties(
 
 
 private void
-xr_init_vk_capabilities(
+xr_init_capabilities(
 	xr_t xr
 	)
 {
@@ -1989,7 +1987,7 @@ xr_init_vk_capabilities(
 private void
 xr_init_extent(
 	xr_t xr,
-	vk_extent_t* extent,
+	xr_extent_t* extent,
 	uint32_t width,
 	uint32_t height
 	)
@@ -2042,7 +2040,7 @@ xr_init_extent(
 
 
 private void
-xr_init_xr_swapchain(
+xr_init_swapchain(
 	xr_t xr
 	)
 {
@@ -2074,7 +2072,7 @@ xr_init_xr_swapchain(
 	hard_assert_eq(result, XR_SUCCESS);
 
 	hard_assert_gt(xr->vk.image_count, 0);
-	assert_le(xr->vk.image_count, VK_MAX_IMAGES);
+	assert_le(xr->vk.image_count, XR_MAX_IMAGES);
 
 	xr->vk.images = alloc_malloc(xr->vk.images, xr->vk.image_count);
 	assert_ptr(xr->vk.images, xr->vk.image_count);
@@ -2144,7 +2142,7 @@ xr_init_xr_swapchain(
 
 
 private void
-xr_free_xr_swapchain(
+xr_free_swapchain(
 	xr_t xr
 	)
 {
@@ -2166,13 +2164,13 @@ xr_free_xr_swapchain(
 private void
 xr_descriptor_set_pool_add(
 	xr_t xr,
-	vk_descriptor_set_pool_t* set_pool
+	xr_descriptor_set_pool_t* set_pool
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(set_pool);
 
-	vk_descriptor_pool_t* pool = alloc_malloc(pool, 1);
+	xr_descriptor_pool_t* pool = alloc_malloc(pool, 1);
 	assert_not_null(pool);
 
 	VkDescriptorPoolSize sizes[set_pool->size_count];
@@ -2187,7 +2185,7 @@ xr_descriptor_set_pool_add(
 		(VkDescriptorPoolSize)
 		{
 			.type = set_size->type,
-			.descriptorCount = set_size->descriptorCount * VK_POOL_SIZE
+			.descriptorCount = set_size->descriptorCount * XR_POOL_SIZE
 		};
 
 		++size;
@@ -2199,7 +2197,7 @@ xr_descriptor_set_pool_add(
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.maxSets = VK_POOL_SIZE,
+		.maxSets = XR_POOL_SIZE,
 		.poolSizeCount = set_pool->size_count,
 		.pPoolSizes = sizes
 	};
@@ -2232,7 +2230,7 @@ xr_descriptor_set_pool_add(
 private void
 xr_get_descriptor_sets(
 	xr_t xr,
-	vk_descriptor_set_layout_t dst_set_layout,
+	xr_descriptor_set_layout_t dst_set_layout,
 	VkDescriptorSet* sets,
 	uint32_t count
 	)
@@ -2246,18 +2244,18 @@ xr_get_descriptor_sets(
 		return;
 	}
 
-	vk_descriptor_set_pool_t* set_pool = dst_set_layout.set_pool;
+	xr_descriptor_set_pool_t* set_pool = dst_set_layout.set_pool;
 	assert_not_null(set_pool);
 	assert_neq(dst_set_layout.multiplier, 0);
 
-	VkDescriptorSetLayout set_layouts[VK_POOL_SIZE];
+	VkDescriptorSetLayout set_layouts[XR_POOL_SIZE];
 
 	while(count > 0)
 	{
-		vk_descriptor_pool_t* pool = set_pool->free_head;
+		xr_descriptor_pool_t* pool = set_pool->free_head;
 		while(pool)
 		{
-			if((pool->allocations + dst_set_layout.multiplier) <= VK_POOL_SIZE)
+			if((pool->allocations + dst_set_layout.multiplier) <= XR_POOL_SIZE)
 			{
 				break;
 			}
@@ -2270,7 +2268,7 @@ xr_get_descriptor_sets(
 			continue;
 		}
 
-		uint32_t available_slots = VK_POOL_SIZE - pool->allocations;
+		uint32_t available_slots = XR_POOL_SIZE - pool->allocations;
 		uint32_t can_alloc_sets = available_slots / dst_set_layout.multiplier;
 		uint32_t alloc_count = MACRO_MIN(count, can_alloc_sets);
 
@@ -2295,7 +2293,7 @@ xr_get_descriptor_sets(
 		sets += alloc_count;
 		count -= alloc_count;
 
-		if(pool->allocations == VK_POOL_SIZE)
+		if(pool->allocations == XR_POOL_SIZE)
 		{
 			if(set_pool->free_head == pool)
 			{
@@ -2324,7 +2322,7 @@ xr_init_set_layout(
 	VkDescriptorPoolSize* sizes,
 	uint32_t size_count,
 	VkShaderStageFlags stage_flags,
-	vk_descriptor_set_layout_t* set_layout
+	xr_descriptor_set_layout_t* set_layout
 	)
 {
 	assert_not_null(xr);
@@ -2390,12 +2388,12 @@ xr_init_set_layout(
 	size_count = unique_types;
 
 
-	vk_descriptor_set_pool_t** set_pool_ptr = xr->vk.set_pools;
-	vk_descriptor_set_pool_t** set_pool_ptr_end = set_pool_ptr + xr->vk.set_pool_count;
+	xr_descriptor_set_pool_t** set_pool_ptr = xr->vk.set_pools;
+	xr_descriptor_set_pool_t** set_pool_ptr_end = set_pool_ptr + xr->vk.set_pool_count;
 
 	while(set_pool_ptr < set_pool_ptr_end)
 	{
-		vk_descriptor_set_pool_t* set_pool = *set_pool_ptr;
+		xr_descriptor_set_pool_t* set_pool = *set_pool_ptr;
 
 		if(set_pool->size_count != size_count)
 		{
@@ -2465,9 +2463,9 @@ xr_init_set_layout(
 	*set_pool_ptr = alloc_malloc(*set_pool_ptr, 1);
 	assert_not_null(*set_pool_ptr);
 
-	vk_descriptor_set_pool_t* set_pool = *set_pool_ptr;
+	xr_descriptor_set_pool_t* set_pool = *set_pool_ptr;
 	*set_pool =
-	(vk_descriptor_set_pool_t)
+	(xr_descriptor_set_pool_t)
 	{
 		.head = NULL,
 		.free_head = NULL,
@@ -2484,22 +2482,22 @@ xr_init_set_layout(
 private void
 xr_free_set_layout(
 	xr_t xr,
-	vk_descriptor_set_layout_t* set_layout
+	xr_descriptor_set_layout_t* set_layout
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(set_layout);
 
-	vk_descriptor_set_pool_t* set_pool = set_layout->set_pool;
+	xr_descriptor_set_pool_t* set_pool = set_layout->set_pool;
 
 	if(!--set_pool->refs)
 	{
-		vk_descriptor_pool_t* pool = set_pool->head;
+		xr_descriptor_pool_t* pool = set_pool->head;
 		while(pool)
 		{
 			xr->vk.table.vkDestroyDescriptorPool(xr->vk.device, pool->pool, NULL);
 
-			vk_descriptor_pool_t* next = pool->next;
+			xr_descriptor_pool_t* next = pool->next;
 			alloc_free(pool, 1);
 			pool = next;
 		}
@@ -2516,7 +2514,7 @@ xr_init_vert_set_layout(
 	xr_t xr,
 	VkDescriptorPoolSize* sizes,
 	uint32_t size_count,
-	vk_descriptor_set_layout_t* set_layout
+	xr_descriptor_set_layout_t* set_layout
 	)
 {
 	xr_init_set_layout(xr, sizes, size_count, VK_SHADER_STAGE_VERTEX_BIT, set_layout);
@@ -2528,7 +2526,7 @@ xr_init_frag_set_layout(
 	xr_t xr,
 	VkDescriptorPoolSize* sizes,
 	uint32_t size_count,
-	vk_descriptor_set_layout_t* set_layout
+	xr_descriptor_set_layout_t* set_layout
 	)
 {
 	xr_init_set_layout(xr, sizes, size_count, VK_SHADER_STAGE_FRAGMENT_BIT, set_layout);
@@ -2625,12 +2623,12 @@ xr_free_sets(
 
 	xr_free_set_layouts(xr);
 
-	vk_descriptor_set_pool_t** set_pool_ptr = xr->vk.set_pools;
-	vk_descriptor_set_pool_t** set_pool_ptr_end = set_pool_ptr + xr->vk.set_pool_count;
+	xr_descriptor_set_pool_t** set_pool_ptr = xr->vk.set_pools;
+	xr_descriptor_set_pool_t** set_pool_ptr_end = set_pool_ptr + xr->vk.set_pool_count;
 
 	while(set_pool_ptr < set_pool_ptr_end)
 	{
-		vk_descriptor_set_pool_t* set_pool = *set_pool_ptr;
+		xr_descriptor_set_pool_t* set_pool = *set_pool_ptr;
 		alloc_free(set_pool, 1);
 
 		++set_pool_ptr;
@@ -2668,7 +2666,7 @@ xr_init_buffer(
 	VkDeviceSize size,
 	VkBufferUsageFlags usage,
 	VkMemoryPropertyFlags flags,
-	vk_buffer_t* buffer
+	xr_buffer_t* buffer
 	)
 {
 	assert_not_null(xr);
@@ -2713,7 +2711,7 @@ xr_init_buffer(
 private void
 xr_free_buffer(
 	xr_t xr,
-	vk_buffer_t* buffer
+	xr_buffer_t* buffer
 	)
 {
 	assert_not_null(xr);
@@ -2726,7 +2724,7 @@ xr_free_buffer(
 private void
 xr_init_staging_buffer(
 	xr_t xr,
-	vk_buffer_t* buffer,
+	xr_buffer_t* buffer,
 	VkDeviceSize size
 	)
 {
@@ -2742,7 +2740,7 @@ xr_init_staging_buffer(
 private void
 xr_free_staging_buffer(
 	xr_t xr,
-	vk_buffer_t* buffer
+	xr_buffer_t* buffer
 	)
 {
 	assert_not_null(xr);
@@ -2756,7 +2754,7 @@ private void
 xr_init_vertex_buffer(
 	xr_t xr,
 	VkDeviceSize size,
-	vk_buffer_t* buffer
+	xr_buffer_t* buffer
 	)
 {
 	assert_not_null(xr);
@@ -2772,7 +2770,7 @@ private void
 xr_init_index_buffer(
 	xr_t xr,
 	VkDeviceSize size,
-	vk_buffer_t* buffer
+	xr_buffer_t* buffer
 	)
 {
 	assert_not_null(xr);
@@ -2788,7 +2786,7 @@ private void
 xr_init_indirect_buffer(
 	xr_t xr,
 	VkDeviceSize size,
-	vk_buffer_t* buffer
+	xr_buffer_t* buffer
 	)
 {
 	assert_not_null(xr);
@@ -2804,8 +2802,8 @@ private void
 xr_init_ubo_buffer(
 	xr_t xr,
 	VkDeviceSize size,
-	vk_descriptor_set_layout_t set_layout,
-	vk_frame_buffer_t* frame_buffer
+	xr_descriptor_set_layout_t set_layout,
+	xr_frame_buffer_t* frame_buffer
 	)
 {
 	assert_not_null(xr);
@@ -2849,7 +2847,7 @@ xr_init_ubo_buffer(
 private void
 xr_free_ubo_buffer(
 	xr_t xr,
-	vk_frame_buffer_t* frame_buffer
+	xr_frame_buffer_t* frame_buffer
 	)
 {
 	assert_not_null(xr);
@@ -2863,7 +2861,7 @@ private void
 xr_init_vert_ubo_buffer(
 	xr_t xr,
 	VkDeviceSize size,
-	vk_frame_buffer_t* frame_buffer
+	xr_frame_buffer_t* frame_buffer
 	)
 {
 	assert_not_null(xr);
@@ -2877,7 +2875,7 @@ private void
 xr_init_frag_ubo_buffer(
 	xr_t xr,
 	VkDeviceSize size,
-	vk_frame_buffer_t* frame_buffer
+	xr_frame_buffer_t* frame_buffer
 	)
 {
 	assert_not_null(xr);
@@ -2928,8 +2926,8 @@ xr_init_commands(
 		.flags = VK_FENCE_CREATE_SIGNALED_BIT
 	};
 
-	vk_command_t* command = xr->vk.commands;
-	vk_command_t* command_end = command + MACRO_ARRAY_LEN(xr->vk.commands);
+	xr_command_t* command = xr->vk.commands;
+	xr_command_t* command_end = command + MACRO_ARRAY_LEN(xr->vk.commands);
 
 	while(command != command_end)
 	{
@@ -2961,8 +2959,8 @@ xr_free_commands(
 	VkCommandBuffer command_buffers[MACRO_ARRAY_LEN(xr->vk.commands)];
 	VkCommandBuffer* command_buffer = command_buffers;
 
-	vk_command_t* command = xr->vk.commands;
-	vk_command_t* command_end = command + MACRO_ARRAY_LEN(xr->vk.commands);
+	xr_command_t* command = xr->vk.commands;
+	xr_command_t* command_end = command + MACRO_ARRAY_LEN(xr->vk.commands);
 
 	while(command != command_end)
 	{
@@ -2990,7 +2988,7 @@ xr_free_commands(
 private void
 xr_wait_command(
 	xr_t xr,
-	vk_command_t* command
+	xr_command_t* command
 	)
 {
 	assert_not_null(xr);
@@ -3017,7 +3015,7 @@ xr_wait_command(
 }
 
 
-private vk_command_t*
+private xr_command_t*
 xr_get_command(
 	xr_t xr
 	)
@@ -3029,7 +3027,7 @@ xr_get_command(
 		xr->vk.command = xr->vk.commands;
 	}
 
-	vk_command_t* command = xr->vk.command;
+	xr_command_t* command = xr->vk.command;
 	++xr->vk.command;
 
 	if(!command->waited)
@@ -3058,7 +3056,7 @@ xr_get_command(
 private void
 xr_run_command(
 	xr_t xr,
-	vk_command_t* command
+	xr_command_t* command
 	)
 {
 	assert_not_null(xr);
@@ -3090,7 +3088,7 @@ xr_run_command(
 private void
 xr_copy_to_buffer_explicit(
 	xr_t xr,
-	vk_buffer_t* buffer,
+	xr_buffer_t* buffer,
 	const void* data,
 	VkDeviceSize size
 	)
@@ -3104,9 +3102,9 @@ xr_copy_to_buffer_explicit(
 		return;
 	}
 
-	vk_command_t* command = xr_get_command(xr);
+	xr_command_t* command = xr_get_command(xr);
 
-	vk_buffer_t* staging_buffer = &command->staging_buffer;
+	xr_buffer_t* staging_buffer = &command->staging_buffer;
 
 	if(size > XR_STAGING_BUFFER_SIZE)
 	{
@@ -3143,7 +3141,7 @@ xr_copy_to_buffer_explicit((xr), (buffer), (data), sizeof(*(data)) * (size))
 private void
 xr_read_from_buffer(
 	xr_t xr,
-	vk_buffer_t* buffer,
+	xr_buffer_t* buffer,
 	void* data,
 	VkDeviceSize size
 	)
@@ -3157,9 +3155,9 @@ xr_read_from_buffer(
 		return;
 	}
 
-	vk_command_t* command = xr_get_command(xr);
+	xr_command_t* command = xr_get_command(xr);
 
-	vk_buffer_t* staging_buffer = &command->staging_buffer;
+	xr_buffer_t* staging_buffer = &command->staging_buffer;
 
 	if(size > XR_STAGING_BUFFER_SIZE)
 	{
@@ -3193,15 +3191,15 @@ xr_read_from_buffer(
 private void
 xr_copy_texture_to_image(
 	xr_t xr,
-	vk_image_t* image
+	xr_image_t* image
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(image);
 
-	vk_command_t* command = xr_get_command(xr);
+	xr_command_t* command = xr_get_command(xr);
 
-	vk_buffer_t* staging_buffer = &command->staging_buffer;
+	xr_buffer_t* staging_buffer = &command->staging_buffer;
 
 	if(image->size > XR_STAGING_BUFFER_SIZE)
 	{
@@ -3271,7 +3269,7 @@ xr_copy_texture_to_image(
 private void
 xr_transition_image_layout(
 	xr_t xr,
-	vk_image_t* image,
+	xr_image_t* image,
 	VkImageLayout from,
 	VkImageLayout to
 	)
@@ -3279,7 +3277,7 @@ xr_transition_image_layout(
 	assert_not_null(xr);
 	assert_not_null(image);
 
-	vk_command_t* command = xr_get_command(xr);
+	xr_command_t* command = xr_get_command(xr);
 
 	VkPipelineStageFlags src_stage;
 	VkPipelineStageFlags dst_stage;
@@ -3345,7 +3343,7 @@ xr_transition_image_layout(
 private void
 xr_copy_data_to_image(
 	xr_t xr,
-	vk_image_t* image
+	xr_image_t* image
 	)
 {
 	assert_not_null(xr);
@@ -3366,14 +3364,14 @@ xr_copy_data_to_image(
 private void
 xr_init_image(
 	xr_t xr,
-	vk_image_t* image
+	xr_image_t* image
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(image);
 
-	assert_neq(image->type & (VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_TEXTURE_BIT),
-		VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_TEXTURE_BIT);
+	assert_neq(image->type & (XR_IMAGE_TYPE_DEPTH_BIT | XR_IMAGE_TYPE_TEXTURE_BIT),
+		XR_IMAGE_TYPE_DEPTH_BIT | XR_IMAGE_TYPE_TEXTURE_BIT);
 
 	VkImageCreateFlags create_flags = 0;
 	VkImageViewType view_type = VK_IMAGE_VIEW_TYPE_2D;
@@ -3381,7 +3379,7 @@ xr_init_image(
 
 	image->usage = 0;
 
-	if(image->type & VK_IMAGE_TYPE_DEPTH_BIT)
+	if(image->type & XR_IMAGE_TYPE_DEPTH_BIT)
 	{
 		image->format = VK_FORMAT_D32_SFLOAT;
 		image->aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -3391,14 +3389,14 @@ xr_init_image(
 	{
 		image->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 
-		if(image->type & VK_IMAGE_TYPE_ATTACHMENT_BIT)
+		if(image->type & XR_IMAGE_TYPE_ATTACHMENT_BIT)
 		{
 			image->usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 		}
 
-		if(!(image->type & VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT))
+		if(!(image->type & XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT))
 		{
-			if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
+			if(image->type & XR_IMAGE_TYPE_TEXTURE_BIT)
 			{
 				image->format = VK_FORMAT_R8G8B8A8_SRGB;
 			}
@@ -3409,22 +3407,22 @@ xr_init_image(
 		}
 	}
 
-	if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
+	if(image->type & XR_IMAGE_TYPE_TEXTURE_BIT)
 	{
 		image->usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	}
 
-	if(image->type & VK_IMAGE_TYPE_SAMPLED_BIT)
+	if(image->type & XR_IMAGE_TYPE_SAMPLED_BIT)
 	{
 		image->usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
 	}
 
-	if(image->type & VK_IMAGE_TYPE_TRANSIENT_BIT)
+	if(image->type & XR_IMAGE_TYPE_TRANSIENT_BIT)
 	{
 		image->usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
 	}
 
-	if(image->type & VK_IMAGE_TYPE_MULTISAMPLED_BIT)
+	if(image->type & XR_IMAGE_TYPE_MULTISAMPLED_BIT)
 	{
 		image->samples = xr->vk.samples;
 	}
@@ -3433,22 +3431,22 @@ xr_init_image(
 		image->samples = VK_SAMPLE_COUNT_1_BIT;
 	}
 
-	if(!(image->type & VK_IMAGE_TYPE_CUSTOM_SIZE_BIT))
+	if(!(image->type & XR_IMAGE_TYPE_CUSTOM_SIZE_BIT))
 	{
 		image->width = xr->vk.screen_extent.width;
 		image->height = xr->vk.screen_extent.height;
 	}
 
 	bool image_backed_texture =
-		(image->type & VK_IMAGE_TYPE_TEXTURE_BIT) && image->path && !str_is_empty(image->path);
+		(image->type & XR_IMAGE_TYPE_TEXTURE_BIT) && image->path && !str_is_empty(image->path);
 
-	if(image->type & VK_IMAGE_TYPE_TEXTURE_BIT)
+	if(image->type & XR_IMAGE_TYPE_TEXTURE_BIT)
 	{
 		if(image_backed_texture)
 		{
-			assert_eq(image->type & VK_IMAGE_TYPE_CUSTOM_SIZE_BIT, 0);
+			assert_eq(image->type & XR_IMAGE_TYPE_CUSTOM_SIZE_BIT, 0);
 
-			bool cube = image->type & VK_IMAGE_TYPE_CUBE_BIT;
+			bool cube = image->type & XR_IMAGE_TYPE_CUBE_BIT;
 			simulation_texture_t* texture = simulation_get_texture(xr->simulation, image->path, cube);
 			image->data = texture->data;
 			image->size = texture->size;
@@ -3477,7 +3475,7 @@ xr_init_image(
 		image->data = NULL;
 		image->size = 0;
 		image->levels = 1;
-		if(image->type & VK_IMAGE_TYPE_MULTIVIEW_BIT)
+		if(image->type & XR_IMAGE_TYPE_MULTIVIEW_BIT)
 		{
 			image->layers = 2;
 			view_type = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
@@ -3571,7 +3569,7 @@ xr_init_image(
 private void
 xr_free_image(
 	xr_t xr,
-	vk_image_t* image
+	xr_image_t* image
 	)
 {
 	assert_not_null(xr);
@@ -3587,7 +3585,7 @@ private void
 xr_write_images_to_set(
 	xr_t xr,
 	VkDescriptorSet set,
-	vk_image_t* images,
+	xr_image_t* images,
 	uint32_t count
 	)
 {
@@ -3656,7 +3654,7 @@ xr_write_images_to_set(
 private void
 xr_init_frame_image(
 	xr_t xr,
-	vk_frame_image_t* frame_image
+	xr_frame_image_t* frame_image
 	)
 {
 	assert_not_null(xr);
@@ -3676,7 +3674,7 @@ xr_init_frame_image(
 private void
 xr_free_frame_image(
 	xr_t xr,
-	vk_frame_image_t* frame_image
+	xr_frame_image_t* frame_image
 	)
 {
 	assert_not_null(xr);
@@ -3689,7 +3687,7 @@ xr_free_frame_image(
 private void
 xr_init_timing(
 	xr_t xr,
-	vk_timing_t* timing,
+	xr_timing_t* timing,
 	VkCommandBuffer command_buffer,
 	uint32_t count
 	)
@@ -3743,7 +3741,7 @@ xr_init_timing(
 private void
 xr_free_timing(
 	xr_t xr,
-	vk_timing_t* timing
+	xr_timing_t* timing
 	)
 {
 	assert_not_null(xr);
@@ -3766,7 +3764,7 @@ xr_free_timing(
 private void
 xr_timing_start(
 	xr_t xr,
-	vk_timing_t* timing,
+	xr_timing_t* timing,
 	uint32_t index
 	)
 {
@@ -3792,7 +3790,7 @@ xr_timing_start(
 private void
 xr_timing_end(
 	xr_t xr,
-	vk_timing_t* timing,
+	xr_timing_t* timing,
 	uint32_t index
 	)
 {
@@ -3817,7 +3815,7 @@ xr_timing_end(
 private void
 xr_timing_query(
 	xr_t xr,
-	vk_timing_t* timing
+	xr_timing_t* timing
 	)
 {
 	assert_not_null(xr);
@@ -3836,7 +3834,7 @@ xr_timing_query(
 private void
 xr_timing_load(
 	xr_t xr,
-	vk_timing_t* timing
+	xr_timing_t* timing
 	)
 {
 	assert_not_null(xr);
@@ -3853,7 +3851,7 @@ xr_timing_load(
 private uint64_t
 xr_timing_get(
 	xr_t xr,
-	vk_timing_t* timing,
+	xr_timing_t* timing,
 	uint32_t index
 	)
 {
@@ -3876,7 +3874,7 @@ xr_timing_get(
 private void
 xr_timing_reset(
 	xr_t xr,
-	vk_timing_t* timing
+	xr_timing_t* timing
 	)
 {
 	assert_not_null(xr);
@@ -4278,12 +4276,12 @@ xr_init_shadow_pipeline(
 	{
 		{
 			.binding = 0,
-			.stride = sizeof(vk_shadow_vertex_data_t),
+			.stride = sizeof(xr_shadow_vertex_data_t),
 			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
 		},
 		{
 			.binding = 1,
-			.stride = sizeof(vk_model_instance_data_t),
+			.stride = sizeof(xr_model_instance_data_t),
 			.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE
 		}
 	};
@@ -4294,31 +4292,31 @@ xr_init_shadow_pipeline(
 			.location = 0,
 			.binding = 0,
 			.format = VK_FORMAT_R32G32B32_SFLOAT,
-			.offset = offsetof(vk_shadow_vertex_data_t, position)
+			.offset = offsetof(xr_shadow_vertex_data_t, position)
 		},
 		{
 			.location = 1,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 0
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 0
 		},
 		{
 			.location = 2,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 1
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 1
 		},
 		{
 			.location = 3,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 2
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 2
 		},
 		{
 			.location = 4,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 3
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 3
 		}
 	};
 
@@ -4407,7 +4405,7 @@ xr_init_shadow_pipeline(
 		.logicOpEnable = VK_FALSE,
 		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &xr_vk_no_blending_attachment,
+		.pAttachments = &xr_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -4863,12 +4861,12 @@ xr_init_scene_pipeline(
 	{
 		{
 			.binding = 0,
-			.stride = sizeof(vk_mesh_vertex_data_t),
+			.stride = sizeof(xr_mesh_vertex_data_t),
 			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
 		},
 		{
 			.binding = 1,
-			.stride = sizeof(vk_model_instance_data_t),
+			.stride = sizeof(xr_model_instance_data_t),
 			.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE
 		}
 	};
@@ -4879,43 +4877,43 @@ xr_init_scene_pipeline(
 			.location = 0,
 			.binding = 0,
 			.format = VK_FORMAT_R32G32B32_SFLOAT,
-			.offset = offsetof(vk_mesh_vertex_data_t, position)
+			.offset = offsetof(xr_mesh_vertex_data_t, position)
 		},
 		{
 			.location = 1,
 			.binding = 0,
 			.format = VK_FORMAT_R32G32B32_SFLOAT,
-			.offset = offsetof(vk_mesh_vertex_data_t, normal)
+			.offset = offsetof(xr_mesh_vertex_data_t, normal)
 		},
 		{
 			.location = 2,
 			.binding = 0,
 			.format = VK_FORMAT_R32G32_SFLOAT,
-			.offset = offsetof(vk_mesh_vertex_data_t, coords)
+			.offset = offsetof(xr_mesh_vertex_data_t, coords)
 		},
 		{
 			.location = 3,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 0
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 0
 		},
 		{
 			.location = 4,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 1
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 1
 		},
 		{
 			.location = 5,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 2
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 2
 		},
 		{
 			.location = 6,
 			.binding = 1,
 			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
-			.offset = offsetof(vk_model_instance_data_t, transform) + sizeof(vec4) * 3
+			.offset = offsetof(xr_model_instance_data_t, transform) + sizeof(vec4) * 3
 		}
 	};
 
@@ -5003,7 +5001,7 @@ xr_init_scene_pipeline(
 
 	while(color_blend_attachment < color_blend_attachment_end)
 	{
-		*color_blend_attachment = xr_vk_no_blending_attachment;
+		*color_blend_attachment = xr_no_blending_attachment;
 		++color_blend_attachment;
 	}
 
@@ -5031,7 +5029,7 @@ xr_init_scene_pipeline(
 		{
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 			.offset = 0,
-			.size = sizeof(vk_scene_frag_constant_data_t)
+			.size = sizeof(xr_scene_frag_constant_data_t)
 		}
 	};
 
@@ -5498,7 +5496,7 @@ xr_init_ssao_pipeline(
 		.logicOpEnable = VK_FALSE,
 		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &xr_vk_no_blending_attachment,
+		.pAttachments = &xr_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -5584,12 +5582,12 @@ xr_init_ssao_noise_const(
 {
 	assert_not_null(xr);
 
-	vk_image_t* image = &xr->vk.ssao.noise.image;
+	xr_image_t* image = &xr->vk.ssao.noise.image;
 	*image =
-	(vk_image_t)
+	(xr_image_t)
 	{
 		.path = NULL,
-		.type = VK_IMAGE_TYPE_TEXTURE_2D_BITS | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT,
+		.type = XR_IMAGE_TYPE_TEXTURE_2D_BITS | XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT | XR_IMAGE_TYPE_CUSTOM_SIZE_BIT,
 		.format = VK_FORMAT_R32G32B32A32_SFLOAT,
 		.width = xr->options.ssao_noise_size,
 		.height = xr->options.ssao_noise_size
@@ -6059,7 +6057,7 @@ xr_init_ssao_blur_pipeline(
 		.logicOpEnable = VK_FALSE,
 		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &xr_vk_no_blending_attachment,
+		.pAttachments = &xr_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -6384,7 +6382,7 @@ xr_init_octree_pipeline(
 	{
 		{
 			.binding = 0,
-			.stride = sizeof(vk_octree_vertex_data_t),
+			.stride = sizeof(xr_octree_vertex_data_t),
 			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
 		}
 	};
@@ -6395,7 +6393,7 @@ xr_init_octree_pipeline(
 			.location = 0,
 			.binding = 0,
 			.format = VK_FORMAT_R32G32B32_SFLOAT,
-			.offset = offsetof(vk_octree_vertex_data_t, position)
+			.offset = offsetof(xr_octree_vertex_data_t, position)
 		}
 	};
 
@@ -6484,7 +6482,7 @@ xr_init_octree_pipeline(
 		.logicOpEnable = VK_FALSE,
 		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &xr_vk_no_blending_attachment,
+		.pAttachments = &xr_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -6784,7 +6782,7 @@ xr_init_skybox_pipeline(
 	{
 		{
 			.binding = 0,
-			.stride = sizeof(vk_skybox_vertex_data_t),
+			.stride = sizeof(xr_skybox_vertex_data_t),
 			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
 		}
 	};
@@ -6795,7 +6793,7 @@ xr_init_skybox_pipeline(
 			.location = 0,
 			.binding = 0,
 			.format = VK_FORMAT_R32G32B32_SFLOAT,
-			.offset = offsetof(vk_skybox_vertex_data_t, position)
+			.offset = offsetof(xr_skybox_vertex_data_t, position)
 		}
 	};
 
@@ -6884,7 +6882,7 @@ xr_init_skybox_pipeline(
 		.logicOpEnable = VK_FALSE,
 		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &xr_vk_no_blending_attachment,
+		.pAttachments = &xr_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -6969,18 +6967,18 @@ xr_init_skybox_consts(
 	assert_not_null(xr);
 
 	xr->vk.output.skybox.sky.image =
-	(vk_image_t)
+	(xr_image_t)
 	{
 		.path = simulation_get_skybox_path(xr->simulation),
-		.type = VK_IMAGE_TYPE_TEXTURE_CUBE_BITS
+		.type = XR_IMAGE_TYPE_TEXTURE_CUBE_BITS
 	};
 	xr_init_frame_image(xr, &xr->vk.output.skybox.sky);
 
-	xr_init_vertex_buffer(xr, sizeof(xr_vk_skybox_vertex_data), &xr->vk.output.skybox.vertex_buffer);
-	xr_copy_to_buffer(xr, &xr->vk.output.skybox.vertex_buffer, xr_vk_skybox_vertex_data, MACRO_ARRAY_LEN(xr_vk_skybox_vertex_data));
+	xr_init_vertex_buffer(xr, sizeof(xr_skybox_vertex_data), &xr->vk.output.skybox.vertex_buffer);
+	xr_copy_to_buffer(xr, &xr->vk.output.skybox.vertex_buffer, xr_skybox_vertex_data, MACRO_ARRAY_LEN(xr_skybox_vertex_data));
 
-	xr_init_index_buffer(xr, sizeof(xr_vk_skybox_index_data), &xr->vk.output.skybox.index_buffer);
-	xr_copy_to_buffer(xr, &xr->vk.output.skybox.index_buffer, xr_vk_skybox_index_data, MACRO_ARRAY_LEN(xr_vk_skybox_index_data));
+	xr_init_index_buffer(xr, sizeof(xr_skybox_index_data), &xr->vk.output.skybox.index_buffer);
+	xr_copy_to_buffer(xr, &xr->vk.output.skybox.index_buffer, xr_skybox_index_data, MACRO_ARRAY_LEN(xr_skybox_index_data));
 }
 
 
@@ -7127,7 +7125,7 @@ xr_init_compose_pipeline(
 		.logicOpEnable = VK_FALSE,
 		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &xr_vk_blending_attachment,
+		.pAttachments = &xr_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -7360,7 +7358,7 @@ xr_init_preview_pipeline(
 		.logicOpEnable = VK_FALSE,
 		.logicOp = VK_LOGIC_OP_CLEAR,
 		.attachmentCount = 1,
-		.pAttachments = &xr_vk_no_blending_attachment,
+		.pAttachments = &xr_no_blending_attachment,
 		.blendConstants = { 0.0f, 0.0f, 0.0f, 0.0f }
 	};
 
@@ -7582,8 +7580,8 @@ xr_init_models(
 	xr->vk.models = alloc_malloc(xr->vk.models, xr->vk.model_count);
 	assert_ptr(xr->vk.models, xr->vk.model_count);
 
-	vk_material_t* material = xr->vk.materials;
-	vk_model_t* model = xr->vk.models;
+	xr_material_t* material = xr->vk.materials;
+	xr_model_t* model = xr->vk.models;
 
 	for(uint32_t i = 0; i < xr->vk.model_count; ++i)
 	{
@@ -7593,7 +7591,7 @@ xr_init_models(
 		assert_ptr(model->meshes, sim_model->mesh_count);
 		model->mesh_count = sim_model->mesh_count;
 
-		vk_mesh_t* mesh = model->meshes;
+		xr_mesh_t* mesh = model->meshes;
 
 		mesh_t* sim_mesh = sim_model->meshes;
 		mesh_t* sim_mesh_end = sim_mesh + sim_model->mesh_count;
@@ -7604,15 +7602,15 @@ xr_init_models(
 			mesh->vertex_count = sim_mesh->vertex_count;
 			mesh->index_count = sim_mesh->index_count;
 
-			xr_init_vertex_buffer(xr, sizeof(vk_shadow_vertex_data_t) *
+			xr_init_vertex_buffer(xr, sizeof(xr_shadow_vertex_data_t) *
 				sim_mesh->vertex_count, &mesh->shadow_vertex_buffer);
 			xr_copy_to_buffer(xr, &mesh->shadow_vertex_buffer, sim_mesh->vertices, sim_mesh->vertex_count);
 
-			vk_mesh_vertex_data_t* vertex_data = alloc_malloc(vertex_data, sim_mesh->vertex_count);
+			xr_mesh_vertex_data_t* vertex_data = alloc_malloc(vertex_data, sim_mesh->vertex_count);
 			assert_ptr(vertex_data, sim_mesh->vertex_count);
 
-			vk_mesh_vertex_data_t* data = vertex_data;
-			vk_mesh_vertex_data_t* data_end = data + sim_mesh->vertex_count;
+			xr_mesh_vertex_data_t* data = vertex_data;
+			xr_mesh_vertex_data_t* data_end = data + sim_mesh->vertex_count;
 
 			vec3* vertex = sim_mesh->vertices;
 			vec3* normal = sim_mesh->normals;
@@ -7650,7 +7648,7 @@ xr_init_models(
 
 		while(sim_material < sim_material_end)
 		{
-			material->texture.type = VK_IMAGE_TYPE_TEXTURE_2D_BITS;
+			material->texture.type = XR_IMAGE_TYPE_TEXTURE_2D_BITS;
 
 			if(!str_is_empty(sim_material->texture))
 			{
@@ -7702,7 +7700,7 @@ xr_init_models(
 
 		for(uint32_t i = 0; i < xr->vk.image_count; ++i)
 		{
-			xr_init_vertex_buffer(xr, sizeof(vk_model_instance_data_t) * VK_MAX_INSTANCES, &model->instance_buffers[i]);
+			xr_init_vertex_buffer(xr, sizeof(xr_model_instance_data_t) * XR_MAX_INSTANCES, &model->instance_buffers[i]);
 
 			xr_init_indirect_buffer(xr, model->mesh_count, &model->indirect_buffers[i]);
 		}
@@ -7721,8 +7719,8 @@ xr_free_models(
 {
 	assert_not_null(xr);
 
-	vk_model_t* model = xr->vk.models;
-	vk_model_t* model_end = model + xr->vk.model_count;
+	xr_model_t* model = xr->vk.models;
+	xr_model_t* model_end = model + xr->vk.model_count;
 
 	while(model < model_end)
 	{
@@ -7732,8 +7730,8 @@ xr_free_models(
 			xr_free_buffer(xr, &model->instance_buffers[i]);
 		}
 
-		vk_mesh_t* mesh = model->meshes;
-		vk_mesh_t* mesh_end = mesh + model->mesh_count;
+		xr_mesh_t* mesh = model->meshes;
+		xr_mesh_t* mesh_end = mesh + model->mesh_count;
 
 		while(mesh < mesh_end)
 		{
@@ -7751,8 +7749,8 @@ xr_free_models(
 
 	alloc_free(xr->vk.models, xr->vk.model_count);
 
-	vk_material_t* material = xr->vk.materials;
-	vk_material_t* material_end = material + xr->vk.material_count;
+	xr_material_t* material = xr->vk.materials;
+	xr_material_t* material_end = material + xr->vk.material_count;
 
 	while(material < material_end)
 	{
@@ -7804,8 +7802,8 @@ xr_init_frames(
 		.flags = VK_FENCE_CREATE_SIGNALED_BIT
 	};
 
-	vk_barrier_t* barrier = xr->vk.barriers;
-	vk_barrier_t* barrier_end = barrier + MACRO_ARRAY_LEN(xr->vk.barriers);
+	xr_barrier_t* barrier = xr->vk.barriers;
+	xr_barrier_t* barrier_end = barrier + MACRO_ARRAY_LEN(xr->vk.barriers);
 
 	while(barrier < barrier_end)
 	{
@@ -7839,8 +7837,8 @@ xr_free_frames(
 	VkCommandBuffer command_buffers[command_buffer_count];
 	VkCommandBuffer* command_buffer = command_buffers;
 
-	vk_barrier_t* barrier = xr->vk.barriers;
-	vk_barrier_t* barrier_end = barrier + MACRO_ARRAY_LEN(xr->vk.barriers);
+	xr_barrier_t* barrier = xr->vk.barriers;
+	xr_barrier_t* barrier_end = barrier + MACRO_ARRAY_LEN(xr->vk.barriers);
 
 	while(barrier < barrier_end)
 	{
@@ -7863,17 +7861,17 @@ xr_free_frames(
 private void
 xr_init_shadow_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
 
-	xr_init_vert_ubo_buffer(xr, sizeof(vk_shadow_vert_constant_data_t), &frame->shadow.vert_ubo);
+	xr_init_vert_ubo_buffer(xr, sizeof(xr_shadow_vert_constant_data_t), &frame->shadow.vert_ubo);
 
-	vk_image_t* image = &frame->shadow.map.image;
-	image->type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_DEPTH_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	xr_image_t* image = &frame->shadow.map.image;
+	image->type = XR_IMAGE_TYPE_ATTACHMENT_BIT | XR_IMAGE_TYPE_DEPTH_BIT |
+		XR_IMAGE_TYPE_SAMPLED_BIT | XR_IMAGE_TYPE_CUSTOM_SIZE_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	image->width = xr->options.shadow_map_size;
 	image->height = xr->options.shadow_map_size;
 	xr_init_frame_image(xr, &frame->shadow.map);
@@ -7905,7 +7903,7 @@ xr_init_shadow_framebuffer(
 private void
 xr_free_shadow_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -7921,42 +7919,42 @@ xr_free_shadow_framebuffer(
 private void
 xr_init_scene_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
 
-	xr_init_vert_ubo_buffer(xr, sizeof(vk_scene_vert_ubo_data_t), &frame->scene.vert_ubo);
+	xr_init_vert_ubo_buffer(xr, sizeof(xr_scene_vert_ubo_data_t), &frame->scene.vert_ubo);
 
-	frame->scene.position_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.position_ms.type = XR_IMAGE_TYPE_ATTACHMENT_BIT |
+		XR_IMAGE_TYPE_MULTISAMPLED_BIT | XR_IMAGE_TYPE_TRANSIENT_BIT | XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	frame->scene.position_ms.format = VK_FORMAT_R32G32B32A32_SFLOAT;
 	xr_init_image(xr, &frame->scene.position_ms);
 
-	frame->scene.normal_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.normal_ms.type = XR_IMAGE_TYPE_ATTACHMENT_BIT |
+		XR_IMAGE_TYPE_MULTISAMPLED_BIT | XR_IMAGE_TYPE_TRANSIENT_BIT | XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	frame->scene.normal_ms.format = VK_FORMAT_R8G8B8A8_UNORM;
 	xr_init_image(xr, &frame->scene.normal_ms);
 
-	frame->scene.map_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.map_ms.type = XR_IMAGE_TYPE_ATTACHMENT_BIT |
+		XR_IMAGE_TYPE_MULTISAMPLED_BIT | XR_IMAGE_TYPE_TRANSIENT_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	xr_init_image(xr, &frame->scene.map_ms);
 
-	frame->scene.position.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.position.image.type = XR_IMAGE_TYPE_ATTACHMENT_BIT |
+		XR_IMAGE_TYPE_SAMPLED_BIT | XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	frame->scene.position.image.format = VK_FORMAT_R32G32B32A32_SFLOAT;
 	xr_init_frame_image(xr, &frame->scene.position);
 
-	frame->scene.normal.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.normal.image.type = XR_IMAGE_TYPE_ATTACHMENT_BIT |
+		XR_IMAGE_TYPE_SAMPLED_BIT | XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	frame->scene.normal.image.format = VK_FORMAT_R8G8B8A8_UNORM;
 	xr_init_frame_image(xr, &frame->scene.normal);
 
-	frame->scene.map.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.map.image.type = XR_IMAGE_TYPE_ATTACHMENT_BIT | XR_IMAGE_TYPE_SAMPLED_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	xr_init_frame_image(xr, &frame->scene.map);
 
-	vk_image_t images[] =
+	xr_image_t images[] =
 	{
 		frame->scene.position.image,
 		frame->scene.normal.image
@@ -7966,8 +7964,8 @@ xr_init_scene_framebuffer(
 
 	xr_write_images_to_set(xr, frame->scene.set, images, MACRO_ARRAY_LEN(images));
 
-	frame->scene.depth.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_DEPTH_BIT | VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT;
+	frame->scene.depth.type = XR_IMAGE_TYPE_ATTACHMENT_BIT |
+		XR_IMAGE_TYPE_DEPTH_BIT | XR_IMAGE_TYPE_MULTISAMPLED_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT;
 	xr_init_image(xr, &frame->scene.depth);
 
 	VkImageView attachments[] =
@@ -8003,7 +8001,7 @@ xr_init_scene_framebuffer(
 private void
 xr_free_scene_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8025,19 +8023,19 @@ xr_free_scene_framebuffer(
 private void
 xr_init_ssao_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
 
-	xr_init_frag_ubo_buffer(xr, sizeof(vk_ssao_frag_ubo_data_t), &frame->ssao.frag_ubo);
+	xr_init_frag_ubo_buffer(xr, sizeof(xr_ssao_frag_ubo_data_t), &frame->ssao.frag_ubo);
 
 	frame->ssao.map.image =
-	(vk_image_t)
+	(xr_image_t)
 	{
-		.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT |
-			VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT,
+		.type = XR_IMAGE_TYPE_ATTACHMENT_BIT | XR_IMAGE_TYPE_SAMPLED_BIT |
+			XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT | XR_IMAGE_TYPE_CUSTOM_SIZE_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT,
 		.format = VK_FORMAT_R8_UNORM,
 		.width = xr->vk.ssao_extent.width,
 		.height = xr->vk.ssao_extent.height
@@ -8071,7 +8069,7 @@ xr_init_ssao_framebuffer(
 private void
 xr_free_ssao_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8087,17 +8085,17 @@ xr_free_ssao_framebuffer(
 private void
 xr_init_ssao_blur_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
 
 	frame->ssao_blur.map.image =
-	(vk_image_t)
+	(xr_image_t)
 	{
-		.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT |
-			VK_IMAGE_TYPE_CUSTOM_FORMAT_BIT | VK_IMAGE_TYPE_CUSTOM_SIZE_BIT | VK_IMAGE_TYPE_MULTIVIEW_BIT,
+		.type = XR_IMAGE_TYPE_ATTACHMENT_BIT | XR_IMAGE_TYPE_SAMPLED_BIT |
+			XR_IMAGE_TYPE_CUSTOM_FORMAT_BIT | XR_IMAGE_TYPE_CUSTOM_SIZE_BIT | XR_IMAGE_TYPE_MULTIVIEW_BIT,
 		.format = VK_FORMAT_R8_UNORM,
 		.width = xr->vk.ssao_extent.width,
 		.height = xr->vk.ssao_extent.height
@@ -8131,7 +8129,7 @@ xr_init_ssao_blur_framebuffer(
 private void
 xr_free_ssao_blur_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8146,22 +8144,22 @@ xr_free_ssao_blur_framebuffer(
 private void
 xr_init_octree_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
 
-	xr_init_vert_ubo_buffer(xr, sizeof(vk_octree_vert_ubo_data_t), &frame->octree.vert_ubo);
+	xr_init_vert_ubo_buffer(xr, sizeof(xr_octree_vert_ubo_data_t), &frame->octree.vert_ubo);
 
-	xr_init_vertex_buffer(xr, sizeof(vk_octree_vertex_data_t) * XR_OCTREE_MAX_VERTICES, &frame->octree.vertex_buffer);
+	xr_init_vertex_buffer(xr, sizeof(xr_octree_vertex_data_t) * XR_OCTREE_MAX_VERTICES, &frame->octree.vertex_buffer);
 	xr_init_indirect_buffer(xr, sizeof(VkDrawIndirectCommand), &frame->octree.indirect_buffer);
 
-	frame->octree.map_ms.type = VK_IMAGE_TYPE_ATTACHMENT_BIT |
-		VK_IMAGE_TYPE_MULTISAMPLED_BIT | VK_IMAGE_TYPE_TRANSIENT_BIT;
+	frame->octree.map_ms.type = XR_IMAGE_TYPE_ATTACHMENT_BIT |
+		XR_IMAGE_TYPE_MULTISAMPLED_BIT | XR_IMAGE_TYPE_TRANSIENT_BIT;
 	xr_init_image(xr, &frame->octree.map_ms);
 
-	frame->octree.map.image.type = VK_IMAGE_TYPE_ATTACHMENT_BIT | VK_IMAGE_TYPE_SAMPLED_BIT;
+	frame->octree.map.image.type = XR_IMAGE_TYPE_ATTACHMENT_BIT | XR_IMAGE_TYPE_SAMPLED_BIT;
 	xr_init_frame_image(xr, &frame->octree.map);
 
 	VkImageView attachments[] =
@@ -8193,7 +8191,7 @@ xr_init_octree_framebuffer(
 private void
 xr_free_octree_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8214,14 +8212,14 @@ xr_free_octree_framebuffer(
 private void
 xr_init_output_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame,
+	xr_frame_t* frame,
 	VkImage* swapchain_image
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(frame);
 
-	xr_init_vert_ubo_buffer(xr, sizeof(vk_skybox_constant_data_t), &frame->output.vert_ubo);
+	xr_init_vert_ubo_buffer(xr, sizeof(xr_skybox_constant_data_t), &frame->output.vert_ubo);
 
 	frame->output.image = *swapchain_image;
 
@@ -8281,7 +8279,7 @@ xr_init_output_framebuffer(
 private void
 xr_free_output_framebuffer(
 	xr_t xr,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8308,8 +8306,8 @@ xr_init_framebuffers(
 		.flags = 0
 	};
 
-	vk_frame_t* frame = xr->vk.frames;
-	vk_frame_t* frame_end = frame + xr->vk.image_count;
+	xr_frame_t* frame = xr->vk.frames;
+	xr_frame_t* frame_end = frame + xr->vk.image_count;
 
 	uint32_t image_idx = 0;
 
@@ -8342,8 +8340,8 @@ xr_free_framebuffers(
 {
 	assert_not_null(xr);
 
-	vk_frame_t* frame = xr->vk.frames;
-	vk_frame_t* frame_end = frame + xr->vk.image_count;
+	xr_frame_t* frame = xr->vk.frames;
+	xr_frame_t* frame_end = frame + xr->vk.image_count;
 
 	while(frame < frame_end)
 	{
@@ -8640,15 +8638,15 @@ xr_get_eye_poses(
 #define XR_FOR_EACH_MODEL(entities_per_model, ...)									\
 do																					\
 {																					\
-	vk_entities_per_model_t* entities_per_model = entity_data;						\
-	vk_entities_per_model_t* entities_per_model##_end =								\
+	xr_entities_per_model_t* entities_per_model = entity_data;						\
+	xr_entities_per_model_t* entities_per_model##_end =								\
 		entities_per_model + xr->vk.model_count;									\
 																					\
-	__VA_OPT__(vk_model_t* __VA_ARGS__ = xr->vk.models;)							\
+	__VA_OPT__(xr_model_t* __VA_ARGS__ = xr->vk.models;)							\
 																					\
 	while(entities_per_model < entities_per_model##_end)							\
 	{																				\
-		hard_assert_le(entities_per_model->entities_used, VK_MAX_INSTANCES);
+		hard_assert_le(entities_per_model->entities_used, XR_MAX_INSTANCES);
 
 #define XR_FOR_EACH_MODEL_END(entities_per_model, ...)	\
 		++entities_per_model;							\
@@ -8662,8 +8660,8 @@ private void
 xr_record_shadow(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
-	vk_frame_t* frame,
-	vk_entities_per_model_t* entity_data
+	xr_frame_t* frame,
+	xr_entities_per_model_t* entity_data
 	)
 {
 	assert_not_null(xr);
@@ -8704,8 +8702,8 @@ xr_record_shadow(
 		xr->vk.table.vkCmdBindVertexBuffers(command_buffer,
 			1, 1, &model->instance_buffers[image_idx].buffer, (VkDeviceSize[]){0});
 
-		vk_mesh_t* mesh = model->meshes;
-		vk_mesh_t* mesh_end = mesh + model->mesh_count;
+		xr_mesh_t* mesh = model->meshes;
+		xr_mesh_t* mesh_end = mesh + model->mesh_count;
 
 		while(mesh < mesh_end)
 		{
@@ -8734,8 +8732,8 @@ private void
 xr_record_scene(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
-	vk_frame_t* frame,
-	vk_entities_per_model_t* entity_data
+	xr_frame_t* frame,
+	xr_entities_per_model_t* entity_data
 	)
 {
 	assert_not_null(xr);
@@ -8787,21 +8785,21 @@ xr_record_scene(
 		VK_PIPELINE_BIND_POINT_GRAPHICS, xr->vk.scene.pipeline_layout,
 		2, 1, &frame->shadow.map.set, 0, NULL);
 
-	vk_scene_frag_constant_data_t scene_frag_constant_data = {0};
+	xr_scene_frag_constant_data_t scene_frag_constant_data = {0};
 
 	XR_FOR_EACH_MODEL(entities_per_model, model)
 	{
 		xr->vk.table.vkCmdBindVertexBuffers(command_buffer, 1, 1,
 			&model->instance_buffers[image_idx].buffer, (VkDeviceSize[]){0});
 
-		vk_mesh_t* mesh = model->meshes;
-		vk_mesh_t* mesh_end = mesh + model->mesh_count;
+		xr_mesh_t* mesh = model->meshes;
+		xr_mesh_t* mesh_end = mesh + model->mesh_count;
 
 		while(mesh < mesh_end)
 		{
 			uint32_t mesh_idx = mesh - model->meshes;
 
-			vk_material_t* material = xr->vk.materials + mesh->material_idx;
+			xr_material_t* material = xr->vk.materials + mesh->material_idx;
 
 			glm_vec4_copy(material->constant_data.diffuse, scene_frag_constant_data.diffuse);
 			glm_vec4_copy(material->constant_data.ambient, scene_frag_constant_data.ambient);
@@ -8839,7 +8837,7 @@ private void
 xr_record_ssao(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8887,7 +8885,7 @@ private void
 xr_record_ssao_blur(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8933,7 +8931,7 @@ private void
 xr_record_octree(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -8985,7 +8983,7 @@ private void
 xr_record_output(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
-	vk_frame_t* frame
+	xr_frame_t* frame
 	)
 {
 	assert_not_null(xr);
@@ -9032,7 +9030,7 @@ xr_record_output(
 			xr->vk.output.skybox.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
 
 		xr->vk.table.vkCmdDrawIndexed(command_buffer,
-			MACRO_ARRAY_LEN(xr_vk_skybox_index_data), 1, 0, 0, 0);
+			MACRO_ARRAY_LEN(xr_skybox_index_data), 1, 0, 0, 0);
 
 
 		xr->vk.table.vkCmdBindPipeline(command_buffer,
@@ -9165,9 +9163,9 @@ private void
 xr_record_command_buffer(
 	xr_t xr,
 	VkCommandBuffer command_buffer,
-	vk_frame_t* frame,
-	vk_timing_t* timing,
-	vk_entities_per_model_t* entity_data
+	xr_frame_t* frame,
+	xr_timing_t* timing,
+	xr_entities_per_model_t* entity_data
 	)
 {
 	assert_not_null(xr);
@@ -9221,14 +9219,14 @@ xr_record_command_buffer(
 private void
 xr_record_all_command_buffers(
 	xr_t xr,
-	vk_entities_per_model_t* entity_data
+	xr_entities_per_model_t* entity_data
 	)
 {
 	assert_not_null(xr);
 	assert_not_null(entity_data);
 
-	vk_barrier_t* barrier = xr->vk.barriers;
-	vk_barrier_t* barrier_end = barrier + MACRO_ARRAY_LEN(xr->vk.barriers);
+	xr_barrier_t* barrier = xr->vk.barriers;
+	xr_barrier_t* barrier_end = barrier + MACRO_ARRAY_LEN(xr->vk.barriers);
 
 	while(barrier < barrier_end)
 	{
@@ -9243,7 +9241,7 @@ xr_record_all_command_buffers(
 }
 
 
-private vk_entities_per_model_t*
+private xr_entities_per_model_t*
 xr_init_entities_per_model(
 	xr_t xr
 	)
@@ -9256,7 +9254,7 @@ xr_init_entities_per_model(
 	simulation_entity_data_t* sim_entity = sim_entity_data;
 	simulation_entity_data_t* sim_entity_end = sim_entity + sim_entity_count;
 
-	vk_entities_per_model_t* entity_data = alloc_calloc(entity_data, xr->vk.model_count);
+	xr_entities_per_model_t* entity_data = alloc_calloc(entity_data, xr->vk.model_count);
 	assert_ptr(entity_data, xr->vk.model_count);
 
 	entity_data->original_entities = sim_entity_data;
@@ -9264,7 +9262,7 @@ xr_init_entities_per_model(
 
 	while(sim_entity < sim_entity_end)
 	{
-		vk_entities_per_model_t* entities = entity_data + sim_entity->model_idx;
+		xr_entities_per_model_t* entities = entity_data + sim_entity->model_idx;
 
 		if(entities->entities_used >= entities->entities_size)
 		{
@@ -9288,7 +9286,7 @@ xr_init_entities_per_model(
 private void
 xr_free_entities_per_model(
 	xr_t xr,
-	vk_entities_per_model_t* entity_data
+	xr_entities_per_model_t* entity_data
 	)
 {
 	assert_not_null(xr);
@@ -9332,7 +9330,7 @@ xr_draw(
 	xr_result = xrWaitSwapchainImage(xr->vk.swapchain, &wait_info);
 	hard_assert_eq(xr_result, XR_SUCCESS);
 
-	vk_frame_t* frame = xr->vk.frames + image_idx;
+	xr_frame_t* frame = xr->vk.frames + image_idx;
 
 	if(frame->barrier)
 	{
@@ -9344,7 +9342,7 @@ xr_draw(
 	result = xr->vk.table.vkResetFences(xr->vk.device, 1, &xr->vk.barrier->fence);
 	hard_assert_eq(result, VK_SUCCESS);
 
-	vk_timing_t* timing = &xr->vk.barrier->timings[image_idx];
+	xr_timing_t* timing = &xr->vk.barrier->timings[image_idx];
 	if(timing->current)
 	{
 		xr_timing_load(xr, timing);
@@ -9435,7 +9433,7 @@ xr_draw(
 
 	simulation_update(xr->simulation);
 
-	vk_entities_per_model_t* entity_data = xr_init_entities_per_model(xr);
+	xr_entities_per_model_t* entity_data = xr_init_entities_per_model(xr);
 
 	if(!xr->vk.recorded_commands)
 	{
@@ -9448,10 +9446,10 @@ xr_draw(
 		simulation_entity_data_t** entity = entities_per_model->entities;
 		simulation_entity_data_t** entity_end = entity + entities_per_model->entities_used;
 
-		vk_model_instance_data_t* instance_data = alloc_malloc(instance_data, entities_per_model->entities_used);
+		xr_model_instance_data_t* instance_data = alloc_malloc(instance_data, entities_per_model->entities_used);
 		assert_ptr(instance_data, entities_per_model->entities_used);
 
-		vk_model_instance_data_t* instance = instance_data;
+		xr_model_instance_data_t* instance = instance_data;
 
 		while(entity < entity_end)
 		{
@@ -9466,8 +9464,8 @@ xr_draw(
 		alloc_free(instance_data, entities_per_model->entities_used);
 
 		VkDrawIndexedIndirectCommand indirect_cmds[model->mesh_count];
-		vk_mesh_t* mesh = model->meshes;
-		vk_mesh_t* mesh_end = mesh + model->mesh_count;
+		xr_mesh_t* mesh = model->meshes;
+		xr_mesh_t* mesh_end = mesh + model->mesh_count;
 
 		while(mesh < mesh_end)
 		{
@@ -9490,11 +9488,11 @@ xr_draw(
 
 	xr_free_entities_per_model(xr, entity_data);
 
-	vk_shadow_vert_constant_data_t shadow_vert_ubo_data;
+	xr_shadow_vert_constant_data_t shadow_vert_ubo_data;
 	glm_mat4_copy(vr_transform.light_transform, shadow_vert_ubo_data.transform);
 	xr_copy_to_buffer(xr, &frame->shadow.vert_ubo.buffer, &shadow_vert_ubo_data, 1);
 
-	vk_scene_vert_ubo_data_t scene_vert_ubo_data;
+	xr_scene_vert_ubo_data_t scene_vert_ubo_data;
 	glm_mat4_copy(vr_transform.projection[0], scene_vert_ubo_data.projection[0]);
 	glm_mat4_copy(vr_transform.projection[1], scene_vert_ubo_data.projection[1]);
 	glm_mat4_copy(vr_transform.view[0], scene_vert_ubo_data.view[0]);
@@ -9507,11 +9505,11 @@ xr_draw(
 	scene_vert_ubo_data.camera_position[1][3] = 1.0f;
 	xr_copy_to_buffer(xr, &frame->scene.vert_ubo.buffer, &scene_vert_ubo_data, 1);
 
-	vk_ssao_frag_ubo_data_t ssao_frag_ubo_data;
+	xr_ssao_frag_ubo_data_t ssao_frag_ubo_data;
 	glm_mat4_copy(vr_transform.projection[0], ssao_frag_ubo_data.projection);
 	xr_copy_to_buffer(xr, &frame->ssao.frag_ubo.buffer, &ssao_frag_ubo_data, 1);
 
-	vk_skybox_constant_data_t skybox_vert_ubo_data;
+	xr_skybox_constant_data_t skybox_vert_ubo_data;
 	glm_mat4_copy(vr_transform.projection[0], skybox_vert_ubo_data.transform[0]);
 	mat4 view_left;
 	glm_mat4_copy(vr_transform.view[0], view_left);
@@ -9528,7 +9526,7 @@ xr_draw(
 	glm_mat4_mul(skybox_vert_ubo_data.transform[1], view_right, skybox_vert_ubo_data.transform[1]);
 	xr_copy_to_buffer(xr, &frame->output.vert_ubo.buffer, &skybox_vert_ubo_data, 1);
 
-	vk_octree_vert_ubo_data_t octree_vert_ubo_data;
+	xr_octree_vert_ubo_data_t octree_vert_ubo_data;
 	glm_mat4_copy(vr_transform.projection[0], octree_vert_ubo_data.transform[0]);
 	glm_mat4_mul(octree_vert_ubo_data.transform[0], vr_transform.view[0], octree_vert_ubo_data.transform[0]);
 	glm_mat4_copy(vr_transform.projection[1], octree_vert_ubo_data.transform[1]);
@@ -9584,7 +9582,7 @@ xr_draw(
 	stats_log(xr->stats, "xr_frame_all", frame_time);
 
 	++xr->vk.barrier;
-	if(xr->vk.barrier >= xr->vk.barriers + VK_MAX_FRAMES)
+	if(xr->vk.barrier >= xr->vk.barriers + XR_MAX_FRAMES)
 	{
 		xr->vk.barrier = xr->vk.barriers;
 	}
@@ -9592,13 +9590,13 @@ xr_draw(
 
 
 private void
-xr_init_xr_session(
+xr_init_session(
 	xr_t xr
 	)
 {
 	assert_not_null(xr);
 
-	XrGraphicsBindingVulkanKHR xr_vk_binding =
+	XrGraphicsBindingVulkanKHR binding =
 	{
 		.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR,
 		.next = NULL,
@@ -9609,16 +9607,16 @@ xr_init_xr_session(
 		.queueIndex = 0
 	};
 
-	XrSessionCreateInfo xr_session_info =
+	XrSessionCreateInfo session_info =
 	{
 		.type = XR_TYPE_SESSION_CREATE_INFO,
-		.next = &xr_vk_binding,
+		.next = &binding,
 		.createFlags = 0,
 		.systemId = xr->system
 	};
 
-	XrResult xr_result = xrCreateSession(xr->instance, &xr_session_info, &xr->session);
-	assert_eq(xr_result, XR_SUCCESS);
+	XrResult result = xrCreateSession(xr->instance, &session_info, &xr->session);
+	assert_eq(result, XR_SUCCESS);
 
 	XrReferenceSpaceCreateInfo xr_space_info =
 	{
@@ -9632,13 +9630,13 @@ xr_init_xr_session(
 		}
 	};
 
-	xr_result = xrCreateReferenceSpace(xr->session, &xr_space_info, &xr->space);
-	assert_eq(xr_result, XR_SUCCESS);
+	result = xrCreateReferenceSpace(xr->session, &xr_space_info, &xr->space);
+	assert_eq(result, XR_SUCCESS);
 }
 
 
 private void
-xr_free_xr_session(
+xr_free_session(
 	xr_t xr
 	)
 {
@@ -9650,7 +9648,7 @@ xr_free_xr_session(
 
 
 private void
-xr_init_xr_views(
+xr_init_views(
 	xr_t xr
 	)
 {
@@ -9700,7 +9698,7 @@ xr_init_xr_views(
 
 
 private void
-xr_free_xr_views(
+xr_free_views(
 	xr_t xr
 	)
 {
@@ -9711,7 +9709,7 @@ xr_free_xr_views(
 
 
 private void
-xr_init_xr_controllers(
+xr_init_controllers(
 	xr_t xr
 	)
 {
@@ -9887,7 +9885,7 @@ xr_init_xr_controllers(
 
 
 private void
-xr_free_xr_controllers(
+xr_free_controllers(
 	xr_t xr
 	)
 {
@@ -10162,7 +10160,7 @@ xr_session_thread_fn(
 
 
 private void
-xr_init_xr_thread(
+xr_init_thread(
 	xr_t xr
 	)
 {
@@ -10178,7 +10176,7 @@ xr_init_xr_thread(
 
 
 private void
-xr_free_xr_thread(
+xr_free_thread(
 	xr_t xr
 	)
 {
@@ -10199,14 +10197,14 @@ xr_init_xr(
 	xr_init_stats(xr);
 	xr_init_xr_instance(xr);
 	xr_init_vk_instance(xr);
-	xr_init_vk_physical_device(xr);
-	xr_init_vk_device_properties(xr);
-	xr_init_vk_logical_device(xr);
-	xr_init_xr_views(xr);
-	xr_init_xr_session(xr);
-	xr_init_vk_capabilities(xr);
-	xr_init_xr_swapchain(xr);
-	xr_init_xr_controllers(xr);
+	xr_init_physical_device(xr);
+	xr_init_device_properties(xr);
+	xr_init_logical_device(xr);
+	xr_init_views(xr);
+	xr_init_session(xr);
+	xr_init_capabilities(xr);
+	xr_init_swapchain(xr);
+	xr_init_controllers(xr);
 	xr_init_commands(xr);
 	xr_init_sets(xr);
 	xr_init_pipelines(xr);
@@ -10214,7 +10212,7 @@ xr_init_xr(
 	xr_init_frames(xr);
 	xr_init_framebuffers(xr);
 
-	xr_init_xr_thread(xr);
+	xr_init_thread(xr);
 
 	puts("\nXR initialized");
 }
@@ -10227,7 +10225,7 @@ xr_free_xr(
 {
 	assert_not_null(xr);
 
-	xr_free_xr_thread(xr);
+	xr_free_thread(xr);
 
 	xr_device_wait_idle(xr);
 
@@ -10237,12 +10235,12 @@ xr_free_xr(
 	xr_free_pipelines(xr);
 	xr_free_sets(xr);
 	xr_free_commands(xr);
-	xr_free_xr_controllers(xr);
-	xr_free_xr_swapchain(xr);
-	xr_free_xr_session(xr);
-	xr_free_xr_views(xr);
-	xr_free_vk_logical_device(xr);
-	xr_free_vk_physical_device(xr);
+	xr_free_controllers(xr);
+	xr_free_swapchain(xr);
+	xr_free_session(xr);
+	xr_free_views(xr);
+	xr_free_logical_device(xr);
+	xr_free_physical_device(xr);
 	xr_free_vk_instance(xr);
 	xr_free_xr_instance(xr);
 	xr_free_stats(xr);

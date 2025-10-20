@@ -251,9 +251,9 @@ typedef struct vk_frame_buffer
 }
 vk_frame_buffer_t;
 
-typedef struct barrier vk_barrier_t;
+typedef struct vk_barrier vk_barrier_t;
 
-typedef struct frame
+typedef struct vk_frame
 {
 	struct
 	{
@@ -357,7 +357,7 @@ typedef enum vk_barrier_timing_idx
 }
 vk_barrier_timing_idx_t;
 
-struct barrier
+struct vk_barrier
 {
 	VkSemaphore semaphore;
 	VkFence fence;
