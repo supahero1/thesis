@@ -17,6 +17,7 @@
 #include <thesis/xr.h>
 #include <thesis/file.h>
 #include <thesis/time.h>
+#include <thesis/volk.h>
 #include <thesis/debug.h>
 #include <thesis/atomic.h>
 #include <thesis/extent.h>
@@ -24,8 +25,6 @@
 #include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
-
-#include <volk.h>
 
 #define XR_USE_PLATFORM_WAYLAND
 #define XR_USE_GRAPHICS_API_VULKAN

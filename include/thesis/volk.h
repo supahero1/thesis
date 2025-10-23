@@ -14,4 +14,6 @@
  *  limitations under the License.
  */
 
-#include <volk.c>
+#pragma once
+
+#include <volk.h>

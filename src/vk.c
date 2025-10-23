@@ -17,6 +17,7 @@
 #include <thesis/vk.h>
 #include <thesis/file.h>
 #include <thesis/time.h>
+#include <thesis/volk.h>
 #include <thesis/debug.h>
 #include <thesis/atomic.h>
 #include <thesis/shared.h>
@@ -24,8 +25,6 @@
 #include <thesis/options.h>
 #include <thesis/threads.h>
 #include <thesis/alloc_ext.h>
-
-#include <volk.h>
 
 #include <signal.h>
 #include <string.h>
