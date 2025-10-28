@@ -525,6 +525,8 @@ struct xr
 
 		VkInstance instance;
 
+		struct VolkInstanceTable itable;
+
 		VkSurfaceKHR surface;
 		VkSurfaceCapabilitiesKHR surface_capabilities;
 
@@ -1515,18 +1517,18 @@ xr_init_vk_instance(
 	hard_assert_eq(result, XR_SUCCESS);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 
+
 	shared_free_str_array(instance_extensions, instance_extension);
 	shared_free_str_array(instance_layers, instance_layer);
 
-#ifndef NDEBUG
-	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT =
-		xr_vk_load_func(xr, "vkCreateDebugUtilsMessengerEXT");
+	volkLoadInstanceOnly(xr->vk.instance);
+	volkLoadInstanceTable(&xr->vk.itable, xr->vk.instance);
 
-	vk_result = vkCreateDebugUtilsMessengerEXT(xr->vk.instance, &debug_info, NULL, &xr->vk.debug_messenger);
+
+#ifndef NDEBUG
+	vk_result = xr->vk.itable.vkCreateDebugUtilsMessengerEXT(xr->vk.instance, &debug_info, NULL, &xr->vk.debug_messenger);
 	hard_assert_eq(vk_result, VK_SUCCESS);
 #endif
-
-	volkLoadInstanceOnly(xr->vk.instance);
 }
 
 
@@ -1542,7 +1544,7 @@ xr_free_vk_instance(
 	vkDestroyDebugUtilsMessengerEXT(xr->vk.instance, xr->vk.debug_messenger, NULL);
 #endif
 
-	vkDestroyInstance(xr->vk.instance, NULL);
+	xr->vk.itable.vkDestroyInstance(xr->vk.instance, NULL);
 
 	volkFinalize();
 }
@@ -1570,12 +1572,12 @@ xr_init_physical_device(
 	assert_eq(result, XR_SUCCESS);
 
 	uint32_t queue_family_count = 0;
-	vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &queue_family_count, NULL);
+	xr->vk.itable.vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &queue_family_count, NULL);
 	assert_gt(queue_family_count, 0);
 
 	VkQueueFamilyProperties queue_family_properties[queue_family_count];
 
-	vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &queue_family_count, queue_family_properties);
+	xr->vk.itable.vkGetPhysicalDeviceQueueFamilyProperties(xr->vk.physical_device, &queue_family_count, queue_family_properties);
 	assert_gt(queue_family_count, 0);
 
 	VkQueueFamilyProperties* queue_family_property = queue_family_properties;
@@ -1617,7 +1619,7 @@ xr_get_device_extensions(
 	assert_not_null(extension);
 
 	uint32_t available_device_extension_count = 0;
-	vkEnumerateDeviceExtensionProperties(xr->vk.physical_device, NULL, &available_device_extension_count, NULL);
+	xr->vk.itable.vkEnumerateDeviceExtensionProperties(xr->vk.physical_device, NULL, &available_device_extension_count, NULL);
 
 	VkExtensionProperties available_device_extensions[available_device_extension_count];
 
@@ -1625,7 +1627,7 @@ xr_get_device_extensions(
 	VkExtensionProperties* available_device_extension_end =
 		available_device_extension + available_device_extension_count;
 
-	vkEnumerateDeviceExtensionProperties(xr->vk.physical_device,
+	xr->vk.itable.vkEnumerateDeviceExtensionProperties(xr->vk.physical_device,
 		NULL, &available_device_extension_count, available_device_extensions);
 
 	puts("\nXR VK available device extensions:");
@@ -1721,14 +1723,14 @@ xr_get_device_layers(
 	assert_not_null(layer);
 
 	uint32_t available_device_layer_count = 0;
-	vkEnumerateDeviceLayerProperties(xr->vk.physical_device, &available_device_layer_count, NULL);
+	xr->vk.itable.vkEnumerateDeviceLayerProperties(xr->vk.physical_device, &available_device_layer_count, NULL);
 
 	VkLayerProperties available_device_layers[available_device_layer_count];
 
 	VkLayerProperties* available_device_layer = available_device_layers;
 	VkLayerProperties* available_device_layer_end = available_device_layer + available_device_layer_count;
 
-	vkEnumerateDeviceLayerProperties(xr->vk.physical_device, &available_device_layer_count, available_device_layers);
+	xr->vk.itable.vkEnumerateDeviceLayerProperties(xr->vk.physical_device, &available_device_layer_count, available_device_layers);
 
 	puts("\nXR VK available device layers:");
 
@@ -1861,7 +1863,7 @@ xr_init_logical_device(
 
 	xr->vk.table.vkGetDeviceQueue(xr->vk.device, xr->vk.queue_id, 0, &xr->vk.queue);
 
-	vkGetPhysicalDeviceMemoryProperties(xr->vk.physical_device, &xr->vk.memory_properties);
+	xr->vk.itable.vkGetPhysicalDeviceMemoryProperties(xr->vk.physical_device, &xr->vk.memory_properties);
 }
 
 
@@ -1884,7 +1886,7 @@ xr_init_device_properties(
 	assert_not_null(xr);
 
 	VkPhysicalDeviceProperties device_properties;
-	vkGetPhysicalDeviceProperties(xr->vk.physical_device, &device_properties);
+	xr->vk.itable.vkGetPhysicalDeviceProperties(xr->vk.physical_device, &device_properties);
 
 	VkSampleCountFlags sample_count =
 		device_properties.limits.framebufferColorSampleCounts &

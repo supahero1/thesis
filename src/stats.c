@@ -254,7 +254,6 @@ stats_log(
 {
 	assert_not_null(stats);
 	assert_not_null(name);
-	assert_ge(time, 0);
 
 	if(!time)
 	{

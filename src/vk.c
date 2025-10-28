@@ -514,6 +514,8 @@ struct vk
 
 	VkInstance instance;
 
+	struct VolkInstanceTable itable;
+
 	VkSurfaceKHR surface;
 	VkSurfaceCapabilitiesKHR surface_capabilities;
 
@@ -1194,16 +1196,15 @@ vk_init_instance(
 	shared_free_str_array(instance_extensions, instance_extension);
 	shared_free_str_array(instance_layers, instance_layer);
 
-#ifndef NDEBUG
-	PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT =
-		vk_load_func(vk, "vkCreateDebugUtilsMessengerEXT");
+	volkLoadInstanceOnly(vk->instance);
+	volkLoadInstanceTable(&vk->itable, vk->instance);
 
-	result = vkCreateDebugUtilsMessengerEXT(
+
+#ifndef NDEBUG
+	result = vk->itable.vkCreateDebugUtilsMessengerEXT(
 		vk->instance, &debug_info, NULL, &vk->debug_messenger);
 	hard_assert_eq(result, VK_SUCCESS);
 #endif
-
-	volkLoadInstanceOnly(vk->instance);
 }
 
 
@@ -1215,10 +1216,10 @@ vk_free_instance(
 	assert_not_null(vk);
 
 #ifndef NDEBUG
-	vkDestroyDebugUtilsMessengerEXT(vk->instance, vk->debug_messenger, NULL);
+	vk->itable.vkDestroyDebugUtilsMessengerEXT(vk->instance, vk->debug_messenger, NULL);
 #endif
 
-	vkDestroyInstance(vk->instance, NULL);
+	vk->itable.vkDestroyInstance(vk->instance, NULL);
 
 	volkFinalize();
 }
@@ -1269,7 +1270,7 @@ vk_get_device_features(
 	)
 {
 	VkPhysicalDeviceFeatures features;
-	vkGetPhysicalDeviceFeatures(device, &features);
+	vk->itable.vkGetPhysicalDeviceFeatures(device, &features);
 
 	if(vk->options.max_anisotropy && !features.samplerAnisotropy)
 	{
@@ -1284,7 +1285,7 @@ vk_get_device_features(
 	}
 
 	VkFormatProperties format_properties;
-	vkGetPhysicalDeviceFormatProperties(device, VK_FORMAT_R8G8B8A8_SRGB, &format_properties);
+	vk->itable.vkGetPhysicalDeviceFormatProperties(device, VK_FORMAT_R8G8B8A8_SRGB, &format_properties);
 
 	if(
 		vk->options.mipmap_levels &&
@@ -1310,7 +1311,7 @@ vk_get_device_queues(
 	)
 {
 	uint32_t queue_count;
-	vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_count, NULL);
+	vk->itable.vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_count, NULL);
 	if(queue_count == 0)
 	{
 		hard_assert_log();
@@ -1318,13 +1319,13 @@ vk_get_device_queues(
 	}
 
 	VkQueueFamilyProperties queues[queue_count];
-	vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_count, queues);
+	vk->itable.vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_count, queues);
 
 	VkQueueFamilyProperties* queue = queues;
 	for(uint32_t i = 0; i < queue_count; ++i, ++queue)
 	{
 		VkBool32 present;
-		VkResult result = vkGetPhysicalDeviceSurfaceSupportKHR(device, i, vk->surface, &present);
+		VkResult result = vk->itable.vkGetPhysicalDeviceSurfaceSupportKHR(device, i, vk->surface, &present);
 		if(result != VK_SUCCESS)
 		{
 			hard_assert_log();
@@ -1356,7 +1357,7 @@ vk_get_device_extensions(
 	}
 
 	uint32_t available_device_extension_count = 0;
-	vkEnumerateDeviceExtensionProperties(device, NULL, &available_device_extension_count, NULL);
+	vk->itable.vkEnumerateDeviceExtensionProperties(device, NULL, &available_device_extension_count, NULL);
 	if(available_device_extension_count == 0)
 	{
 		hard_assert_log();
@@ -1373,7 +1374,7 @@ vk_get_device_extensions(
 		*(available_device_extension++) = (VkExtensionProperties){0};
 	}
 
-	vkEnumerateDeviceExtensionProperties(device, NULL,
+	vk->itable.vkEnumerateDeviceExtensionProperties(device, NULL,
 		&available_device_extension_count, available_device_extensions);
 
 	puts("\nVK available device extensions:");
@@ -1435,7 +1436,7 @@ vk_get_device_layers(
 	}
 
 	uint32_t available_device_layer_count = 0;
-	VkResult result = vkEnumerateDeviceLayerProperties(device, &available_device_layer_count, NULL);
+	VkResult result = vk->itable.vkEnumerateDeviceLayerProperties(device, &available_device_layer_count, NULL);
 	if(result != VK_SUCCESS || available_device_layer_count == 0)
 	{
 		hard_assert_log();
@@ -1443,7 +1444,7 @@ vk_get_device_layers(
 	}
 
 	VkLayerProperties available_device_layers[available_device_layer_count];
-	result = vkEnumerateDeviceLayerProperties(device, &available_device_layer_count, available_device_layers);
+	result = vk->itable.vkEnumerateDeviceLayerProperties(device, &available_device_layer_count, available_device_layers);
 	if(result != VK_SUCCESS)
 	{
 		hard_assert_log();
@@ -1502,7 +1503,7 @@ vk_get_device_swapchain(
 	)
 {
 	uint32_t format_count;
-	VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(device, vk->surface, &format_count, NULL);
+	VkResult result = vk->itable.vkGetPhysicalDeviceSurfaceFormatsKHR(device, vk->surface, &format_count, NULL);
 	if(result != VK_SUCCESS || format_count == 0)
 	{
 		hard_assert_log();
@@ -1510,7 +1511,7 @@ vk_get_device_swapchain(
 	}
 
 	VkSurfaceFormatKHR formats[format_count];
-	result = vkGetPhysicalDeviceSurfaceFormatsKHR(device, vk->surface, &format_count, formats);
+	result = vk->itable.vkGetPhysicalDeviceSurfaceFormatsKHR(device, vk->surface, &format_count, formats);
 	if(result != VK_SUCCESS)
 	{
 		hard_assert_log();
@@ -1551,7 +1552,7 @@ vk_get_device_properties(
 	)
 {
 	VkPhysicalDeviceProperties properties;
-	vkGetPhysicalDeviceProperties(device, &properties);
+	vk->itable.vkGetPhysicalDeviceProperties(device, &properties);
 
 	device_score->name = cstr_init(properties.deviceName);
 
@@ -1758,7 +1759,7 @@ vk_get_extent(
 
 	while(1)
 	{
-		VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+		VkResult result = vk->itable.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
 			vk->physical_device, vk->surface, &vk->surface_capabilities);
 		hard_assert_eq(result, VK_SUCCESS);
 
@@ -1803,7 +1804,7 @@ vk_init_device(
 	assert_not_null(vk);
 
 	uint32_t physical_device_count = 0;
-	VkResult result = vkEnumeratePhysicalDevices(vk->instance, &physical_device_count, NULL);
+	VkResult result = vk->itable.vkEnumeratePhysicalDevices(vk->instance, &physical_device_count, NULL);
 	hard_assert_eq(result, VK_SUCCESS);
 	hard_assert_neq(physical_device_count, 0);
 
@@ -1811,7 +1812,7 @@ vk_init_device(
 	VkPhysicalDevice* physical_device = physical_devices;
 	VkPhysicalDevice* physical_device_end = physical_device + physical_device_count;
 
-	result = vkEnumeratePhysicalDevices(vk->instance, &physical_device_count, physical_devices);
+	result = vk->itable.vkEnumeratePhysicalDevices(vk->instance, &physical_device_count, physical_devices);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	VkPhysicalDevice best_device = NULL;
@@ -1896,7 +1897,7 @@ vk_init_device(
 		.pEnabledFeatures = &device_features
 	};
 
-	result = vkCreateDevice(best_device, &device_info, NULL, &vk->device);
+	result = vk->itable.vkCreateDevice(best_device, &device_info, NULL, &vk->device);
 	hard_assert_eq(result, VK_SUCCESS);
 
 
@@ -1904,7 +1905,7 @@ vk_init_device(
 
 	vk->table.vkGetDeviceQueue(vk->device, vk->queue_id, 0, &vk->queue);
 
-	vkGetPhysicalDeviceMemoryProperties(vk->physical_device, &vk->memory_properties);
+	vk->itable.vkGetPhysicalDeviceMemoryProperties(vk->physical_device, &vk->memory_properties);
 
 
 	vk_get_extent(vk);
@@ -1921,7 +1922,7 @@ vk_init_device(
 
 
 	uint32_t present_mode_count;
-	result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+	result = vk->itable.vkGetPhysicalDeviceSurfacePresentModesKHR(
 		vk->physical_device, vk->surface, &present_mode_count, NULL);
 	hard_assert_eq(result, VK_SUCCESS);
 	hard_assert_neq(present_mode_count, 0);
@@ -1931,7 +1932,7 @@ vk_init_device(
 	VkPresentModeKHR* present_mode_end =
 		present_mode + present_mode_count;
 
-	result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+	result = vk->itable.vkGetPhysicalDeviceSurfacePresentModesKHR(
 		vk->physical_device, vk->surface, &present_mode_count, present_modes);
 	hard_assert_eq(result, VK_SUCCESS);
 
@@ -3317,12 +3318,10 @@ vk_init_image(
 		.memoryTypeIndex = memory_type_index
 	};
 
-	result = vk->table.vkAllocateMemory(
-		vk->device, &memory_info, NULL, &image->memory);
+	result = vk->table.vkAllocateMemory(vk->device, &memory_info, NULL, &image->memory);
 	hard_assert_eq(result, VK_SUCCESS);
 
-	result = vk->table.vkBindImageMemory(
-		vk->device, image->image, image->memory, 0);
+	result = vk->table.vkBindImageMemory(vk->device, image->image, image->memory, 0);
 	hard_assert_eq(result, VK_SUCCESS);
 
 	VkImageViewCreateInfo image_view_info =
