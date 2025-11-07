@@ -1605,7 +1605,7 @@ octree_collide(
 
 				entry->idx[0] = index_a;
 				entry->idx[1] = index_b;
-				entry->next = index;
+				entry->next = ht[hash];
 				ht[hash] = entry_idx;
 			}
 #endif
