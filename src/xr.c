@@ -1000,22 +1000,6 @@ xr_xr_load_func(
 }
 
 
-private void*
-xr_vk_load_func(
-	xr_t xr,
-	const char* name
-	)
-{
-	assert_not_null(xr);
-	assert_not_null(name);
-
-	void* func = xr->vk.proc_addr_fn(xr->vk.instance, name);
-	hard_assert_not_null(func, fprintf(stderr, "VK function %s not found\n", name));
-
-	return func;
-}
-
-
 private const char**
 xr_xr_get_instance_extensions(
 	xr_t xr,
@@ -10076,6 +10060,7 @@ xr_process_frame(
 	};
 
 	XrView views[2];
+	XrCompositionLayerProjectionView projection_views[2];
 
 	if(frame_state.shouldRender)
 	{
@@ -10088,39 +10073,39 @@ xr_process_frame(
 
 		xr_draw(xr, views);
 
-		XrCompositionLayerProjectionView projection_views[2] =
+		projection_views[0] = (XrCompositionLayerProjectionView)
 		{
+			.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
+			.next = NULL,
+			.pose = views[0].pose,
+			.fov = views[0].fov,
+			.subImage =
 			{
-				.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
-				.next = NULL,
-				.pose = views[0].pose,
-				.fov = views[0].fov,
-				.subImage =
+				.swapchain = xr->vk.swapchain,
+				.imageRect =
 				{
-					.swapchain = xr->vk.swapchain,
-					.imageRect =
-					{
-						.offset = {0, 0},
-						.extent = xr->vk.screen_extent.xr_extent
-					},
-					.imageArrayIndex = 0
-				}
-			},
+					.offset = {0, 0},
+					.extent = xr->vk.screen_extent.xr_extent
+				},
+				.imageArrayIndex = 0
+			}
+		};
+		
+		projection_views[1] = (XrCompositionLayerProjectionView)
+		{
+			.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
+			.next = NULL,
+			.pose = views[1].pose,
+			.fov = views[1].fov,
+			.subImage =
 			{
-				.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
-				.next = NULL,
-				.pose = views[1].pose,
-				.fov = views[1].fov,
-				.subImage =
+				.swapchain = xr->vk.swapchain,
+				.imageRect =
 				{
-					.swapchain = xr->vk.swapchain,
-					.imageRect =
-					{
-						.offset = {0, 0},
-						.extent = xr->vk.screen_extent.xr_extent
-					},
-					.imageArrayIndex = 1
-				}
+					.offset = {0, 0},
+					.extent = xr->vk.screen_extent.xr_extent
+				},
+				.imageArrayIndex = 1
 			}
 		};
 
